@@ -1,5 +1,14 @@
 import { defineCollection, z } from 'astro:content';
 
+// ── What Decap CMS actually writes ─────────────────────────────────────────
+// Decap saves dates unquoted (`pubDate: 2026-11-10`), and YAML reads an unquoted
+// ISO date as a Date object, not a string — so a plain `z.string()` rejects every
+// entry the CMS has saved and the build fails. Accept both forms and normalise to
+// "YYYY-MM-DD", so templates keep receiving the same plain string as before.
+const isoDate = z
+  .union([z.string(), z.date()])
+  .transform((value) => (value instanceof Date ? value.toISOString().slice(0, 10) : value));
+
 // Shared SEO fields — editors get full control of slug (filename), SEO title,
 // SEO description, OG image and noindex for every Pages / Projects / Blog entry.
 const seoFields = {
@@ -17,11 +26,16 @@ const pages = defineCollection({
     heroSubtitle: z.string().optional(),
     featuredImage: z.string().optional(),
     ...seoFields,
-    navOrder: z.number().optional().default(99),
+    // Emptying this number box in the CMS saves `""`; treat that as "not set" so
+    // the default applies instead of failing the build.
+    navOrder: z.preprocess(
+      (value) => (value === '' || value === null ? undefined : value),
+      z.number().optional().default(99),
+    ),
     showInNav: z.boolean().optional().default(false),
     showInFooter: z.boolean().optional().default(false),
     draft: z.boolean().optional().default(false),
-    updatedDate: z.string().optional(),
+    updatedDate: isoDate.optional(),
   }),
 });
 
@@ -34,7 +48,7 @@ const projects = defineCollection({
     technologies: z.array(z.string()).optional().default([]),
     coverImage: z.string().optional(),
     featured: z.boolean().optional().default(false),
-    date: z.string(),
+    date: isoDate,
     results: z.array(z.string()).optional().default([]),
     liveUrl: z.string().optional(),
     ...seoFields,
@@ -46,8 +60,8 @@ const blog = defineCollection({
   schema: z.object({
     title: z.string(),
     description: z.string(),
-    pubDate: z.string(),
-    updatedDate: z.string().optional(),
+    pubDate: isoDate,
+    updatedDate: isoDate.optional(),
     author: z.string().optional().default('AMS Builds Team'),
     tags: z.array(z.string()).optional().default([]),
     heroImage: z.string().optional(),
