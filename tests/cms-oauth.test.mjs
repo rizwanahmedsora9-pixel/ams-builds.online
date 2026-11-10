@@ -150,7 +150,9 @@ test('Admin HTML manually initializes Decap CMS against window.location.origin a
   assert.ok(manualInitPos !== -1, 'CMS_MANUAL_INIT flag must be present');
   assert.ok(bundlePos > manualInitPos, 'CMS_MANUAL_INIT must execute before decap-cms.js loads');
   assert.ok(initCallPos > bundlePos, 'CMS.init must execute after decap-cms.js loads');
-  assert.match(adminHtml, /base_url:\s*window\.location\.origin/);
+  assert.match(adminHtml, /var origin = window\.location\.origin/);
+  assert.match(adminHtml, /base_url:\s*origin/);
+  assert.match(adminHtml, /site_url:\s*origin/);
 
   const wranglerRaw = fs.readFileSync(path.join(repoRoot, 'wrangler.jsonc'), 'utf8');
   const wranglerJson = JSON.parse(wranglerRaw.replace(/^\s*\/\/.*$/gm, ''));
