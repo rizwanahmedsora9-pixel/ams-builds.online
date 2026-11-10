@@ -1,199 +1,125 @@
 ---
 /*
- * IntroOverlay — full-screen entrance overlay shown once per session.
- * - Auto-swiping catalogue of landing-page design styles (CSS-driven carousel)
- * - LOCAL mp3 music plays continuously until the visitor clicks ENTER.
- * - Playlist (fixed order, loops forever, NO shuffle):
- *     1. /audio/baila-lento.mp3   — BAILA LENTO (sma$her & MC DA$ILVA)
- *     2. /audio/tulin-tulin-phonk.mp3 — Tulin Tulin (phonk)
- * - If the browser blocks autoplay, the visitor can start sound with the button.
- * - Clicking ENTER stops the music, fades the overlay out, and reveals the site.
+ * IntroOverlay — full-screen entrance screen shown once per session.
+ * - Auto-swiping catalogue of landing-page designs (CSS-driven carousel, 4s).
+ * - LOCAL mp3 playlist (fixed order, loops, NO shuffle) starts from the
+ *   "Start demo" button (browsers require a click before audio can play).
+ *   While music plays only an animated equalizer is shown — no track names.
+ *     1. /audio/baila-lento.mp3        — BAILA LENTO (sma$her & MC DA$ILVA)
+ *     2. /audio/tulin-tulin-phonk.mp3  — Tulin Tulin (phonk)
+ * - "Enter" stops the music, fades the overlay out and reveals the site.
  * - Shown once per session via sessionStorage (key: ams_intro_seen).
  */
+const slides = [
+  { tag: 'SaaS · Dark mode', title: 'Scale your product.', desc: 'Clean, conversion-focused pages for software companies that want to grow fast.', img: '/images/uploads/project-software.jpg' },
+  { tag: 'E-commerce · Bright', title: 'Shop the new season.', desc: 'Vibrant product pages with bold imagery and clear offers that turn browsers into buyers.', img: '/images/uploads/project-retail.jpg' },
+  { tag: 'Business · Clean', title: 'Your business, online.', desc: 'Fast, SEO-ready websites for shops, clinics and schools — built to bring in enquiries.', img: '/images/uploads/hero-dashboard.jpg' },
+  { tag: 'Agency · Bold', title: 'We build brands.', desc: 'Typography-led agency pages that command attention and win clients.', img: '/images/uploads/blog-gujrat-business.jpg' },
+  { tag: 'Android · Mobile', title: 'Apps that feel native.', desc: 'Android apps from UI design to Play Store launch, with ongoing support.', img: '/images/uploads/project-android.jpg' },
+];
 ---
 <div
   id="ams-intro-overlay"
-  class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-slate-950 text-slate-100 font-sans transition-opacity duration-700 ease-in-out"
+  class="fixed inset-0 z-[9999] overflow-y-auto overscroll-contain bg-slate-950 text-slate-100 font-sans transition-opacity duration-700 ease-in-out"
   data-show="true"
 >
   <!-- Hidden audio engine: fixed playlist, looped, no shuffle -->
   <audio id="ams-audio-player" preload="auto" playsinline></audio>
 
-  <!-- Backdrop shapes (gentle animated gradient ambience) -->
-  <div class="absolute inset-0 overflow-hidden -z-10">
-    <div class="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] rounded-full bg-brand-500/20 blur-[120px] animate-pulse"></div>
-    <div class="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] rounded-full bg-amber-500/15 blur-[120px] animate-pulse" style="animation-delay: 2s;"></div>
-    <div class="absolute top-[20%] right:[20%] w-[40%] h-[40%] rounded-full bg-purple-500/10 blur-[100px] animate-pulse" style="animation-delay: 4s;"></div>
+  <!-- Ambient backdrop -->
+  <div class="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
+    <div class="absolute -top-40 -left-40 w-[28rem] h-[28rem] rounded-full bg-amber-500/15 blur-[120px]"></div>
+    <div class="absolute -bottom-40 -right-40 w-[28rem] h-[28rem] rounded-full bg-sky-500/10 blur-[120px]"></div>
   </div>
 
-  <!-- Headline -->
-  <div class="relative text-center px-6 max-w-xl">
-    <h2 class="text-4xl md:text-6xl font-bold tracking-tight text-white mb-3 leading-tight">
-      AMS Builds
-      <span class="block text-brand-500">Landing-Page Catalogue</span>
-    </h2>
-    <p class="text-slate-400 text-lg md:text-xl max-w-2xl mx-auto leading-relaxed">
-      Hand-crafted website &amp; app designs — auto-previewing while you listen.
-    </p>
-  </div>
-
-  <!-- Auto-swiping catalogue carousel -->
-  <div
-    class="relative w-full max-w-5xl mx-auto px-6 mt-10 mb-12 overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-2xl"
-  >
-    <div
-      id="ams-carousel-track"
-      class="flex h-96 md:h-[340px] transition-transform duration-700 ease-in-out will-change-transform"
-    >
-      {/* Slide 1 — Dark SaaS */}
+  <div class="relative min-h-full flex flex-col px-5 py-5 sm:px-8 md:px-12 md:py-8 max-w-6xl w-full mx-auto">
+    <!-- Top bar: brand + equalizer (equalizer only, shown while music plays) -->
+    <header class="flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <span class="w-9 h-9 rounded-xl bg-amber-500 text-slate-900 grid place-items-center font-black text-lg">A</span>
+        <span class="leading-tight">
+          <span class="block font-extrabold tracking-tight text-white">AMS Builds</span>
+          <span class="block text-[10px] tracking-[0.2em] uppercase text-amber-400 font-semibold">Web &amp; App Studio</span>
+        </span>
+      </div>
       <div
-        class="flex-shrink-0 w-full h-full p-8 md:p-12 flex flex-col justify-between gap-6 bg-slate-900/60 border border-white/5"
+        id="ams-now-playing"
+        class="hidden items-center gap-2 h-9 px-3.5 rounded-full bg-white/5 border border-white/10"
+        role="status"
+        aria-label="Demo music playing"
       >
-        <div>
-          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 text-sm font-medium border border-amber-500/20 mb-4">
-            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-            SaaS · Dark Mode
-          </div>
-          <h3 class="text-3xl md:text-4xl font-bold text-white mb-2">Scale your product.</h3>
-          <p class="text-slate-400 text-lg max-w-md leading-relaxed">
-            Clean conversion-focused pages built for software companies that want to grow fast.
-          </p>
-        </div>
-        <div class="flex items-end gap-3">
-          <span class="text-6xl font-black text-white tracking-tighter opacity-90">01</span>
-          <div class="w-full h-24 rounded-xl bg-gradient-to-br from-brand-500/40 to-amber-500/20 border border-white/10 shadow-[0_0_40px_rgba(245,158,11,0.15)]"></div>
-        </div>
+        <span class="flex items-end gap-[3px] h-4" aria-hidden="true">
+          <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0s;"></span>
+          <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.25s;"></span>
+          <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.5s;"></span>
+          <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.75s;"></span>
+        </span>
+      </div>
+    </header>
+
+    <!-- Hero copy + carousel -->
+    <main class="flex-1 flex flex-col justify-center py-8 md:py-10">
+      <div class="text-center max-w-2xl mx-auto">
+        <p class="text-[11px] sm:text-xs tracking-[0.25em] uppercase text-amber-400 font-semibold">Landing-page catalogue</p>
+        <h1 class="mt-3 text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-[1.1]">
+          Websites &amp; apps that <span class="text-amber-400">convert.</span>
+        </h1>
+        <p class="mt-4 text-sm sm:text-base md:text-lg text-slate-400 leading-relaxed">
+          A preview of the designs we build for businesses in Pakistan and beyond.
+        </p>
       </div>
 
-      {/* Slide 2 — Bright E-commerce */}
-      <div
-        class="flex-shrink-0 w-full h-full p-8 md:p-12 flex flex-col justify-between gap-6 bg-white/10 border border-white/5"
-      >
-        <div>
-          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-white text-sm font-medium border border-white/20 mb-4">
-            <span class="w-2 h-2 rounded-full bg-white animate-pulse"></span>
-            E-commerce · Bright
+      <div class="mt-8 md:mt-10 w-full max-w-4xl mx-auto">
+        <div class="rounded-2xl border border-white/10 bg-slate-900/70 shadow-2xl shadow-black/40 overflow-hidden">
+          <div id="ams-carousel-track" class="flex transition-transform duration-700 ease-in-out will-change-transform">
+            {slides.map((s) => (
+              <article class="flex-shrink-0 w-full grid md:grid-cols-2 gap-5 md:gap-8 items-center p-5 sm:p-6 md:p-8">
+                <div class="order-2 md:order-1">
+                  <p class="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-amber-300">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>{s.tag}
+                  </p>
+                  <h2 class="mt-2 text-2xl sm:text-3xl font-bold text-white">{s.title}</h2>
+                  <p class="mt-2 text-sm sm:text-base text-slate-400 leading-relaxed">{s.desc}</p>
+                </div>
+                <div class="order-1 md:order-2 relative aspect-[1200/630] rounded-xl overflow-hidden border border-white/10 bg-slate-800">
+                  <img src={s.img} alt={`${s.tag} design preview`} class="w-full h-full object-cover" loading="eager" decoding="async" />
+                </div>
+              </article>
+            ))}
           </div>
-          <h3 class="text-3xl md:text-4xl font-bold text-white mb-2">Shop the new season.</h3>
-          <p class="text-slate-300 text-lg max-w-md leading-relaxed">
-            Vibrant product pages that convert browsers into buyers with bold imagery and clear offers.
-          </p>
         </div>
-        <div class="flex items-end gap-3">
-          <span class="text-6xl font-black text-white tracking-tighter opacity-90">02</span>
-          <div class="w-full h-24 rounded-xl bg-gradient-to-tr from-rose-500/40 to-orange-400/30 border border-white/10 shadow-[0_0_40px_rgba(244,63,94,0.2)]"></div>
+        <div id="ams-carousel-dots" class="flex justify-center gap-2 mt-5">
+          {slides.map((_, i) => (
+            <button type="button" class="w-2 h-2 rounded-full bg-white/20 hover:bg-white/40 transition-all duration-300" aria-label={`Show design ${i + 1}`}></button>
+          ))}
         </div>
       </div>
+    </main>
 
-      {/* Slide 3 — Minimal Portfolio */}
-      <div
-        class="flex-shrink-0 w-full h-full p-8 md:p-12 flex flex-col justify-between gap-6 bg-slate-900/40 border border-white/5"
-      >
-        <div>
-          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-white text-sm font-medium border border-white/20 mb-4">
-            <span class="w-2 h-2 rounded-full bg-white animate-pulse"></span>
-            Portfolio · Minimal
-          </div>
-          <h3 class="text-3xl md:text-4xl font-bold text-white mb-2">Let the work speak.</h3>
-          <p class="text-slate-300 text-lg max-w-md leading-relaxed">
-            Quiet confidence and generous whitespace — perfect for studios, freelancers and creators.
-          </p>
-        </div>
-        <div class="flex items-end gap-3">
-          <span class="text-6xl font-black text-white tracking-tighter opacity-90">03</span>
-          <div class="w-full h-24 rounded-xl bg-gradient-to-b from-slate-800/40 to-slate-900/60 border border-white/10"></div>
-        </div>
-      </div>
-
-      {/* Slide 4 — Bold Agency */}
-      <div
-        class="flex-shrink-0 w-full h-full p-8 md:p-12 flex flex-col justify-between gap-6 bg-black border border-white/5"
-      >
-        <div>
-          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 text-sm font-medium border border-amber-500/30 mb-4">
-            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-            Agency · Bold
-          </div>
-          <h3 class="text-3xl md:text-4xl font-bold text-white mb-2">We build brands.</h3>
-          <p class="text-slate-300 text-lg max-w-md leading-relaxed">
-            High-impact, typography-led agency pages that command attention and win clients.
-          </p>
-        </div>
-        <div class="flex items-end gap-3">
-          <span class="text-6xl font-black text-white tracking-tighter opacity-90">04</span>
-          <div class="w-full h-24 rounded-xl bg-gradient-to-r from-amber-600/40 to-rose-500/30 border border-white/10"></div>
-        </div>
-      </div>
-
-      {/* Slide 5 — Creative Glass */}
-      <div
-        class="flex-shrink-0 w-full h-full p-8 md:p-12 flex flex-col justify-between gap-6 bg-indigo-950/60 border border-white/10 backdrop-blur-sm"
-      >
-        <div>
-          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/20 text-purple-400 text-sm font-medium border border-purple-500/30 mb-4">
-            <span class="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
-            Creative · Glass
-          </div>
-          <h3 class="text-3xl md:text-4xl font-bold text-white mb-2">Imagine differently.</h3>
-          <p class="text-slate-300 text-lg max-w-md leading-relaxed">
-            Frosted glass, vivid gradients and motion — for the boldest creative ideas.
-          </p>
-        </div>
-        <div class="flex items-end gap-3">
-          <span class="text-6xl font-black text-white tracking-tighter opacity-90">05</span>
-          <div class="w-full h-24 rounded-xl bg-gradient-to-tr from-purple-500/30 to-pink-500/30 border border-white/10 shadow-[0_0_40px_rgba(168,85,247,0.15)]"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Navigation dots -->
-    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2">
-      {[0,1,2,3,4].map((i) => (
+    <!-- Actions -->
+    <footer class="flex flex-col items-center gap-4">
+      <div id="ams-sound-hint" class="flex flex-col sm:flex-row items-center gap-3">
         <button
-          class={`w-2 h-2 rounded-full transition-all duration-300 ${
-            i === 0 ? 'bg-brand-500 w-8 rounded-full' : 'bg-white/20 hover:bg-white/40'
-          }`}
-          aria-label={`Slide ${i + 1}`}
-        ></button>
-      ))}
-    </div>
+          id="ams-start-demo"
+          type="button"
+          class="inline-flex items-center gap-2.5 px-6 py-3 rounded-full bg-white text-slate-900 text-sm sm:text-base font-bold hover:bg-slate-200 transition-colors shadow-lg"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.6-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14z"/></svg>
+          Start demo
+        </button>
+        <button
+          id="ams-enter-btn"
+          type="button"
+          class="inline-flex items-center gap-2 px-8 py-3 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-900 text-sm sm:text-base font-bold uppercase tracking-widest shadow-[0_0_30px_rgba(245,158,11,0.35)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+        >
+          Enter site
+          <span aria-hidden="true">→</span>
+        </button>
+      </div>
+      <p id="ams-status" class="text-xs text-amber-300 min-h-[1rem] text-center" aria-live="polite"></p>
+      <p class="text-[11px] text-slate-500 tracking-widest uppercase text-center">Best with sound · Headphones recommended</p>
+    </footer>
   </div>
-
-  <!-- Now-playing pill (visible while music is on — client-meeting friendly proof) -->
-  <div
-    id="ams-now-playing"
-    class="relative mt-2 hidden items-center gap-3 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm max-w-[90vw]"
-    aria-live="polite"
-  >
-    <span class="flex items-end gap-[3px] h-4" aria-hidden="true">
-      <span class="w-[3px] rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0s;"></span>
-      <span class="w-[3px] rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.25s;"></span>
-      <span class="w-[3px] rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.5s;"></span>
-      <span class="w-[3px] rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.75s;"></span>
-    </span>
-    <span id="ams-now-playing-title" class="text-xs md:text-sm text-slate-300 truncate">Now playing…</span>
-  </div>
-
-  <!-- Sound control remains available whenever playback needs a gesture or retry. -->
-  <div id="ams-sound-hint" class="relative mt-6">
-    <button
-      id="ams-unmute-btn"
-      class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white text-sm font-medium hover:bg-white/20 transition-colors backdrop-blur-sm"
-    >
-      <span aria-hidden="true">🔊</span> <span id="ams-sound-label">Play sound</span>
-    </button>
-  </div>
-
-  <!-- ENTER button -->
-  <button
-    id="ams-enter-btn"
-    class="mt-10 relative px-10 py-4 rounded-full bg-brand-500 text-white text-xl font-bold tracking-widest uppercase shadow-[0_0_30px_rgba(245,158,11,0.4)] hover:bg-amber-600 hover:shadow-[0_0_45px_rgba(245,158,11,0.6)] transition-all duration-300 transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
-  >
-    Enter
-  </button>
-
-  <!-- Bottom hint -->
-  <p class="relative mt-6 text-xs text-slate-500 tracking-widest uppercase">Best experienced with sound · Headphones recommended</p>
 </div>
 
 <style>
@@ -201,11 +127,10 @@
     opacity: 0 !important;
     pointer-events: none;
   }
-  #ams-carousel-track > div {
+  #ams-carousel-track > article {
     min-width: 100%;
   }
   .ams-eq-bar {
-    height: 100%;
     transform-origin: bottom;
     animation: ams-eq 0.9s ease-in-out infinite;
   }
@@ -215,6 +140,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .ams-eq-bar { animation: none; }
+    #ams-carousel-track { transition: none; }
   }
 </style>
 
@@ -227,22 +153,20 @@
   const enterBtn = document.getElementById('ams-enter-btn');
   const track = document.getElementById('ams-carousel-track');
   const slides = track?.children;
-  const dotsContainer = track?.nextElementSibling;
-  const soundHint = document.getElementById('ams-sound-hint');
-  const unmuteBtn = document.getElementById('ams-unmute-btn');
-  const soundLabel = document.getElementById('ams-sound-label');
+  const dotsContainer = document.getElementById('ams-carousel-dots');
+  const startBtn = document.getElementById('ams-start-demo');
+  const statusText = document.getElementById('ams-status');
   const nowPlaying = document.getElementById('ams-now-playing');
-  const nowPlayingTitle = document.getElementById('ams-now-playing-title');
   const audio = document.getElementById('ams-audio-player');
 
   let slideIndex = 0;
-  let slideCount = slides ? slides.length : 0;
+  const slideCount = slides ? slides.length : 0;
   let timer = null;
 
   // Fixed playlist — fixed order, loops forever, NO shuffle
   const PLAYLIST = [
-    { src: '/audio/baila-lento.mp3',       title: 'sma$her & MC DA$ILVA — BAILA LENTO' },
-    { src: '/audio/tulin-tulin-phonk.mp3', title: 'Tulin Tulin (Phonk)' },
+    { src: '/audio/baila-lento.mp3' },
+    { src: '/audio/tulin-tulin-phonk.mp3' },
   ];
   let trackIndex = 0;
 
@@ -262,11 +186,19 @@
   let playRequest = 0;
   let consecutiveErrors = 0;
 
-  function showSoundHint(message) {
-    if (soundLabel) soundLabel.textContent = message;
-    soundHint?.classList.remove('hidden');
+  // Button visible while demo is not playing; equalizer visible while it is.
+  function showStartButton(message = '') {
+    startBtn?.classList.remove('hidden');
     nowPlaying?.classList.add('hidden');
     nowPlaying?.classList.remove('flex');
+    if (statusText) statusText.textContent = message;
+  }
+
+  function showPlaying() {
+    nowPlaying?.classList.remove('hidden');
+    nowPlaying?.classList.add('flex');
+    startBtn?.classList.add('hidden');
+    if (statusText) statusText.textContent = '';
   }
 
   function loadTrack(index) {
@@ -286,16 +218,16 @@
     try {
       result = audio.play();
     } catch (error) {
-      showSoundHint('Unable to play sound — tap to retry');
+      showStartButton('Could not start the demo — please try again.');
       return;
     }
     if (result) result.catch((error) => {
       // Ignore an older autoplay attempt if the visitor has already clicked.
       if (exiting || request !== playRequest) return;
       if (error.name === 'NotAllowedError') {
-        showSoundHint('Tap to play sound');
+        showStartButton('Tap "Start demo" to hear the music.');
       } else if (error.name !== 'AbortError') {
-        showSoundHint('Unable to play sound — tap to retry');
+        showStartButton('Could not start the demo — please try again.');
       }
     });
   }
@@ -303,10 +235,7 @@
   audio?.addEventListener('playing', () => {
     if (exiting || audio.muted || audio.volume === 0) return;
     consecutiveErrors = 0;
-    if (nowPlayingTitle) nowPlayingTitle.textContent = 'Now playing: ' + PLAYLIST[trackIndex].title;
-    nowPlaying?.classList.remove('hidden');
-    nowPlaying?.classList.add('flex');
-    soundHint?.classList.add('hidden');
+    showPlaying();
   });
 
   audio?.addEventListener('ended', () => {
@@ -324,11 +253,11 @@
       loadTrack(trackIndex + 1);
       requestPlayback();
     } else {
-      showSoundHint('Audio unavailable — tap to retry');
+      showStartButton('Music is unavailable right now — you can still browse.');
     }
   });
 
-  unmuteBtn?.addEventListener('click', () => {
+  startBtn?.addEventListener('click', () => {
     if (!audio || exiting) return;
     if (audio.error) {
       consecutiveErrors = 0;
@@ -341,15 +270,15 @@
   requestPlayback();
 
   /* --------------------------------------------------------------
-   * Auto-swiping carousel
+   * Auto-swiping carousel (pauses on hover / focus)
    * -------------------------------------------------------------- */
   function updateDots() {
     if (!dotsContainer) return;
     const allDots = dotsContainer.querySelectorAll('button');
     allDots.forEach((d, i) => {
       d.className = i === slideIndex
-        ? 'w-8 h-2 rounded-full bg-brand-500'
-        : 'w-2 h-2 rounded-full bg-white/20 hover:bg-white/40 transition-colors';
+        ? 'w-8 h-2 rounded-full bg-amber-500 transition-all duration-300'
+        : 'w-2 h-2 rounded-full bg-white/20 hover:bg-white/40 transition-all duration-300';
     });
   }
 
@@ -366,13 +295,18 @@
 
   function startCarousel() {
     if (!track) return;
-    updateDots();
+    clearInterval(timer);
     timer = setInterval(nextSlide, 4000);
   }
+
+  dotsContainer?.querySelectorAll('button').forEach((d, i) => {
+    d.addEventListener('click', () => { goToSlide(i); startCarousel(); });
+  });
 
   track?.addEventListener('mouseenter', () => clearInterval(timer));
   track?.addEventListener('mouseleave', startCarousel);
 
+  updateDots();
   startCarousel();
 
   /* --------------------------------------------------------------

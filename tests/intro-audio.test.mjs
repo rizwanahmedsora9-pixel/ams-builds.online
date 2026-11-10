@@ -17,7 +17,7 @@ function setup() {
         contains: (name) => this.classes.has(name),
       };
       this.style = {};
-      this.children = [];
+      this.textContent = '';
     }
     addEventListener(name, fn) { (this.listeners[name] ??= []).push(fn); }
     dispatch(name, event = {}) { for (const fn of this.listeners[name] ?? []) fn(event); }
@@ -26,10 +26,9 @@ function setup() {
     remove() {}
     querySelectorAll() { return []; }
   }
-  const ids = ['ams-intro-overlay', 'ams-enter-btn', 'ams-carousel-track', 'ams-sound-hint',
-    'ams-unmute-btn', 'ams-sound-label', 'ams-now-playing', 'ams-now-playing-title', 'ams-audio-player'];
+  const ids = ['ams-intro-overlay', 'ams-enter-btn', 'ams-carousel-track', 'ams-carousel-dots',
+    'ams-start-demo', 'ams-status', 'ams-now-playing', 'ams-audio-player'];
   const elements = Object.fromEntries(ids.map((id) => [id, new Element()]));
-  elements['ams-carousel-track'].nextElementSibling = new Element();
   const audio = elements['ams-audio-player'];
   const requests = [];
   Object.defineProperty(audio, 'src', {
@@ -50,9 +49,9 @@ function setup() {
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-test('blocked autoplay can be started by clicking and stale rejection cannot mute it', async () => {
+test('Start demo button starts playback after a blocked autoplay, and stale rejection is ignored', async () => {
   const { elements, audio, requests } = setup();
-  elements['ams-unmute-btn'].dispatch('click');
+  elements['ams-start-demo'].dispatch('click');
   assert.equal(audio.muted, false);
   assert.equal(audio.volume, 1);
   assert.equal(requests.length, 2);
@@ -61,17 +60,28 @@ test('blocked autoplay can be started by clicking and stale rejection cannot mut
   requests[0].reject(Object.assign(new Error('blocked'), { name: 'NotAllowedError' }));
   await flush();
   assert.equal(audio.muted, false);
-  assert.equal(elements['ams-sound-hint'].classList.contains('hidden'), true);
-  assert.equal(elements['ams-now-playing-title'].textContent, 'Now playing: sma$her & MC DA$ILVA — BAILA LENTO');
+  assert.equal(elements['ams-start-demo'].classList.contains('hidden'), true);
+  assert.equal(elements['ams-now-playing'].classList.contains('hidden'), false);
+  assert.equal(elements['ams-status'].textContent, '');
 });
 
-test('blocked playback shows a retry button, not a now-playing claim', async () => {
+test('while playing only the equalizer is shown: no track name is rendered anywhere', () => {
+  const { elements, audio, requests } = setup();
+  requests[0].resolve();
+  audio.dispatch('playing');
+  for (const el of Object.values(elements)) {
+    assert.doesNotMatch(String(el.textContent), /BAILA|Tulin|sma\$her|phonk/i);
+  }
+});
+
+test('blocked playback shows the Start demo button with a hint, not a now-playing claim', async () => {
   const { elements, requests } = setup();
   requests[0].reject(Object.assign(new Error('blocked'), { name: 'NotAllowedError' }));
   await flush();
-  assert.equal(elements['ams-sound-label'].textContent, 'Tap to play sound');
+  assert.equal(elements['ams-start-demo'].classList.contains('hidden'), false);
   assert.equal(elements['ams-now-playing'].classList.contains('hidden'), true);
-  elements['ams-unmute-btn'].dispatch('click');
+  assert.match(elements['ams-status'].textContent, /Start demo/);
+  elements['ams-start-demo'].dispatch('click');
   assert.equal(requests.length, 2);
 });
 
@@ -82,13 +92,13 @@ test('failed tracks stop after one playlist cycle and can be retried', () => {
   assert.equal(audio.src, '/audio/tulin-tulin-phonk.mp3');
   audio.error = {};
   audio.dispatch('error');
-  assert.equal(elements['ams-sound-label'].textContent, 'Audio unavailable — tap to retry');
+  assert.match(elements['ams-status'].textContent, /unavailable/);
   assert.equal(requests.length, 2);
-  elements['ams-unmute-btn'].dispatch('click');
+  elements['ams-start-demo'].dispatch('click');
   assert.equal(requests.length, 3);
 });
 
-test('keyboard activation of the sound button does not dismiss the intro', () => {
+test('keyboard activation does not dismiss the intro; Escape does', () => {
   const { document, elements } = setup();
   document.dispatch('keydown', { key: 'Enter' });
   assert.equal(elements['ams-intro-overlay'].classList.contains('opacity-0'), false);
