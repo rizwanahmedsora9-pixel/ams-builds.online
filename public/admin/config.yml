@@ -41,7 +41,10 @@ collections:
   # ─────────────────────────────────────────────────────────────────────────
   - name: "settings"
     label: "⚙️ Site Settings"
-    file: "src/content/settings/site.yml"
+    files:
+      - name: "site"
+        label: "Site Settings"
+        file: "src/content/settings/site.yml"
     fields:
       - { label: "Site Name", name: "siteName", widget: "string" }
       - { label: "Tagline", name: "tagline", widget: "string", required: false, hint: "Shown under the logo, e.g. “Web & App Development”" }
