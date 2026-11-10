@@ -1,0 +1,108 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import AdSlot from '../components/AdSlot.astro';
+import BlogCard from '../components/BlogCard.astro';
+import ProjectCard from '../components/ProjectCard.astro';
+import { getCollection } from 'astro:content';
+import { getSite } from '../utils/site';
+
+const site = await getSite();
+const featuredProjects = (await getCollection('projects', ({data}) => !data.draft && data.featured)).slice(0,3);
+const latestPosts = (await getCollection('blog', ({data}) => !data.draft)).sort((a,b) => +new Date(b.data.pubDate) - +new Date(a.data.pubDate)).slice(0,3);
+const services = [
+  { icon:'🌐', title:'Business Websites', desc:'Custom, lightning-fast websites for shops, clinics, schools & companies — SEO-ready, mobile-first and built to convert visitors into customers.', href:'/services/' },
+  { icon:'📱', title:'Android App Development', desc:'Native & cross-platform Android apps — from idea and UI design to Play Store launch and ongoing maintenance.', href:'/services/' },
+  { icon:'💻', title:'Custom Software', desc:'POS, inventory, school and business management software tailored to how your team actually works.', href:'/services/' },
+  { icon:'🛒', title:'E-commerce & Web Apps', desc:'Online stores and web applications — catalogues, cart, payments and admin dashboards, end to end.', href:'/services/' },
+];
+const stats = site.stats?.length ? site.stats : [{ value:'50+', label:'Projects Delivered' }];
+---
+<BaseLayout title="Web & App Development Services" description={site.shortDescription}>
+  <!-- HERO (content from CMS → Site Settings) -->
+  <section class="bg-slate-900 text-white overflow-hidden">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24 grid lg:grid-cols-2 gap-12 items-center">
+      <div>
+        <p class="inline-flex items-center gap-2 bg-white/10 border border-white/15 text-amber-300 text-xs font-bold tracking-widest uppercase px-3 py-1.5 rounded-full">📍 {site.heroBadge}</p>
+        <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.05] mt-5">{site.heroTitle}</h1>
+        <p class="mt-5 text-lg text-slate-300 leading-8">{site.heroSubtitle}</p>
+        <div class="flex flex-col sm:flex-row gap-3 mt-8">
+          <a href={site.heroCtaUrl} class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-7 py-3.5 rounded-xl text-center">{site.heroCtaText} →</a>
+          <a href="/projects/" class="bg-white/10 hover:bg-white/15 border border-white/20 font-bold px-7 py-3.5 rounded-xl text-center">View Our Work</a>
+        </div>
+        <dl class="grid grid-cols-3 gap-4 mt-10 text-center">
+          {stats.slice(0,3).map(s => <div><dt class="text-2xl font-extrabold text-white">{s.value}</dt><dd class="text-xs text-slate-400 mt-1">{s.label}</dd></div>)}
+        </dl>
+      </div>
+      <div class="relative">
+        <div class="bg-white rounded-2xl shadow-2xl p-2 rotate-1">
+          <img src={site.heroImage} alt={`${site.siteName} website dashboard preview`} class="rounded-xl w-full h-72 object-cover bg-slate-100" onerror="this.style.display='none'" />
+          <div class="p-5">
+            <p class="font-bold text-slate-900">Your business, online — 24/7</p>
+            <p class="text-sm text-slate-600 mt-1">WhatsApp orders, Google Maps, online catalog & more.</p>
+            <div class="flex gap-2 mt-4"><span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded-full">✓ SEO Ready</span><span class="text-xs bg-amber-100 text-amber-800 font-bold px-2.5 py-1 rounded-full">✓ AdSense Ready</span><span class="text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-1 rounded-full">✓ Mobile First</span></div>
+          </div>
+        </div>
+        <div class="absolute -bottom-4 -left-4 bg-amber-500 text-slate-900 font-extrabold px-5 py-3 rounded-xl shadow-lg text-sm">⚡ Loads in &lt; 1 second</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SERVICES -->
+  <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+    <div class="text-center max-w-2xl mx-auto">
+      <h2 class="text-3xl font-extrabold text-slate-900">What we do</h2>
+      <p class="mt-3 text-slate-600 leading-7">End-to-end web & app development services for businesses in Pakistan and beyond.</p>
+    </div>
+    <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-10">
+      {services.map(s => (
+        <a href={s.href} class="group bg-white border border-slate-200 rounded-2xl p-6 hover:shadow-soft hover:-translate-y-1 transition">
+          <span class="text-3xl">{s.icon}</span>
+          <h3 class="font-bold text-slate-900 mt-4 group-hover:text-amber-600">{s.title}</h3>
+          <p class="text-sm text-slate-600 leading-6 mt-2">{s.desc}</p>
+          <span class="inline-block mt-4 text-sm font-bold text-amber-600">Learn more →</span>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"><AdSlot format="leaderboard" slot="8888888888" /></div>
+
+  <!-- FEATURED PROJECTS -->
+  <section class="bg-slate-50 border-y border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+      <div class="flex items-end justify-between gap-4">
+        <div><h2 class="text-3xl font-extrabold text-slate-900">Featured projects</h2><p class="text-slate-600 mt-2">Real work for real businesses.</p></div>
+        <a href="/projects/" class="hidden sm:inline-block font-bold text-amber-600 shrink-0">All projects →</a>
+      </div>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">{featuredProjects.map(p => <ProjectCard project={p} />)}</div>
+    </div>
+  </section>
+
+  <!-- WHY US -->
+  <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 grid lg:grid-cols-2 gap-12 items-center">
+    <div>
+      <h2 class="text-3xl font-extrabold text-slate-900 leading-tight">Why businesses choose AMS Builds</h2>
+      <ul class="mt-6 space-y-4">
+        {['Lightning-fast Astro websites — 95+ PageSpeed, zero bloat','SEO & AdSense-ready from day one — clean semantic HTML','Direct support in Urdu & English — WhatsApp, phone or email','Affordable PKR pricing with transparent packages','Easy CMS — edit pages, projects & blog yourself via Decap CMS'].map(t => <li class="flex gap-3"><span class="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-sm font-bold shrink-0">✓</span><span class="text-slate-700 leading-6">{t}</span></li>)}
+      </ul>
+      <a href="/about/" class="inline-block mt-8 bg-slate-900 text-white font-bold px-6 py-3 rounded-xl">About our agency →</a>
+    </div>
+    <div class="bg-slate-900 rounded-2xl p-8 text-white">
+      <h3 class="font-extrabold text-xl">Get a website like this</h3>
+      <p class="text-slate-300 mt-2 leading-7 text-sm">Tell us about your business — we reply within 24 hours with a free quote and timeline.</p>
+      <a href="/contact/" class="block text-center mt-6 bg-amber-500 text-slate-900 font-bold py-3.5 rounded-xl">Contact Us →</a>
+      <p class="text-xs text-slate-400 mt-4 text-center">📞 {site.phone} · ✉️ {site.email}</p>
+    </div>
+  </section>
+
+  <!-- BLOG -->
+  <section class="bg-slate-50 border-t border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+      <div class="flex items-end justify-between gap-4">
+        <div><h2 class="text-3xl font-extrabold text-slate-900">Latest from our blog</h2><p class="text-slate-600 mt-2">Local business tips, costs & guides — AdSense-friendly content.</p></div>
+        <a href="/blog/" class="hidden sm:inline-block font-bold text-amber-600 shrink-0">All articles →</a>
+      </div>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">{latestPosts.map(p => <BlogCard post={p} />)}</div>
+    </div>
+  </section>
+</BaseLayout>
