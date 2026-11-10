@@ -52,7 +52,21 @@ CMS entries are stored as Markdown/YAML in `src/content/`. Published changes com
 
 ---
 
-## Part 4 — Deploy to Vercel
+## Part 4 — Deploy to Cloudflare Workers or Vercel
+
+### Option A — Cloudflare Workers (current live deployment: `ams-builds-online`)
+
+`wrangler.jsonc` configures Cloudflare Workers Static Assets (`./dist`) plus the lightweight `worker/index.js` entrypoint for `/auth` and `/callback`:
+
+| Setting | Value |
+|---|---|
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| Non-production branch command | `npx wrangler versions upload` or `npx wrangler preview` |
+
+To connect your custom domain `ams-builds.online` in Cloudflare, add `ams-builds.online` to Cloudflare DNS and attach it under **Workers & Pages → `ams-builds-online` → Settings → Domains & Routes**.
+
+### Option B — Vercel
 
 1. In Vercel, choose **Add New → Project** and import `rizwanahmedsora9-pixel/ams-builds.online` from GitHub.
 2. Use the Astro framework preset and confirm:
@@ -64,35 +78,36 @@ CMS entries are stored as Markdown/YAML in `src/content/`. Published changes com
 | Root directory | `/` (repository root) |
 | Node.js version | `20.x` or newer |
 
-3. Deploy. Vercel serves the generated static site and deploys the small `/api` OAuth functions; `vercel.json` maps Decap's `/auth` and `/callback` endpoints to those functions.
-4. Add `ams-builds.online` under **Project → Settings → Domains**, and configure the DNS records Vercel shows. Use the apex domain as the canonical CMS origin unless you intentionally change `CMS_PUBLIC_URL` and the Decap config.
-
-> The Vercel project must be connected to this GitHub repository for CMS-published commits on `main` to trigger a rebuild. CMS OAuth setup is in Part 5.
+3. Deploy. Vercel serves the generated static site and deploys the `/api` OAuth functions; `vercel.json` maps Decap's `/auth` and `/callback` endpoints to those functions.
+4. Add `ams-builds.online` under **Project → Settings → Domains**, and configure the DNS records Vercel shows.
 
 ---
 
 ## Part 5 — Enable the CMS at /admin (GitHub OAuth)
 
-The admin UI is a static Decap CMS page at `/admin/`. Its GitHub backend uses the Vercel OAuth functions in `/api`; no third-party OAuth proxy is needed. The CMS is pointed at `rizwanahmedsora9-pixel/ams-builds.online`, branch `main`.
+The admin UI is a static Decap CMS page at `/admin/` that automatically authenticates against the current host origin (`window.location.origin`). Its GitHub backend uses `worker/index.js` on Cloudflare Workers or `/api/*` on Vercel; no third-party OAuth proxy is needed. The CMS is pointed at `rizwanahmedsora9-pixel/ams-builds.online`, branch `main`.
 
 **A1. Create a GitHub OAuth App**
 1. GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App**.
-2. Set **Application name** to `AMS Builds CMS`, **Homepage URL** to `https://ams-builds.online`, and **Authorization callback URL** to exactly `https://ams-builds.online/callback`.
-3. Register it, copy the Client ID, then generate and copy a Client Secret. Keep the secret private.
+2. Set:
+   - **Application name:** `AMS Builds CMS`
+   - **Homepage URL:** `<YOUR_SITE_ORIGIN>` (e.g. `https://ams-builds-online.rizwanahmedsora9.workers.dev` now, or `https://ams-builds.online` once custom domain DNS is active)
+   - **Authorization callback URL:** `<YOUR_SITE_ORIGIN>/callback` (exact match, e.g. `https://ams-builds-online.rizwanahmedsora9.workers.dev/callback` or `https://ams-builds.online/callback`)
+3. Register it, copy the **Client ID**, then generate and copy a **Client Secret**. Keep the secret private.
 
-**A2. Add credentials to Vercel**
-In the Vercel project for this site, open **Settings → Environment Variables** and add these for **Production** and **Preview**:
+**A2. Add credentials to Cloudflare Workers (or Vercel)**
 
-| Variable | Value |
-|---|---|
-| `GITHUB_OAUTH_CLIENT_ID` | OAuth App Client ID |
-| `GITHUB_OAUTH_CLIENT_SECRET` | OAuth App Client Secret (mark as sensitive/encrypted) |
-| `CMS_PUBLIC_URL` | `https://ams-builds.online` |
+- **Cloudflare Workers:** open **Cloudflare Dashboard → Workers & Pages → `ams-builds-online` → Settings → Variables and Secrets** and add:
+  - `GITHUB_OAUTH_CLIENT_ID` — OAuth App Client ID
+  - `GITHUB_OAUTH_CLIENT_SECRET` — OAuth App Client Secret (choose **Secret** so it is encrypted)
+  - `CMS_PUBLIC_URL` *(optional)* — leave unset to automatically use the request's host origin, or set explicitly (e.g. `https://ams-builds.online`)
 
-`CMS_PUBLIC_URL` must match the domain where the CMS is opened and the OAuth App callback URL. `GITHUB_OAUTH_SCOPE` is optional; the default `public_repo` is appropriate for this public repository. If the repo is private, set it to `repo`. Redeploy after adding or changing variables.
+- **Vercel:** open **Settings → Environment Variables** and add `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` (plus optional `CMS_PUBLIC_URL`).
+
+`GITHUB_OAUTH_SCOPE` is optional; when unset, the OAuth bridge honors the `scope` requested by Decap CMS (`repo` by default).
 
 **A3. Sign in and verify**
-Open `https://ams-builds.online/admin/`, choose **Login with GitHub**, and authorize the OAuth App. Create a draft entry and publish it; verify the new commit reaches `main` and Vercel starts a fresh build. The code under `api/` exchanges the one-time GitHub authorization code server-side, keeps the client secret out of the browser, validates OAuth state, and returns the token to the CMS popup.
+Open `<YOUR_SITE_ORIGIN>/admin/`, choose **Login with GitHub**, and authorize the OAuth App. Create or edit an entry and publish it; verify the new commit reaches `main` and triggers a fresh build. Both `worker/oauth.js` and `api/` exchange the one-time GitHub authorization code server-side, keep the client secret out of the browser, validate CSRF OAuth state via `HttpOnly` cookie, and complete Decap's two-step `postMessage` handshake scoped to your site origin.
 
 ### Local editing without OAuth
 

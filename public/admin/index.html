@@ -7,6 +7,18 @@
   <title>Content Manager | AMS Builds</title>
 </head>
 <body>
+  <script>
+    window.CMS_MANUAL_INIT = true;
+  </script>
   <script src="https://unpkg.com/decap-cms@^3.0.0/dist/decap-cms.js"></script>
+  <script>
+    window.CMS.init({
+      config: {
+        backend: {
+          base_url: window.location.origin,
+        },
+      },
+    });
+  </script>
 </body>
 </html>
