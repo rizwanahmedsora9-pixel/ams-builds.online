@@ -3,17 +3,43 @@ import { timingSafeEqual } from 'node:crypto';
 const SITE_URL = process.env.CMS_PUBLIC_URL || 'https://ams-builds.online';
 const STATE_COOKIE = 'ams_decap_oauth_state';
 
+// postMessage compares bare origins (scheme, host and port), so drop any path or trailing slash.
+function originOf(url) {
+  try { return new URL(url).origin; } catch { return url; }
+}
+
 function escapeForInlineScript(value) {
   return JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
 }
 
+// Decap CMS ignores a sign-in result that arrives on its own. The popup has to say hello
+// first: it sends "authorizing:github", the CMS echoes that back, and only then does the
+// CMS accept "authorization:github:<result>" (and close this popup itself).
+// Everything is exchanged with the CMS origin only, never with "*".
 function callbackPage(res, type, payload, status = 200) {
   const message = `authorization:github:${type}:${JSON.stringify(payload)}`;
+  const cmsOrigin = originOf(SITE_URL);
+  const script = `(function () {
+  var cms = ${escapeForInlineScript(cmsOrigin)};
+  var hello = 'authorizing:github';
+  var result = ${escapeForInlineScript(message)};
+  if (!window.opener) { document.body.textContent = 'Sign-in complete. You may close this window.'; return; }
+  var answered = false;
+  window.addEventListener('message', function (event) {
+    if (event.origin !== cms || event.data !== hello || answered) return;
+    answered = true;
+    window.opener.postMessage(result, cms);
+  }, false);
+  window.opener.postMessage(hello, cms);
+  setTimeout(function () {
+    if (!answered) document.body.textContent = 'Could not hand the sign-in back to the CMS. Close this window, open the CMS at ' + cms + '/admin/ and sign in again.';
+  }, 5000);
+})();`;
   res.status(status);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'`);
-  res.end(`<!doctype html><html><head><meta charset="utf-8"><title>CMS sign-in</title></head><body><p>Returning to the CMS…</p><script>if(window.opener){window.opener.postMessage(${escapeForInlineScript(message)},${escapeForInlineScript(SITE_URL)});window.close();}else{document.body.textContent='Sign-in complete. You may close this window.';}</script></body></html>`);
+  res.end(`<!doctype html><html><head><meta charset="utf-8"><title>CMS sign-in</title></head><body><p>Returning to the CMS…</p><script>${script}</script></body></html>`);
 }
 
 function readCookie(header, name) {

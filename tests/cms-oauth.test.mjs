@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import authHandler from '../api/auth.js';
 import callbackHandler from '../api/callback.js';
 
@@ -87,6 +88,64 @@ test('OAuth callback exchanges a valid code and returns a Decap success message'
     assert.match(res.body, /authorization:github:success:/);
     assert.match(res.body, /github-access-token/);
     assert.match(res.body, /window\.opener\.postMessage/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous.id === undefined) delete process.env.GITHUB_OAUTH_CLIENT_ID;
+    else process.env.GITHUB_OAUTH_CLIENT_ID = previous.id;
+    if (previous.secret === undefined) delete process.env.GITHUB_OAUTH_CLIENT_SECRET;
+    else process.env.GITHUB_OAUTH_CLIENT_SECRET = previous.secret;
+  }
+});
+
+// Decap CMS (decap-cms-lib-auth/src/netlify-auth.js) only starts listening for the sign-in
+// result after the popup has sent "authorizing:github" and received it back. A callback page
+// that posts the result straight away is silently ignored and the editor stays on the login
+// screen. This test plays the CMS side of that conversation against the real callback page.
+test('OAuth callback page says hello first and only hands the token to the CMS origin', async () => {
+  const previous = { id: process.env.GITHUB_OAUTH_CLIENT_ID, secret: process.env.GITHUB_OAUTH_CLIENT_SECRET };
+  const originalFetch = globalThis.fetch;
+  process.env.GITHUB_OAUTH_CLIENT_ID = 'test-client-id';
+  process.env.GITHUB_OAUTH_CLIENT_SECRET = 'test-client-secret';
+  globalThis.fetch = async () => new Response(JSON.stringify({ access_token: 'github-access-token' }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  try {
+    const res = mockResponse();
+    await callbackHandler({
+      method: 'GET',
+      query: { code: 'one-time-code', state: 'expected-state' },
+      headers: { cookie: 'ams_decap_oauth_state=expected-state' },
+    }, res);
+    const script = res.body.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+    const cms = 'https://ams-builds.online';
+    const posted = []; // everything the popup sends to the CMS window, in order
+    let deliver;       // the popup's "message" listener
+    const window = {
+      opener: { postMessage: (data, targetOrigin) => posted.push({ data, targetOrigin }) },
+      addEventListener: (type, listener) => { if (type === 'message') deliver = listener; },
+      close() {},
+    };
+    vm.runInNewContext(script, { window, document: { body: {} }, setTimeout() {} });
+
+    // 1. The popup opens with the hello — the token has not left the page yet.
+    assert.deepEqual(posted, [{ data: 'authorizing:github', targetOrigin: cms }]);
+
+    // 2. An answer from any other site is ignored.
+    deliver({ origin: 'https://attacker.example', data: 'authorizing:github' });
+    assert.equal(posted.length, 1);
+
+    // 3. The CMS echoes the hello, and only now is the result sent — to the CMS origin, never "*".
+    deliver({ origin: cms, data: 'authorizing:github' });
+    assert.deepEqual(posted[1], {
+      data: 'authorization:github:success:{"token":"github-access-token","provider":"github"}',
+      targetOrigin: cms,
+    });
+
+    // 4. It is sent exactly once.
+    deliver({ origin: cms, data: 'authorizing:github' });
+    assert.equal(posted.length, 2);
   } finally {
     globalThis.fetch = originalFetch;
     if (previous.id === undefined) delete process.env.GITHUB_OAUTH_CLIENT_ID;

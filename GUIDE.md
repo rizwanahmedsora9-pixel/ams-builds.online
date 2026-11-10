@@ -102,6 +102,7 @@ For local-only editing, uncomment `local_backend: true` in `public/admin/config.
 - 404 at `/admin/`: check the production deployment includes `dist/admin/index.html` and Vercel's output directory is `dist`.
 - `CMS GitHub OAuth is not configured`: add the three Vercel variables above and redeploy.
 - OAuth callback/state error: callback must be exactly `https://ams-builds.online/callback`; open the CMS at the same canonical domain, not a Vercel preview URL.
+- Popup says `Could not hand the sign-in back to the CMS`: the CMS was opened on a different address than `CMS_PUBLIC_URL`. Close the popup and open the CMS at the address shown in that message.
 - Login works but repository access fails: confirm repo/branch in `public/admin/config.yml`; for a private repo, set the OAuth scope to `repo` and authorize again.
 
 ---
