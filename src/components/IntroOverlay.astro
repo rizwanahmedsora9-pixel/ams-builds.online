@@ -1,135 +1,338 @@
 ---
 /*
- * IntroOverlay — full-screen entrance screen shown once per session.
- * - Auto-swiping catalogue of landing-page designs (CSS-driven carousel, 4s).
- * - LOCAL mp3 playlist (fixed order, loops, NO shuffle) starts from the
- *   "Start demo" button (browsers require a click before audio can play).
- *   While music plays only an animated equalizer is shown — no track names.
- *     1. /audio/baila-lento.mp3        — BAILA LENTO (sma$her & MC DA$ILVA)
- *     2. /audio/tulin-tulin-phonk.mp3  — Tulin Tulin (phonk)
- * - "Enter" stops the music, fades the overlay out and reveals the site.
- * - Shown once per session via sessionStorage (key: ams_intro_seen).
+ * IntroOverlay — full-screen entrance screen ("demo stage"), shown once per session.
+ *
+ *  IDLE  → the catalogue is BLURRED. The only thing revealed is one big round
+ *          DEMO button, dead-centre of the stage on every device (it needs no
+ *          scrolling: the overlay is exactly 100dvh and nothing overflows).
+ *  PLAY  → tapping the button starts the music and the catalogue starts
+ *          swiping IN BEAT with the track (8 beats per slide, pulses on beat).
+ *          The gate blurs away and the expand button appears.
+ *  FULL  → the expand button blows the stage up to the whole page.
+ *
+ * Audio: LOCAL mp3 playlist, fixed order, loops, NO shuffle.
+ *   1. /audio/baila-lento.mp3        — BAILA LENTO   (84 BPM)
+ *   2. /audio/tulin-tulin-phonk.mp3  — Tulin Tulin   (75 BPM)
+ * Tempos are measured from the files themselves, so the swipe interval is
+ * derived from the track that is actually playing. While music plays only an
+ * animated equalizer is shown — no track or artist names.
+ *
+ * Once per session via sessionStorage (key: ams_intro_seen).
  */
 const slides = [
-  { tag: 'SaaS · Dark mode', title: 'Scale your product.', desc: 'Clean, conversion-focused pages for software companies that want to grow fast.', img: '/images/uploads/project-software.jpg' },
-  { tag: 'E-commerce · Bright', title: 'Shop the new season.', desc: 'Vibrant product pages with bold imagery and clear offers that turn browsers into buyers.', img: '/images/uploads/project-retail.jpg' },
-  { tag: 'Business · Clean', title: 'Your business, online.', desc: 'Fast, SEO-ready websites for shops, clinics and schools — built to bring in enquiries.', img: '/images/uploads/hero-dashboard.jpg' },
-  { tag: 'Agency · Bold', title: 'We build brands.', desc: 'Typography-led agency pages that command attention and win clients.', img: '/images/uploads/blog-gujrat-business.jpg' },
-  { tag: 'Android · Mobile', title: 'Apps that feel native.', desc: 'Android apps from UI design to Play Store launch, with ongoing support.', img: '/images/uploads/project-android.jpg' },
+  { tag: 'SaaS · Dark mode', title: 'Scale your product.', desc: 'Dashboards, analytics and marketing pages for software teams that want to grow fast.', img: '/images/uploads/demo-saas-dashboard.jpg' },
+  { tag: 'E-commerce · Bright', title: 'Shop the new season.', desc: 'Editorial product pages, fast catalogue grids and a cart that never loses a sale.', img: '/images/uploads/demo-shop-storefront.jpg' },
+  { tag: 'Business · Clean', title: 'Your business, online.', desc: 'Fast, SEO-ready websites for shops, clinics and schools — built to bring in enquiries.', img: '/images/uploads/demo-business-site.jpg' },
+  { tag: 'Agency · Bold', title: 'We build brands.', desc: 'Typography-led portfolio pages that command attention and win clients.', img: '/images/uploads/demo-brand-agency.jpg' },
+  { tag: 'Android · Mobile', title: 'Apps that feel native.', desc: 'Android apps from UI design to Play Store launch, with ongoing support.', img: '/images/uploads/demo-android-app.jpg' },
 ];
+
+// bpm measured from the files (onset-comb analysis) — drives the swipe rhythm
+const playlist = [
+  { src: '/audio/baila-lento.mp3', bpm: 84 },
+  { src: '/audio/tulin-tulin-phonk.mp3', bpm: 75 },
+];
+const BEATS_PER_SLIDE = 8;
 ---
+
 <div
   id="ams-intro-overlay"
-  class="fixed inset-0 z-[9999] overflow-y-auto overscroll-contain bg-slate-950 text-slate-100 font-sans transition-opacity duration-700 ease-in-out"
-  data-show="true"
+  data-state="idle"
+  data-expanded="false"
+  class="fixed inset-0 z-[9999] overflow-hidden bg-slate-950 text-slate-100 font-sans transition-opacity duration-500 ease-in-out"
 >
   <!-- Hidden audio engine: fixed playlist, looped, no shuffle -->
   <audio id="ams-audio-player" preload="auto" playsinline></audio>
 
-  <!-- Ambient backdrop -->
-  <div class="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
-    <div class="absolute -top-40 -left-40 w-[28rem] h-[28rem] rounded-full bg-amber-500/15 blur-[120px]"></div>
+  <!-- Ambient catalogue backdrop: the slide's own picture, blurred -->
+  <div class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+    {slides.map((s, i) => (
+      <img
+        src={s.img}
+        alt=""
+        data-bg={i}
+        class="ams-bg-img absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-1000 ease-out"
+        data-active={i === 0 ? 'true' : 'false'}
+      />
+    ))}
+    <div class="absolute inset-0 bg-slate-950/75 backdrop-blur-xl"></div>
+    <div class="absolute -top-40 -left-40 w-[28rem] h-[28rem] rounded-full bg-amber-500/20 blur-[120px]"></div>
     <div class="absolute -bottom-40 -right-40 w-[28rem] h-[28rem] rounded-full bg-sky-500/10 blur-[120px]"></div>
   </div>
 
-  <div class="relative min-h-full flex flex-col px-5 py-5 sm:px-8 md:px-12 md:py-8 max-w-6xl w-full mx-auto">
-    <!-- Top bar: brand + equalizer (equalizer only, shown while music plays) -->
-    <header class="flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <span class="w-9 h-9 rounded-xl bg-amber-500 text-slate-900 grid place-items-center font-black text-lg">A</span>
-        <span class="leading-tight">
-          <span class="block font-extrabold tracking-tight text-white">AMS Builds</span>
-          <span class="block text-[10px] tracking-[0.2em] uppercase text-amber-400 font-semibold">Web &amp; App Studio</span>
+  <div class="relative h-[100dvh] w-full">
+    <!-- ── Top bar (absolute so the stage stays dead-centre of the viewport) ── -->
+    <header class="absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-10 pt-3 sm:pt-5">
+      <div class="flex items-center gap-2.5 sm:gap-3 min-w-0">
+        <span class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-500 text-slate-900 grid place-items-center font-black text-lg shrink-0">A</span>
+        <span class="leading-tight min-w-0">
+          <span class="block font-extrabold tracking-tight text-white text-sm sm:text-base truncate">AMS Builds</span>
+          <span class="block text-[9px] sm:text-[10px] tracking-[0.2em] uppercase text-amber-400 font-semibold truncate">Web &amp; App Studio</span>
         </span>
       </div>
-      <div
-        id="ams-now-playing"
-        class="hidden items-center gap-2 h-9 px-3.5 rounded-full bg-white/5 border border-white/10"
-        role="status"
-        aria-label="Demo music playing"
-      >
-        <span class="flex items-end gap-[3px] h-4" aria-hidden="true">
-          <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0s;"></span>
-          <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.25s;"></span>
-          <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.5s;"></span>
-          <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.75s;"></span>
-        </span>
+
+      <div class="flex items-center gap-2 shrink-0">
+        <!-- Equalizer only while music plays (no track names, ever) -->
+        <div
+          id="ams-now-playing"
+          class="hidden items-center gap-2 h-9 px-3 rounded-full bg-white/5 border border-white/10"
+          role="status"
+          aria-label="Demo music playing"
+        >
+          <span class="flex items-end gap-[3px] h-4" aria-hidden="true">
+            <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0s;"></span>
+            <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.25s;"></span>
+            <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.5s;"></span>
+            <span class="w-[3px] h-full rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.75s;"></span>
+          </span>
+        </div>
+        <button
+          id="ams-sound-toggle"
+          type="button"
+          class="w-9 h-9 grid place-items-center rounded-full bg-white/5 border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+          aria-label="Toggle demo music"
+          aria-pressed="false"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M11 5 6 9H3v6h3l5 4V5z" />
+            <path class="ams-sound-wave" d="M15.5 8.5a5 5 0 0 1 0 7" />
+            <path class="ams-sound-wave" d="M18.5 5.5a9 9 0 0 1 0 13" />
+            <path class="ams-sound-mute hidden" d="m16 9 6 6M22 9l-6 6" />
+          </svg>
+        </button>
       </div>
     </header>
 
-    <!-- Hero copy + carousel -->
-    <main class="flex-1 flex flex-col justify-center py-8 md:py-10">
-      <div class="text-center max-w-2xl mx-auto">
-        <p class="text-[11px] sm:text-xs tracking-[0.25em] uppercase text-amber-400 font-semibold">Landing-page catalogue</p>
-        <h1 class="mt-3 text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-[1.1]">
-          Websites &amp; apps that <span class="text-amber-400">convert.</span>
-        </h1>
-        <p class="mt-4 text-sm sm:text-base md:text-lg text-slate-400 leading-relaxed">
-          A preview of the designs we build for businesses in Pakistan and beyond.
-        </p>
-      </div>
-
-      <div class="mt-8 md:mt-10 w-full max-w-4xl mx-auto">
-        <div class="rounded-2xl border border-white/10 bg-slate-900/70 shadow-2xl shadow-black/40 overflow-hidden">
-          <div id="ams-carousel-track" class="flex transition-transform duration-700 ease-in-out will-change-transform">
-            {slides.map((s) => (
-              <article class="flex-shrink-0 w-full grid md:grid-cols-2 gap-5 md:gap-8 items-center p-5 sm:p-6 md:p-8">
-                <div class="order-2 md:order-1">
-                  <p class="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-amber-300">
+    <!-- ── Stage (fills the viewport, contents centred) ─────────── -->
+    <main class="absolute inset-0 flex items-center justify-center px-4 sm:px-6 lg:px-10">
+      <div id="ams-stage-shell" class="ams-stage-shell relative w-full max-w-4xl">
+        <div id="ams-stage" class="ams-stage relative w-full overflow-hidden rounded-2xl sm:rounded-3xl border border-white/10 bg-slate-900 shadow-2xl shadow-black/60">
+          <!-- swipe track -->
+          <div id="ams-carousel-track" class="ams-track flex h-full">
+            {slides.map((s, i) => (
+              <article class="ams-slide relative flex-shrink-0 w-full h-full" data-slide={i}>
+                <img
+                  src={s.img}
+                  alt={`${s.tag} design preview`}
+                  class="absolute inset-0 w-full h-full object-cover"
+                  loading={i === 0 ? 'eager' : 'lazy'}
+                  decoding="async"
+                  draggable="false"
+                />
+                <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-slate-950/10"></div>
+                <div class="ams-slide-copy absolute inset-x-0 bottom-0 p-4 sm:p-7 lg:p-9">
+                  <p class="inline-flex items-center gap-2 text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-amber-300">
                     <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>{s.tag}
                   </p>
-                  <h2 class="mt-2 text-2xl sm:text-3xl font-bold text-white">{s.title}</h2>
-                  <p class="mt-2 text-sm sm:text-base text-slate-400 leading-relaxed">{s.desc}</p>
+                  <h1 class="mt-1.5 sm:mt-2 text-xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white leading-tight">{s.title}</h1>
+                  <p class="hidden sm:block mt-2 text-sm lg:text-base text-slate-300/90 leading-relaxed max-w-xl">{s.desc}</p>
                 </div>
-                <div class="order-1 md:order-2 relative aspect-[1200/630] rounded-xl overflow-hidden border border-white/10 bg-slate-800">
-                  <img src={s.img} alt={`${s.tag} design preview`} class="w-full h-full object-cover" loading="eager" decoding="async" />
-                </div>
+                <span class="absolute top-3 right-3 sm:top-5 sm:right-5 text-[10px] sm:text-xs font-bold tracking-[0.2em] text-white/70 tabular-nums">
+                  {String(i + 1).padStart(2, '0')} / {String(slides.length).padStart(2, '0')}
+                </span>
               </article>
             ))}
           </div>
+
+          <!-- beat pulse ring, driven by CSS var --ams-beat -->
+          <span class="ams-beat-ring pointer-events-none absolute inset-0 rounded-2xl sm:rounded-3xl" aria-hidden="true"></span>
+
+          <!-- ── The gate: nothing is revealed until this is pressed ── -->
+          <div id="ams-demo-gate" class="ams-gate absolute inset-0 grid place-items-center transition-opacity duration-500">
+            <div class="absolute inset-0 bg-slate-950/90 backdrop-blur-2xl"></div>
+            <div class="relative flex flex-col items-center gap-4 px-4 text-center">
+              <button
+                id="ams-start-demo"
+                type="button"
+                class="ams-demo-btn group relative grid place-items-center rounded-full text-slate-900 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-300/60"
+                aria-label="Play the demo — music and catalogue"
+              >
+                <svg class="ams-demo-ring absolute inset-0 w-full h-full" viewBox="0 0 100 100" aria-hidden="true">
+                  <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(245,158,11,0.45)" stroke-width="1.5" stroke-dasharray="4 6" />
+                </svg>
+                <span class="ams-demo-halo absolute inset-0 rounded-full" aria-hidden="true"></span>
+                <span class="relative flex flex-col items-center gap-1">
+                  <svg class="w-7 h-7 sm:w-9 sm:h-9 translate-x-0.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.6-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14z"/></svg>
+                  <span class="text-[11px] sm:text-xs font-black uppercase tracking-[0.3em]">Demo</span>
+                </span>
+              </button>
+              <p class="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.22em] text-amber-300/90">Tap to play</p>
+              <p class="text-[10px] sm:text-xs text-slate-400 max-w-[15rem] sm:max-w-xs leading-relaxed">Music on · catalogue plays itself in beat</p>
+            </div>
+          </div>
         </div>
-        <div id="ams-carousel-dots" class="flex justify-center gap-2 mt-5">
-          {slides.map((_, i) => (
-            <button type="button" class="w-2 h-2 rounded-full bg-white/20 hover:bg-white/40 transition-all duration-300" aria-label={`Show design ${i + 1}`}></button>
-          ))}
+
+        <!-- ── Stage controls: appear once the demo is running ───── -->
+        <div id="ams-stage-controls" class="ams-controls mt-3 sm:mt-4 flex items-center justify-center gap-4 sm:gap-5 opacity-0 pointer-events-none transition-opacity duration-500">
+          <button id="ams-prev-btn" type="button" class="w-9 h-9 grid place-items-center rounded-full bg-white/5 border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 transition-colors" aria-label="Previous design">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div id="ams-carousel-dots" class="flex items-center gap-2">
+            {slides.map((_, i) => (
+              <button type="button" class="ams-dot" aria-label={`Show design ${i + 1}`} data-dot={i}></button>
+            ))}
+          </div>
+          <button id="ams-next-btn" type="button" class="w-9 h-9 grid place-items-center rounded-full bg-white/5 border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 transition-colors" aria-label="Next design">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <button
+            id="ams-expand-btn"
+            type="button"
+            class="ml-1 inline-flex items-center gap-2 h-9 px-4 rounded-full bg-white/5 border border-white/10 text-xs font-bold uppercase tracking-widest text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="Enlarge catalogue to the full page"
+            aria-pressed="false"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5" />
+            </svg>
+            <span id="ams-expand-label">Expand</span>
+          </button>
         </div>
       </div>
     </main>
 
-    <!-- Actions -->
-    <footer class="flex flex-col items-center gap-4">
-      <div id="ams-sound-hint" class="flex flex-col sm:flex-row items-center gap-3">
-        <button
-          id="ams-start-demo"
-          type="button"
-          class="inline-flex items-center gap-2.5 px-6 py-3 rounded-full bg-white text-slate-900 text-sm sm:text-base font-bold hover:bg-slate-200 transition-colors shadow-lg"
-        >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.6-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14z"/></svg>
-          Start demo
-        </button>
-        <button
-          id="ams-enter-btn"
-          type="button"
-          class="inline-flex items-center gap-2 px-8 py-3 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-900 text-sm sm:text-base font-bold uppercase tracking-widest shadow-[0_0_30px_rgba(245,158,11,0.35)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-        >
-          Enter site
-          <span aria-hidden="true">→</span>
-        </button>
-      </div>
-      <p id="ams-status" class="text-xs text-amber-300 min-h-[1rem] text-center" aria-live="polite"></p>
-      <p class="text-[11px] text-slate-500 tracking-widest uppercase text-center">Best with sound · Headphones recommended</p>
+    <!-- ── Footer ──────────────────────────────────────────────── -->
+    <footer class="absolute inset-x-0 bottom-0 z-20 flex flex-col items-center gap-1.5 px-4 pb-3 sm:pb-4">
+      <button
+        id="ams-enter-btn"
+        type="button"
+        class="inline-flex items-center gap-2 text-xs sm:text-sm font-bold uppercase tracking-widest text-slate-300 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 rounded-full px-4 py-2"
+      >
+        Skip to website <span aria-hidden="true">→</span>
+      </button>
+      <p id="ams-status" class="text-[11px] sm:text-xs text-amber-300 min-h-[1rem] text-center" aria-live="polite"></p>
     </footer>
   </div>
+
+  <!-- close button (only in full-page mode) -->
+  <button
+    id="ams-collapse-btn"
+    type="button"
+    class="hidden fixed top-3 right-3 sm:top-5 sm:right-5 z-[10003] w-10 h-10 place-items-center rounded-full bg-slate-950/80 border border-white/15 text-white hover:bg-slate-900 transition-colors"
+    aria-label="Exit full-page catalogue"
+  >
+    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 3v6H3M15 3v6h6M21 15h-6v6M3 15h6v6" />
+    </svg>
+  </button>
 </div>
 
 <style>
-  #ams-intro-overlay[data-exiting="true"] {
-    opacity: 0 !important;
+  /* Stage size: always fits inside the first viewport, never needs scrolling. */
+  .ams-stage {
+    height: min(58dvh, 30rem);
+    max-height: calc(100dvh - 13rem);
+  }
+  @media (min-width: 640px) {
+    .ams-stage { height: min(62dvh, 34rem); }
+  }
+  /* short/landscape phones: keep header + footer clear of the stage */
+  @media (max-height: 32rem) {
+    .ams-stage { height: calc(100dvh - 11rem); max-height: calc(100dvh - 11rem); }
+    .ams-demo-btn { width: clamp(6rem, 22vw, 8rem); height: clamp(6rem, 22vw, 8rem); }
+  }
+
+  /* Swipe track: 700ms so a slide lands exactly on the next beat at 84/75 BPM
+     (a beat is 714ms / 800ms). */
+  .ams-track {
+    height: 100%;
+    transition: transform 640ms cubic-bezier(0.22, 0.8, 0.24, 1);
+    will-change: transform;
+  }
+  .ams-slide { min-width: 100%; }
+
+  /* Slide copy lifts in as its slide lands */
+  .ams-slide-copy { opacity: 0.99; }
+  .ams-slide[data-active='true'] .ams-slide-copy { animation: ams-copy-in 520ms cubic-bezier(0.22, 0.8, 0.24, 1) both; }
+  @keyframes ams-copy-in {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Beat ring */
+  .ams-beat-ring {
+    box-shadow: inset 0 0 0 2px rgba(245, 158, 11, 0.55), inset 0 0 40px rgba(245, 158, 11, 0.18);
+    opacity: var(--ams-beat-opacity, 0);
+    transition: opacity 90ms linear;
+  }
+
+  /* Demo button */
+  .ams-demo-btn {
+    width: clamp(7.5rem, 30vw, 11rem);
+    height: clamp(7.5rem, 30vw, 11rem);
+    background: linear-gradient(145deg, #fbbf24 0%, #f59e0b 45%, #d97706 100%);
+    box-shadow: 0 18px 50px -12px rgba(245, 158, 11, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    transition: transform 220ms cubic-bezier(0.22, 0.8, 0.24, 1), box-shadow 220ms ease;
+  }
+  .ams-demo-btn:hover { transform: scale(1.04); }
+  .ams-demo-btn:active { transform: scale(0.97); }
+  .ams-demo-halo {
+    background: radial-gradient(circle, rgba(245, 158, 11, 0.5) 0%, rgba(245, 158, 11, 0) 70%);
+    animation: ams-halo 2.4s ease-out infinite;
+  }
+  @keyframes ams-halo {
+    0% { transform: scale(1); opacity: 0.85; }
+    70%, 100% { transform: scale(1.55); opacity: 0; }
+  }
+  .ams-demo-ring { animation: ams-spin 18s linear infinite; }
+  @keyframes ams-spin { to { transform: rotate(360deg); } }
+
+  /* Gate: full cover until the demo runs */
+  .ams-gate[data-open='true'] {
+    opacity: 0;
     pointer-events: none;
   }
-  #ams-carousel-track > article {
-    min-width: 100%;
+
+  /* Controls revealed after play */
+  .ams-controls[data-live='true'] {
+    opacity: 1;
+    pointer-events: auto;
   }
+
+  .ams-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.2);
+    transition: all 320ms ease;
+  }
+  .ams-dot:hover { background: rgba(255, 255, 255, 0.4); }
+  .ams-dot[data-active='true'] {
+    width: 1.75rem;
+    background: #f59e0b;
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.5);
+  }
+
+  /* Full-page (expand) mode */
+  #ams-intro-overlay[data-expanded='true'] .ams-stage-shell {
+    position: fixed;
+    inset: 0;
+    max-width: none;
+    z-index: 10002;
+    padding: 0;
+  }
+  #ams-intro-overlay[data-expanded='true'] .ams-stage {
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    border: 0;
+  }
+  #ams-intro-overlay[data-expanded='true'] #ams-demo-gate { display: none; }
+  #ams-intro-overlay[data-expanded='true'] .ams-controls {
+    position: fixed;
+    left: 50%;
+    bottom: 1rem;
+    transform: translateX(-50%);
+    z-index: 10003;
+    padding: 0.4rem 0.75rem;
+    border-radius: 9999px;
+    background: rgba(2, 6, 23, 0.72);
+    backdrop-filter: blur(10px);
+  }
+  #ams-intro-overlay[data-expanded='true'] .ams-slide-copy { padding-bottom: 4.5rem; }
+  #ams-intro-overlay[data-expanded='true'] #ams-collapse-btn { display: grid; }
+  body.ams-intro-locked { overflow: hidden; }
+
   .ams-eq-bar {
     transform-origin: bottom;
     animation: ams-eq 0.9s ease-in-out infinite;
@@ -138,59 +341,78 @@ const slides = [
     0%, 100% { transform: scaleY(0.25); }
     50% { transform: scaleY(1); }
   }
+
   @media (prefers-reduced-motion: reduce) {
-    .ams-eq-bar { animation: none; }
-    #ams-carousel-track { transition: none; }
+    .ams-eq-bar, .ams-demo-halo, .ams-demo-ring { animation: none; }
+    .ams-track { transition: none; }
+    .ams-slide[data-active='true'] .ams-slide-copy { animation: none; }
   }
 </style>
 
 <script>
-  /* --------------------------------------------------------------
-   * Only show once per session
-   * -------------------------------------------------------------- */
   const STORAGE_KEY = 'ams_intro_seen';
+
   const overlay = document.getElementById('ams-intro-overlay');
   const enterBtn = document.getElementById('ams-enter-btn');
   const track = document.getElementById('ams-carousel-track');
-  const slides = track?.children;
   const dotsContainer = document.getElementById('ams-carousel-dots');
   const startBtn = document.getElementById('ams-start-demo');
   const statusText = document.getElementById('ams-status');
   const nowPlaying = document.getElementById('ams-now-playing');
   const audio = document.getElementById('ams-audio-player');
+  const gate = document.getElementById('ams-demo-gate');
+  const controls = document.getElementById('ams-stage-controls');
+  const expandBtn = document.getElementById('ams-expand-btn');
+  const expandLabel = document.getElementById('ams-expand-label');
+  const collapseBtn = document.getElementById('ams-collapse-btn');
+  const prevBtn = document.getElementById('ams-prev-btn');
+  const nextBtn = document.getElementById('ams-next-btn');
+  const soundToggle = document.getElementById('ams-sound-toggle');
+
+  // Fixed playlist — measured BPM drives the swipe rhythm
+  const PLAYLIST = [
+    { src: '/audio/baila-lento.mp3', bpm: 84 },
+    { src: '/audio/tulin-tulin-phonk.mp3', bpm: 75 },
+  ];
+  const BEATS_PER_SLIDE = 8;
+  const IDLE_SLIDE_MS = 4000;
 
   let slideIndex = 0;
-  const slideCount = slides ? slides.length : 0;
-  let timer = null;
-
-  // Fixed playlist — fixed order, loops forever, NO shuffle
-  const PLAYLIST = [
-    { src: '/audio/baila-lento.mp3' },
-    { src: '/audio/tulin-tulin-phonk.mp3' },
-  ];
+  const slideEls = track ? Array.from(track.children) : [];
+  const slideCount = slideEls.length;
+  const bgEls = overlay ? Array.from(overlay.querySelectorAll('[data-bg]')) : [];
   let trackIndex = 0;
+  let exiting = false;
+  let started = false;
+  let expanded = false;
 
-  // Skip if already seen this session
+  /* --------------------------------------------------------------
+   * Session gate
+   * -------------------------------------------------------------- */
   const alreadySeen = sessionStorage.getItem(STORAGE_KEY);
   if (alreadySeen) {
     overlay?.remove();
     document.body.style.overflow = '';
   } else {
-    // Keep body from scrolling behind overlay
+    document.body.classList?.add('ams-intro-locked');
     document.body.style.overflow = 'hidden';
 
   /* --------------------------------------------------------------
-   * LOCAL mp3 playlist — continuous loop, fixed order, no shuffle
+   * Audio: local mp3 playlist — loop, fixed order, no shuffle
    * -------------------------------------------------------------- */
-  let exiting = false;
   let playRequest = 0;
   let consecutiveErrors = 0;
+
+  function currentBpm() {
+    return (PLAYLIST[trackIndex] && PLAYLIST[trackIndex].bpm) || 84;
+  }
 
   // Button visible while demo is not playing; equalizer visible while it is.
   function showStartButton(message = '') {
     startBtn?.classList.remove('hidden');
     nowPlaying?.classList.add('hidden');
     nowPlaying?.classList.remove('flex');
+    soundToggle?.setAttribute('aria-pressed', 'false');
     if (statusText) statusText.textContent = message;
   }
 
@@ -198,6 +420,7 @@ const slides = [
     nowPlaying?.classList.remove('hidden');
     nowPlaying?.classList.add('flex');
     startBtn?.classList.add('hidden');
+    soundToggle?.setAttribute('aria-pressed', 'true');
     if (statusText) statusText.textContent = '';
   }
 
@@ -207,8 +430,7 @@ const slides = [
     audio.src = PLAYLIST[trackIndex].src;
   }
 
-  // Call play() directly from the button's click handler so it retains the
-  // browser's user activation. Do not fall back to misleading muted playback.
+  // Call play() straight from the click handler so the user activation is kept.
   function requestPlayback() {
     if (!audio || exiting) return;
     const request = ++playRequest;
@@ -222,20 +444,36 @@ const slides = [
       return;
     }
     if (result) result.catch((error) => {
-      // Ignore an older autoplay attempt if the visitor has already clicked.
       if (exiting || request !== playRequest) return;
       if (error.name === 'NotAllowedError') {
-        showStartButton('Tap "Start demo" to hear the music.');
+        showStartButton('Tap the demo button to hear the music.');
       } else if (error.name !== 'AbortError') {
         showStartButton('Could not start the demo — please try again.');
       }
     });
   }
 
+  // Open the gate: music + catalogue now run together.
+  function openStage() {
+    if (started) return;
+    started = true;
+    gate?.setAttribute('data-open', 'true');
+    controls?.setAttribute('data-live', 'true');
+    overlay?.setAttribute('data-state', 'playing');
+    stopIdleCarousel();
+    startBeatCarousel();
+  }
+
   audio?.addEventListener('playing', () => {
     if (exiting || audio.muted || audio.volume === 0) return;
     consecutiveErrors = 0;
     showPlaying();
+    openStage();
+  });
+
+  audio?.addEventListener('pause', () => {
+    if (exiting) return;
+    showStartButton('Paused — tap play to continue.');
   });
 
   audio?.addEventListener('ended', () => {
@@ -253,7 +491,9 @@ const slides = [
       loadTrack(trackIndex + 1);
       requestPlayback();
     } else {
-      showStartButton('Music is unavailable right now — you can still browse.');
+      showStartButton('Music is unavailable right now — the catalogue still plays.');
+      // Never block the demo because a file is missing.
+      openStage();
     }
   });
 
@@ -264,53 +504,163 @@ const slides = [
       loadTrack(trackIndex);
     }
     requestPlayback();
+    openStage();
+  });
+
+  soundToggle?.addEventListener('click', () => {
+    if (!audio || exiting) return;
+    if (audio.paused) {
+      requestPlayback();
+    } else {
+      try { audio.pause(); } catch (e) {}
+    }
   });
 
   loadTrack(0);
   requestPlayback();
 
   /* --------------------------------------------------------------
-   * Auto-swiping carousel (pauses on hover / focus)
+   * Swipe engine
+   *  - idle: gentle 4s timer so the gate is never static
+   *  - playing: advances every BEATS_PER_SLIDE beats of the live track,
+   *    with a ring pulse on every single beat
    * -------------------------------------------------------------- */
-  function updateDots() {
-    if (!dotsContainer) return;
-    const allDots = dotsContainer.querySelectorAll('button');
-    allDots.forEach((d, i) => {
-      d.className = i === slideIndex
-        ? 'w-8 h-2 rounded-full bg-amber-500 transition-all duration-300'
-        : 'w-2 h-2 rounded-full bg-white/20 hover:bg-white/40 transition-all duration-300';
+  let idleTimer = null;
+  let rafId = null;
+  let lastBeat = -1;
+  let lastSlideBeat = 0;
+
+  function updateVisuals() {
+    slideEls.forEach((el, i) => {
+      el.setAttribute('data-active', i === slideIndex ? 'true' : 'false');
+      el.setAttribute('aria-hidden', i === slideIndex ? 'false' : 'true');
     });
+    bgEls.forEach((el, i) => {
+      el.setAttribute('data-active', i === slideIndex ? 'true' : 'false');
+      el.style.opacity = i === slideIndex ? '1' : '0';
+    });
+    if (dotsContainer) {
+      Array.from(dotsContainer.querySelectorAll('button')).forEach((d, i) => {
+        d.setAttribute('data-active', i === slideIndex ? 'true' : 'false');
+      });
+    }
   }
 
   function goToSlide(index) {
     if (!track || slideCount === 0) return;
     slideIndex = ((index % slideCount) + slideCount) % slideCount;
     track.style.transform = `translateX(-${slideIndex * 100}%)`;
-    updateDots();
+    updateVisuals();
   }
 
-  function nextSlide() {
-    goToSlide(slideIndex + 1);
+  function nextSlide() { goToSlide(slideIndex + 1); }
+  function prevSlide() { goToSlide(slideIndex - 1, 'back'); }
+
+  function startIdleCarousel() {
+    stopIdleCarousel();
+    if (!track || started) return;
+    idleTimer = setInterval(nextSlide, IDLE_SLIDE_MS);
+  }
+  function stopIdleCarousel() {
+    if (idleTimer) clearInterval(idleTimer);
+    idleTimer = null;
   }
 
-  function startCarousel() {
-    if (!track) return;
-    clearInterval(timer);
-    timer = setInterval(nextSlide, 4000);
+  function pulseBeat() {
+    const ring = overlay?.querySelector('.ams-beat-ring');
+    if (!ring) return;
+    ring.style.setProperty('--ams-beat-opacity', '1');
+    setTimeout(() => ring.style.setProperty('--ams-beat-opacity', '0'), 130);
+    const stage = document.getElementById('ams-stage');
+    if (stage) {
+      stage.style.transform = 'scale(1.006)';
+      setTimeout(() => { stage.style.transform = 'scale(1)'; }, 120);
+    }
   }
 
-  dotsContainer?.querySelectorAll('button').forEach((d, i) => {
-    d.addEventListener('click', () => { goToSlide(i); startCarousel(); });
-  });
+  const hasRaf = typeof requestAnimationFrame === 'function';
 
-  track?.addEventListener('mouseenter', () => clearInterval(timer));
-  track?.addEventListener('mouseleave', startCarousel);
+  function beatTick() {
+    if (exiting) return;
+    const bpm = currentBpm();
+    const beatSeconds = 60 / bpm;
+    const beat = Math.floor((audio?.currentTime || 0) / beatSeconds);
+    if (beat !== lastBeat) {
+      lastBeat = beat;
+      pulseBeat();
+      if (beat - lastSlideBeat >= BEATS_PER_SLIDE) {
+        lastSlideBeat = beat;
+        nextSlide();
+      }
+    }
+    rafId = hasRaf ? requestAnimationFrame(beatTick) : null;
+  }
 
-  updateDots();
-  startCarousel();
+  function startBeatCarousel() {
+    stopBeatCarousel();
+    lastBeat = -1;
+    lastSlideBeat = Math.floor((audio?.currentTime || 0) / (60 / currentBpm()));
+    // Advance once immediately so pressing DEMO visibly "runs" the catalogue.
+    nextSlide();
+    if (hasRaf) {
+      rafId = requestAnimationFrame(beatTick);
+    } else {
+      idleTimer = setInterval(beatTick, 120);
+    }
+  }
+
+  function stopBeatCarousel() {
+    if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
+    rafId = null;
+  }
 
   /* --------------------------------------------------------------
-   * ENTER button — stop music, fade out overlay, reveal site
+   * Controls
+   * -------------------------------------------------------------- */
+  dotsContainer?.querySelectorAll('button').forEach((d, i) => {
+    d.addEventListener('click', () => {
+      goToSlide(i);
+      lastSlideBeat = Math.floor((audio?.currentTime || 0) / (60 / currentBpm()));
+    });
+  });
+
+  nextBtn?.addEventListener('click', () => {
+    nextSlide();
+    lastSlideBeat = Math.floor((audio?.currentTime || 0) / (60 / currentBpm()));
+  });
+  prevBtn?.addEventListener('click', () => {
+    prevSlide();
+    lastSlideBeat = Math.floor((audio?.currentTime || 0) / (60 / currentBpm()));
+  });
+
+  function setExpanded(next) {
+    expanded = next;
+    overlay?.setAttribute('data-expanded', expanded ? 'true' : 'false');
+    expandBtn?.setAttribute('aria-pressed', expanded ? 'true' : 'false');
+    if (expandLabel) expandLabel.textContent = expanded ? 'Shrink' : 'Expand';
+    if (collapseBtn) {
+      collapseBtn.style.display = expanded ? 'grid' : 'none';
+    }
+  }
+
+  expandBtn?.addEventListener('click', () => setExpanded(!expanded));
+  collapseBtn?.addEventListener('click', () => setExpanded(false));
+
+  // Keyboard: arrows move through the catalogue
+  document.addEventListener('keydown', (e) => {
+    if (exiting) return;
+    if (e.key === 'Escape') {
+      if (expanded) { setExpanded(false); return; }
+      enterSite();
+      return;
+    }
+    if (!started) return;
+    if (e.key === 'ArrowRight') nextSlide();
+    if (e.key === 'ArrowLeft') prevSlide();
+  });
+
+  /* --------------------------------------------------------------
+   * ENTER — stop everything, reveal the site
    * -------------------------------------------------------------- */
   function enterSite() {
     if (exiting) return;
@@ -321,24 +671,24 @@ const slides = [
       try { audio.currentTime = 0; } catch (e) {}
       try { audio.removeAttribute('src'); audio.load(); } catch (e) {}
     }
-    clearInterval(timer);
-    sessionStorage.setItem(STORAGE_KEY, '1');
+    stopIdleCarousel();
+    stopBeatCarousel();
+    try { sessionStorage.setItem(STORAGE_KEY, '1'); } catch (e) {}
 
-    overlay?.classList.add('opacity-0', 'pointer-events-none');
-    overlay?.setAttribute('data-exiting', 'true');
+    overlay?.setAttribute('data-state', 'exiting');
+    overlay?.style.setProperty('opacity', '0');
+    overlay?.style.setProperty('pointer-events', 'none');
 
-    // Fade out then remove from DOM and restore scrolling
     setTimeout(() => {
       overlay?.remove();
+      document.body.classList?.remove('ams-intro-locked');
       document.body.style.overflow = '';
-    }, 900);
+    }, 700);
   }
 
   enterBtn?.addEventListener('click', enterSite);
 
-  // Escape dismisses the overlay; Enter and Space retain native button behavior.
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') enterSite();
-  });
+  goToSlide(0);
+  startIdleCarousel();
   }
 </script>

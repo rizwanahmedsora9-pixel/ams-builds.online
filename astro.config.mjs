@@ -14,8 +14,10 @@ export default defineConfig({
   build: { format: 'directory' },
   vite: {
     server: {
-      host: '0.0.0.0',
+      host: true,
       allowedHosts: true,
+      port: 4321,
+      strictPort: true,
     },
   },
 });
