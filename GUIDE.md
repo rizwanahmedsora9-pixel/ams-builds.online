@@ -1,12 +1,12 @@
 # AMS Builds — Complete Guide
-**Deployment to Cloudflare Pages + 100% CMS-managed site**
+**Deployment to Vercel + 100% CMS-managed site**
 
 This guide takes you from the zip file to a live, Google-indexed, AdSense-ready website at **https://ams-builds.online** — and shows you how to manage **everything** (brand, contact, hero, SEO slugs/titles/descriptions, Google Search Console tag, analytics, ads, navigation) from the CMS at `https://ams-builds.online/admin/`.
 
 > **How the system works (30 seconds)**
-> There is no database and no server. The CMS commits content changes to your GitHub repository. Cloudflare Pages notices the commit, rebuilds the site (~1–2 minutes), and the live site updates. That is the whole pipeline:
+> There is no database. The CMS commits content changes to your GitHub repository. Vercel notices the commit, rebuilds the site, and the live site updates. A small serverless function handles GitHub sign-in; it does not store content.
 >
-> **You edit in /admin → commit to GitHub → Cloudflare Pages auto-builds → live site updated**
+> **You edit in /admin → commit to GitHub → Vercel auto-builds → live site updated**
 
 ---
 
@@ -31,106 +31,78 @@ Everything below is editable at `https://ams-builds.online/admin/`:
 
 1. **Node.js 20+** (you have it if `npm -v` ≥ 9)
 2. A **GitHub account** (free)
-3. A **Cloudflare account** (free) — with `ams-builds.online` in the same account, or your DNS delegated to Cloudflare (recommended)
+3. A **Vercel account** with access to the GitHub repository; access to the domain's DNS settings to point `ams-builds.online` at Vercel
 4. About 45–60 minutes for first-time setup
 
 ---
 
-## Part 3 — Push the project to GitHub
+## Part 3 — Confirm the GitHub repository
+
+This site is maintained in [`rizwanahmedsora9-pixel/ams-builds.online`](https://github.com/rizwanahmedsora9-pixel/ams-builds.online). Clone it locally only if you need to edit files outside the CMS:
 
 ```bash
-unzip ams-builds-website.zip
-cd ams-builds-website
+git clone https://github.com/rizwanahmedsora9-pixel/ams-builds.online.git
+cd ams-builds.online
 npm install
-npm run build    # sanity check — should print "16 page(s) built"
-
-git init
-git add .
-git commit -m "AMS Builds website — initial commit"
-git branch -M main
-git remote add origin https://github.com/YOUR-USERNAME/ams-builds-website.git
-git push -u origin main
+npm test
+npm run build
 ```
 
-(Create the empty repo first at github.com → New repository → don't add README/gitignore.)
+CMS entries are stored as Markdown/YAML in `src/content/`. Published changes commit to the repository's `main` branch.
 
 ---
 
-## Part 4 — Connect Cloudflare Pages
+## Part 4 — Deploy to Vercel
 
-1. Cloudflare Dashboard → **Workers & Pages** → **Create** → **Pages** → **Connect to Git**
-2. Authorize Cloudflare → select the `ams-builds-website` repository
-3. Build settings:
+1. In Vercel, choose **Add New → Project** and import `rizwanahmedsora9-pixel/ams-builds.online` from GitHub.
+2. Use the Astro framework preset and confirm:
 
 | Setting | Value |
 |---|---|
-| Framework preset | **Astro** |
 | Build command | `npm run build` |
-| Build output directory | `dist` |
-| Root directory | `/` (leave empty) |
-| Environment variable | `NODE_VERSION` = `20` (Settings → Environment variables, Production) |
+| Output directory | `dist` |
+| Root directory | `/` (repository root) |
+| Node.js version | `20.x` or newer |
 
-4. **Save and Deploy** → wait ~2 minutes → you get `https://ams-builds-website.pages.dev`
-5. **Add your custom domain:** Pages project → **Custom domains** → **Set up a custom domain** → enter `ams-builds.online` → Cloudflare validates/creates the DNS record automatically → HTTPS is automatic.
-   - If the domain was bought elsewhere: first add the domain to Cloudflare (or set the registrar's nameservers to Cloudflare's), then repeat step 5.
-6. **Free email:** Cloudflare → **Email** → **Email Routing** → Create address `hello@ams-builds.online` → forward to your personal Gmail → add the MX/SPF records Cloudflare shows you. (Optional but recommended — clients will email you.)
+3. Deploy. Vercel serves the generated static site and deploys the small `/api` OAuth functions; `vercel.json` maps Decap's `/auth` and `/callback` endpoints to those functions.
+4. Add `ams-builds.online` under **Project → Settings → Domains**, and configure the DNS records Vercel shows. Use the apex domain as the canonical CMS origin unless you intentionally change `CMS_PUBLIC_URL` and the Decap config.
 
-> At this point the site is live over HTTPS with a valid SSL cert. Next, make the CMS work in production.
+> The Vercel project must be connected to this GitHub repository for CMS-published commits on `main` to trigger a rebuild. CMS OAuth setup is in Part 5.
 
 ---
 
 ## Part 5 — Enable the CMS at /admin (GitHub OAuth)
 
-Decap CMS talks directly to the GitHub API. Unlike Netlify, Cloudflare Pages has no built-in identity proxy, so you need a tiny **OAuth proxy** once (it stays free). You have two production paths and one local path:
-
-### Path A (production, standard) — GitHub OAuth App + OAuth proxy
+The admin UI is a static Decap CMS page at `/admin/`. Its GitHub backend uses the Vercel OAuth functions in `/api`; no third-party OAuth proxy is needed. The CMS is pointed at `rizwanahmedsora9-pixel/ams-builds.online`, branch `main`.
 
 **A1. Create a GitHub OAuth App**
-1. github.com → **Settings** → **Developer settings** → **OAuth Apps** → **New OAuth App**
-2. Fill in:
-   - Application name: `AMS Builds CMS`
-   - Homepage URL: `https://ams-builds.online`
-   - Authorization callback URL: `https://YOUR-OAUTH-PROXY/callback` ← set this in step A2/A3
-3. Click **Register application** → copy the **Client ID** → **Generate a new client secret** → copy it immediately.
+1. GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App**.
+2. Set **Application name** to `AMS Builds CMS`, **Homepage URL** to `https://ams-builds.online`, and **Authorization callback URL** to exactly `https://ams-builds.online/callback`.
+3. Register it, copy the Client ID, then generate and copy a Client Secret. Keep the secret private.
 
-**A2. Deploy an OAuth proxy**
-Any proxy implementing Decap's GitHub handshake works. The commonly used one is the community project `vencax/netlify-cms-github-oauth` (a small Node service that also works with Decap). General steps:
+**A2. Add credentials to Vercel**
+In the Vercel project for this site, open **Settings → Environment Variables** and add these for **Production** and **Preview**:
 
-1. Fork/clone it: `git clone https://github.com/vencax/netlify-cms-github-oauth.git`
-2. Set environment variables (names per that repo's README — typically `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` from step A1; the callback path is `/callback`)
-3. Deploy it:
-   - **Cloudflare Workers** (`wrangler deploy` or paste into the Workers editor), or
-   - **Vercel** (import repo → set env vars → deploy, free)
-4. Note the resulting URL, e.g. `https://ams-cms-oauth.YOUR-NAME.workers.dev`
-5. **A1's callback URL must equal** `<proxy-url>/callback` — update the OAuth App if it differs.
+| Variable | Value |
+|---|---|
+| `GITHUB_OAUTH_CLIENT_ID` | OAuth App Client ID |
+| `GITHUB_OAUTH_CLIENT_SECRET` | OAuth App Client Secret (mark as sensitive/encrypted) |
+| `CMS_PUBLIC_URL` | `https://ams-builds.online` |
 
-**A3. Point the CMS at your repo + proxy** — edit `public/admin/config.yml`:
+`CMS_PUBLIC_URL` must match the domain where the CMS is opened and the OAuth App callback URL. `GITHUB_OAUTH_SCOPE` is optional; the default `public_repo` is appropriate for this public repository. If the repo is private, set it to `repo`. Redeploy after adding or changing variables.
 
-```yaml
-backend:
-  name: github
-  repo: YOUR-USERNAME/ams-builds-website   # exact owner/repo
-  branch: main
-  base_url: https://ams-cms-oauth.YOUR-NAME.workers.dev   # proxy from A2
-```
+**A3. Sign in and verify**
+Open `https://ams-builds.online/admin/`, choose **Login with GitHub**, and authorize the OAuth App. Create a draft entry and publish it; verify the new commit reaches `main` and Vercel starts a fresh build. The code under `api/` exchanges the one-time GitHub authorization code server-side, keeps the client secret out of the browser, validates OAuth state, and returns the token to the CMS popup.
 
-Commit & push (`git commit -am "Configure CMS backend" && git push`) → Cloudflare redeploys.
+### Local editing without OAuth
 
-**A4. Log in** — visit `https://ams-builds.online/admin/` → **Login with GitHub** → authorize → the CMS opens. Create a test post and check it appears on `/blog/` after ~2 minutes.
+For local-only editing, uncomment `local_backend: true` in `public/admin/config.yml`, then run `npm run dev` and `npx decap-server` in separate terminals. Open `http://localhost:4321/admin/`. Edits write into the local repository; push them to `main` to deploy. Do not leave local backend enabled in production.
 
-### Path B (no proxy, simplest for a solo owner) — local CMS + push
-
-1. In `config.yml` set `local_backend: true`
-2. Locally: `npm run dev` + `npx decap-server` (two terminals), open `http://localhost:4321/admin/`
-3. Edits save **directly into your local git repo**; `git push` → Cloudflare redeploys.
-   - Honest limitation: the live `/admin` URL won't work for remote login; editing happens on your machine.
-
-### Path C (hosted auth, zero infra) — Netlify Identity alternative
-Only if you'd switch hosting to Netlify (`git-gateway` backend) — not applicable to Cloudflare Pages, listed for completeness.
-
-**Troubleshooting this section** (see also Part 13):
-- Blank `/admin` or infinite "Loading configuration…" → `base_url` wrong, OAuth callback mismatch, or the proxy is down. Open DevTools → Console for the exact error.
-- "Not authorized" / 404 on repo → repo name typo in `config.yml`, or the OAuth app lacks the `repo` scope → delete and re-authorize the app (Settings → Applications → Revoke), log in again.
+**Troubleshooting**
+- 404 at `/admin/`: check the production deployment includes `dist/admin/index.html` and Vercel's output directory is `dist`.
+- `CMS GitHub OAuth is not configured`: add the three Vercel variables above and redeploy.
+- OAuth callback/state error: callback must be exactly `https://ams-builds.online/callback`; open the CMS at the same canonical domain, not a Vercel preview URL.
+- Login works but repository access fails: confirm repo/branch in `public/admin/config.yml`; for a private repo, set the OAuth scope to `repo` and authorize again.
 
 ---
 
@@ -144,7 +116,7 @@ Only if you'd switch hosting to Netlify (`git-gateway` backend) — not applicab
 2. **Pages:** open About/Services/Contact — rewrite in your voice; set nav order (Services 1, About 3, Contact 4), tick Show in Nav/Footer as wanted; SEO overrides optional
 3. **Projects:** replace (or edit) the 3 sample case studies with real ones; tick **Featured** for the ones shown on the homepage
 4. **Blog:** replace sample posts or keep them as starters; every post supports tags, hero image, SEO overrides
-5. Each **Publish** → commit → Cloudflare rebuild (~1–2 min). Check the live site afterwards.
+5. Each **Publish** → commit to GitHub → Vercel rebuild. Check the live site after the deployment is ready.
 
 > Editing tip: images upload via the media library into `public/images/uploads/` and are committed with your content — no separate file hosting needed.
 
@@ -200,11 +172,12 @@ Only if you'd switch hosting to Netlify (`git-gateway` backend) — not applicab
 ## Part 10 — Slugs & per-page SEO control
 
 - **URL = filename.** New entries: slug is derived from the title at creation (`Best SEO Tips!` → `/blog/best-seo-tips/`).
-- **Change a slug later:** rename the file in GitHub (e.g. `src/content/blog/best-seo-tips.md` → `src/content/blog/10-local-seo-tips.md`) and commit. Cloudflare rebuilds; update any internal links. (GitHub web UI → the file → ⋯ → Rename → commit.)
-  - To keep the old URL alive, add to `public/_redirects` (Cloudflare Pages reads it):
+- **Change a slug later:** rename the file in GitHub (e.g. `src/content/blog/best-seo-tips.md` → `src/content/blog/10-local-seo-tips.md`) and commit. Vercel rebuilds; update any internal links. (GitHub web UI → the file → ⋯ → Rename → commit.)
+  - To keep the old URL alive, add a permanent redirect to `vercel.json` (Vercel reads it):
+    ```json
+    { "source": "/blog/old-slug", "destination": "/blog/new-slug", "permanent": true }
     ```
-    /blog/old-slug /blog/new-slug 301
-    ```
+    Add that object to the existing `redirects` array in `vercel.json`.
 - **SEO title / SEO description / OG image / noindex:** every Pages, Projects and Blog entry has an **SEO** section — overrides win over the default title/description; blank = defaults used automatically.
 - **noindex** removes a page from search results (keeps it public by URL). To fully hide and remove a page: toggle **Draft = true** instead — drafts aren't built at all. Note: noindexed pages can still appear in the sitemap (it lists everything built); drafts/exclusions are the clean way to unpublish.
 
@@ -252,9 +225,9 @@ Common tweaks:
 
 | Symptom | Cause → Fix |
 |---|---|
-| `/admin` blank page or endless loader | `base_url` in `config.yml` wrong / OAuth callback mismatch / proxy down → check DevTools console + proxy logs |
+| `/admin` blank page or endless loader | Check the browser console, confirm `config.yml` has the correct backend URL, then verify the Vercel deployment includes the `/api` OAuth functions |
 | Login OK, but "repo not found" | `repo:` typo, or OAuth app lacks repo access → revoke app at github.com/settings/applications, re-login; verify `owner/repo` exactly |
-| Published content not on live site | Wait for Cloudflare rebuild (Pages → Deployments); hard-refresh; if build **failed**, the log tells you why (usually a YAML/frontmatter typo — open the file, fix quotes/colons) |
+| Published content not on live site | Wait for the Vercel deployment to finish; hard-refresh; if the build **failed**, inspect its logs (often a YAML/frontmatter typo — fix quotes/colons) |
 | Sitemap 404 in Search Console | Deploy finished before sitemap existed → re-build/redeploy; `dist/sitemap-index.xml` must exist |
 | GSC token set but tag missing | Rebuild happened? Token in Site Settings → Publish → check Deployments log → view-source on the live homepage and search `google-site-verification` |
 | Ads not rendering | Enable toggle ON? correct `ca-pub-`? slot IDs replaced? account approved? `ads.txt` uploaded? |

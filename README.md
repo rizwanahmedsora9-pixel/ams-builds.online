@@ -1,6 +1,6 @@
 # AMS Builds — Web & App Development (ams-builds.online)
 
-**Astro 4 + Tailwind CSS + Decap CMS** — production-ready, AdSense-friendly, Cloudflare Pages ready.
+**Astro 4 + Tailwind CSS + Decap CMS** — static, AdSense-friendly site with a Vercel-hosted GitHub OAuth bridge.
 
 Services agency site: **custom business websites, Android apps, e-commerce and custom software** — manageable end-to-end from the CMS.
 
@@ -14,11 +14,11 @@ Services agency site: **custom business websites, Android apps, e-commerce and c
 - 🧭 **Dynamic navigation** — header/footer auto-pull CMS pages (`showInNav` / `showInFooter`, ordered by `navOrder`)
 - 🔍 **SEO built-in** — meta, OpenGraph, Twitter cards, JSON-LD ProfessionalService schema, sitemap, RSS
 - 💰 **AdSense-ready** — semantic H1/H2/H3, `AdSlot` units in blog/sidebar/pages (placeholders until enabled in CMS)
-- ☁️ **Cloudflare Pages** — static output, security `_headers`, `robots.txt`
+- ▲ **Vercel-ready** — static Astro output plus a small Vercel OAuth bridge for Decap CMS; `_headers` and `robots.txt` included
 
 ## 📚 Full documentation
 
-**→ See [GUIDE.md](./GUIDE.md)** for the complete step-by-step: push to GitHub → Cloudflare Pages → custom domain → CMS/OAuth setup → Search Console → AdSense → content strategy → troubleshooting → launch checklist.
+**→ See [GUIDE.md](./GUIDE.md)** for the complete step-by-step: deploy to Vercel → configure the GitHub OAuth App → use the CMS at `/admin/` → Search Console → AdSense → troubleshooting → launch checklist.
 
 ## 🚀 Quick start (local)
 
@@ -43,8 +43,8 @@ src/pages/             # index, dynamic [...slug], blog, projects, 404, rss.xml.
 
 ## ⚠️ Before deploy
 
-1. Push to GitHub; connect repo in **Cloudflare Pages** (build: `npm run build`, output: `dist`, `NODE_VERSION=20`) — details in GUIDE.md Part 4
-2. Set your repo + OAuth `base_url` in `public/admin/config.yml` — GUIDE.md Part 5
-3. Open `/admin/` → **Site Settings** → paste real contact details (+ optional GSC token / GA4 / AdSense) → publish
+1. Import `rizwanahmedsora9-pixel/ams-builds.online` into **Vercel** (build: `npm run build`, output: `dist`).
+2. Create a GitHub OAuth App and set `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` in Vercel. The callback URL must be `https://ams-builds.online/callback` — see GUIDE.md Part 5.
+3. Open `https://ams-builds.online/admin/` → sign in with GitHub → **Site Settings** → add real contact details and optional Google IDs → publish.
 
 Contact/placeholders to replace (or edit via CMS → Site Settings): phone `+92 300 0000000`, `hello@ams-builds.online`, address (currently "Gujrat, Punjab, Pakistan").

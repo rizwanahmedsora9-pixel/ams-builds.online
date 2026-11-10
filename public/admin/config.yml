@@ -1,20 +1,20 @@
 # Decap CMS Configuration — AMS Builds (ams-builds.online)
 # Docs: https://decapcms.org/docs/intro/
 #
-# IMPORTANT — 3 steps before /admin works in production (see GUIDE.md):
-#   1. Replace `repo:` below with YOUR GitHub repository (owner/repo).
-#   2. Deploy a GitHub OAuth proxy (required by the GitHub backend outside Netlify)
-#      and put its URL in `base_url` — see GUIDE.md → "Step 5: Enable the CMS".
-#   3. Commit & push. Then open https://ams-builds.online/admin/ and log in with GitHub.
+# The production OAuth proxy is provided by the Vercel functions in /api.
+# Create a GitHub OAuth App and set GITHUB_OAUTH_CLIENT_ID and
+# GITHUB_OAUTH_CLIENT_SECRET in the Vercel project before enabling login.
+# See GUIDE.md → "Enable the CMS at /admin" for the exact setup.
 #
-# Local editing without any OAuth setup (optional): set `local_backend: true`,
-# run `npx decap-server` alongside `npm run dev`, and edit at http://localhost:4321/admin/
+# Local editing without OAuth: set local_backend: true, run `npx decap-server`
+# alongside `npm run dev`, and open http://localhost:4321/admin/.
 
 backend:
   name: github
-  repo: your-github-username/ams-builds-website   # ← CHANGE THIS (owner/repo)
+  repo: rizwanahmedsora9-pixel/ams-builds.online
   branch: main
-  base_url: https://your-oauth-proxy.workers.dev  # ← CHANGE THIS (your deployed OAuth proxy)
+  base_url: https://ams-builds.online
+  auth_endpoint: auth
   open_authoring: false
 
 # local_backend: true   # uncomment for local-only editing (npx decap-server)
