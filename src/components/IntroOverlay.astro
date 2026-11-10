@@ -2,11 +2,14 @@
 /*
  * IntroOverlay — full-screen entrance overlay shown once per session.
  * - Auto-swiping catalogue of landing-page design styles (CSS-driven carousel)
- * - YouTube music plays continuously until the visitor clicks ENTER
- * - Clicking ENTER stops the music, fades the overlay out, and reveals the site
- * - Respected once per session via sessionStorage (key: ams_intro_seen)
- *
- * YouTube track: https://youtu.be/VxkOd7z96-k  (video id: VxkOd7z96-k)
+ * - LOCAL mp3 music plays continuously until the visitor clicks ENTER.
+ * - Playlist (fixed order, loops forever, NO shuffle):
+ *     1. /audio/baila-lento.mp3   — BAILA LENTO (sma$her & MC DA$ILVA)
+ *     2. /audio/tulin-tulin-phonk.mp3 — Tulin Tulin (phonk)
+ * - If the browser blocks unmuted autoplay, playback starts MUTED and sound is
+ *   enabled on the visitor's first tap/click/keypress anywhere (autoplay policy).
+ * - Clicking ENTER stops the music, fades the overlay out, and reveals the site.
+ * - Shown once per session via sessionStorage (key: ams_intro_seen).
  */
 ---
 <div
@@ -14,6 +17,9 @@
   class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-slate-950 text-slate-100 font-sans transition-opacity duration-700 ease-in-out"
   data-show="true"
 >
+  <!-- Hidden audio engine: fixed playlist, looped, no shuffle -->
+  <audio id="ams-audio-player" preload="auto" playsinline></audio>
+
   <!-- Backdrop shapes (gentle animated gradient ambience) -->
   <div class="absolute inset-0 overflow-hidden -z-10">
     <div class="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] rounded-full bg-brand-500/20 blur-[120px] animate-pulse"></div>
@@ -154,13 +160,28 @@
     </div>
   </div>
 
-  <!-- Sound status hint (shown only if autoplay is blocked by the browser) -->
+  <!-- Now-playing pill (visible while music is on — client-meeting friendly proof) -->
+  <div
+    id="ams-now-playing"
+    class="relative mt-2 hidden items-center gap-3 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm max-w-[90vw]"
+    aria-live="polite"
+  >
+    <span class="flex items-end gap-[3px] h-4" aria-hidden="true">
+      <span class="w-[3px] rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0s;"></span>
+      <span class="w-[3px] rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.25s;"></span>
+      <span class="w-[3px] rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.5s;"></span>
+      <span class="w-[3px] rounded-full bg-amber-400 ams-eq-bar" style="animation-delay: 0.75s;"></span>
+    </span>
+    <span id="ams-now-playing-title" class="text-xs md:text-sm text-slate-300 truncate">Now playing…</span>
+  </div>
+
+  <!-- Sound status hint (shown only if the browser blocked unmuted autoplay) -->
   <div id="ams-sound-hint" class="relative mt-6 hidden">
     <button
       id="ams-unmute-btn"
       class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white text-sm font-medium hover:bg-white/20 transition-colors backdrop-blur-sm"
     >
-      <span>🔊</span> Enable sound
+      <span>🔊</span> Tap anywhere for sound
     </button>
   </div>
 
@@ -184,6 +205,18 @@
   #ams-carousel-track > div {
     min-width: 100%;
   }
+  .ams-eq-bar {
+    height: 100%;
+    transform-origin: bottom;
+    animation: ams-eq 0.9s ease-in-out infinite;
+  }
+  @keyframes ams-eq {
+    0%, 100% { transform: scaleY(0.25); }
+    50% { transform: scaleY(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ams-eq-bar { animation: none; }
+  }
 </style>
 
 <script>
@@ -198,12 +231,20 @@
   const dotsContainer = track?.nextElementSibling;
   const soundHint = document.getElementById('ams-sound-hint');
   const unmuteBtn = document.getElementById('ams-unmute-btn');
+  const nowPlaying = document.getElementById('ams-now-playing');
+  const nowPlayingTitle = document.getElementById('ams-now-playing-title');
+  const audio = document.getElementById('ams-audio-player');
 
   let slideIndex = 0;
   let slideCount = slides ? slides.length : 0;
   let timer = null;
-  let player = null;
-  let audioStarted = false;
+
+  // Fixed playlist — fixed order, loops forever, NO shuffle
+  const PLAYLIST = [
+    { src: '/audio/baila-lento.mp3',       title: 'sma$her & MC DA$ILVA — BAILA LENTO' },
+    { src: '/audio/tulin-tulin-phonk.mp3', title: 'Tulin Tulin (Phonk)' },
+  ];
+  let trackIndex = 0;
 
   // Skip if already seen this session
   const alreadySeen = sessionStorage.getItem(STORAGE_KEY);
@@ -215,87 +256,111 @@
     document.body.style.overflow = 'hidden';
 
   /* --------------------------------------------------------------
-   * YouTube IFrame API — music
+   * LOCAL mp3 playlist — continuous loop, fixed order, no shuffle
    * -------------------------------------------------------------- */
-  function loadYouTubeAPI() {
-    return new Promise((resolve) => {
-      if (window.YT && window.YT.Player) {
-        resolve(window.YT);
-        return;
-      }
-      window.onYouTubeIframeAPIReady = () => resolve(window.YT);
-      const tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      const first = document.getElementsByTagName('script')[0];
-      first.parentNode.insertBefore(tag, first);
-    });
+  function setNowPlaying(index) {
+    if (nowPlayingTitle) nowPlayingTitle.textContent = 'Now playing: ' + PLAYLIST[index].title;
   }
 
-  async function initMusic() {
+  function showNowPlaying() {
+    nowPlaying?.classList.remove('hidden');
+    nowPlaying?.classList.add('flex');
+  }
+
+  function hideSoundHint() {
+    soundHint?.classList.add('hidden');
+  }
+
+  function showSoundHint() {
+    soundHint?.classList.remove('hidden');
+  }
+
+  function loadTrack(index, autoplay = true) {
+    if (!audio) return Promise.resolve();
+    trackIndex = ((index % PLAYLIST.length) + PLAYLIST.length) % PLAYLIST.length;
+    audio.src = PLAYLIST[trackIndex].src;
+    setNowPlaying(trackIndex);
+    if (!autoplay) return Promise.resolve();
+    const p = audio.play();
+    return (p && typeof p.then === 'function') ? p : Promise.resolve();
+  }
+
+  function onAudioError() {
+    // If one file fails, skip to the next so music never just stops
+    console.warn('Intro audio failed to load:', audio?.src);
+    loadTrack(trackIndex + 1).catch(() => showSoundHint());
+  }
+
+  // Advance to the next track when one ends; wraps around forever (continuous)
+  audio?.addEventListener('ended', () => {
+    loadTrack(trackIndex + 1).catch(() => {
+      // Autoplay of the next track was blocked — wait for first gesture
+      showSoundHint();
+    });
+  });
+  audio?.addEventListener('error', onAudioError);
+  audio?.addEventListener('playing', () => {
+    showNowPlaying();
+    if (!audio.muted) hideSoundHint();
+  });
+
+  // Start playback. Browsers block UNMUTED autoplay without a user gesture,
+  // so: try with sound first → if blocked, start MUTED (guaranteed to play)
+  // and switch sound on at the visitor's first tap/click/keypress anywhere.
+  async function startMusic() {
+    if (!audio) return false;
+    audio.volume = 1;
     try {
-      const YT = await loadYouTubeAPI();
-      player = new YT.Player('ams-youtube-player', {
-        videoId: 'VxkOd7z96-k',
-        host: 'https://www.youtube-nocookie.com',
-        playerVars: {
-          autoplay: 1,
-          mute: 0,
-          loop: 1,
-          playlist: 'VxkOd7z96-k',
-          controls: 0,
-          disablekb: 1,
-          modestbranding: 1,
-          rel: 0,
-          fs: 0,
-          playsinline: 1,
-        },
-        events: {
-          onReady: (e) => {
-            try {
-              e.target.playVideo();
-              audioStarted = true;
-              soundHint?.classList.add('hidden');
-            } catch (err) {
-              // Autoplay blocked — show hint
-              soundHint?.classList.remove('hidden');
-            }
-          },
-          onError: () => {
-            soundHint?.classList.remove('hidden');
-          },
-          onStateChange: (e) => {
-            // Keep looping manually as a fallback
-            if (e.data === YT.PlayerState.ENDED && player) {
-              player.seekTo(0);
-              player.playVideo();
-            }
-          },
-        },
-      });
+      await loadTrack(0);
+      hideSoundHint();
+      showNowPlaying();
+      return true;
     } catch (err) {
-      console.warn('Intro music unavailable:', err);
-      soundHint?.classList.remove('hidden');
+      console.info('Unmuted autoplay blocked, falling back to muted autoplay + gesture-to-unmute.');
+      try {
+        audio.muted = true;
+        await loadTrack(0);
+        showNowPlaying();
+        showSoundHint();
+        return true;
+      } catch (err2) {
+        console.warn('Muted autoplay also blocked:', err2);
+        showSoundHint();
+        return false;
+      }
     }
   }
 
-  // Create hidden player container
-  const playerWrap = document.createElement('div');
-  playerWrap.id = 'ams-youtube-player';
-  playerWrap.className = 'fixed inset-0 -z-10 pointer-events-none';
-  document.body.insertBefore(playerWrap, document.body.firstChild);
+  // Enable sound from any first interaction anywhere on the page
+  let soundUnlocked = false;
+  function unlockSound() {
+    if (soundUnlocked || !audio) return;
+    soundUnlocked = true;
+    try {
+      audio.muted = false;
+      audio.volume = 1;
+      const p = audio.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+      hideSoundHint();
+    } catch (e) {}
+  }
+  ['pointerdown', 'touchstart', 'mousedown', 'keydown', 'wheel', 'scroll'].forEach((evt) => {
+    window.addEventListener(evt, unlockSound, { passive: true });
+  });
 
-  initMusic();
+  startMusic();
 
   /* --------------------------------------------------------------
-   * Unmute fallback (browser blocked autoplay)
+   * Tap-anywhere-for-sound button (visible only when blocked)
    * -------------------------------------------------------------- */
-  unmuteBtn?.addEventListener('click', async () => {
-    if (player && typeof player.unMute === 'function') {
-      player.unMute();
-      try { player.playVideo(); } catch (e) {}
-      audioStarted = true;
-    }
-    soundHint?.classList.add('hidden');
+  unmuteBtn?.addEventListener('click', () => {
+    if (!audio) return;
+    soundUnlocked = true;
+    audio.muted = false;
+    audio.volume = 1;
+    const p = audio.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+    hideSoundHint();
   });
 
   /* --------------------------------------------------------------
@@ -337,9 +402,10 @@
    * ENTER button — stop music, fade out overlay, reveal site
    * -------------------------------------------------------------- */
   function enterSite() {
-    if (player) {
-      try { player.stopVideo(); } catch (e) {}
-      try { player.destroy(); } catch (e) {}
+    if (audio) {
+      try { audio.pause(); } catch (e) {}
+      try { audio.currentTime = 0; } catch (e) {}
+      try { audio.removeAttribute('src'); audio.load(); } catch (e) {}
     }
     clearInterval(timer);
     sessionStorage.setItem(STORAGE_KEY, '1');
