@@ -12,4 +12,10 @@ export default defineConfig({
   ],
   output: 'static',
   build: { format: 'directory' },
+  vite: {
+    server: {
+      host: '0.0.0.0',
+      allowedHosts: true,
+    },
+  },
 });
