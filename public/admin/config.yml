@@ -38,6 +38,12 @@ collections:
   # ─────────────────────────────────────────────────────────────────────────
   # SITE SETTINGS — singleton: brand, contact, socials, hero & stats,
   # Google Search Console verification, GA4, AdSense (toggle + publisher ID)
+  #
+  # NOTE: Decap has no single-file collection type. Every collection must be
+  # either a `folder:` collection or a `files:` list, so this one settings file
+  # is a `files:` list with a single entry, and that entry carries its own
+  # `fields:` (indented under it — not at the collection level). Otherwise
+  # config validation fails and the whole CMS refuses to load.
   # ─────────────────────────────────────────────────────────────────────────
   - name: "settings"
     label: "⚙️ Site Settings"
@@ -45,53 +51,53 @@ collections:
       - name: "site"
         label: "Site Settings"
         file: "src/content/settings/site.yml"
-    fields:
-      - { label: "Site Name", name: "siteName", widget: "string" }
-      - { label: "Tagline", name: "tagline", widget: "string", required: false, hint: "Shown under the logo, e.g. “Web & App Development”" }
-      - { label: "Short Description (default meta description)", name: "shortDescription", widget: "text" }
-      - { label: "Site URL", name: "url", widget: "string", hint: "Do not change unless the domain changes — include https://" }
-      - { label: "Logo Text", name: "logoText", widget: "string", required: false }
-      - { label: "Logo Initial (1 letter)", name: "logoInitial", widget: "string", required: false }
-
-      - { label: "Email", name: "email", widget: "string" }
-      - { label: "Phone (display)", name: "phone", widget: "string" }
-      - { label: "WhatsApp (international format)", name: "whatsapp", widget: "string", required: false, hint: "e.g. +92 300 1234567" }
-      - { label: "Street Address", name: "streetAddress", widget: "string", required: false }
-      - { label: "City / Locality", name: "addressLocality", widget: "string", required: false }
-      - { label: "Region / Province", name: "addressRegion", widget: "string", required: false }
-      - { label: "Country", name: "addressCountry", widget: "string", required: false }
-      - { label: "Postal Code", name: "postalCode", widget: "string", required: false }
-      - { label: "Opening Hours", name: "openingHours", widget: "string", required: false, hint: "Schema format, e.g. Mo-Sa 09:00-18:00" }
-      - { label: "Price Range", name: "priceRange", widget: "string", required: false }
-
-      - { label: "Facebook URL", name: "facebook", widget: "string", required: false }
-      - { label: "Instagram URL", name: "instagram", widget: "string", required: false }
-      - { label: "LinkedIn URL", name: "linkedin", widget: "string", required: false }
-      - { label: "YouTube URL", name: "youtube", widget: "string", required: false }
-      - { label: "GitHub URL", name: "github", widget: "string", required: false }
-      - { label: "X / Twitter URL", name: "twitter", widget: "string", required: false }
-
-      - { label: "Google Site Verification Token", name: "googleSiteVerification", widget: "string", required: false, hint: "Search Console → Add property → HTML tag → paste ONLY the content token (google-site-verification=...). Injected into every page <head>. Leave blank if you verified via DNS TXT record." }
-
-      - { label: "GA4 Measurement ID", name: "googleAnalyticsId", widget: "string", required: false, hint: "e.g. G-XXXXXXXXXX — blank disables GA4" }
-
-      - { label: "Enable AdSense", name: "adsenseEnabled", widget: "boolean", default: false }
-      - { label: "AdSense Publisher ID", name: "adsenseClient", widget: "string", required: false, hint: "ca-pub-XXXXXXXXXXXXXXXX — script loads automatically when enabled" }
-
-      - { label: "Hero Badge Text", name: "heroBadge", widget: "string", required: false }
-      - { label: "Hero Title (H1)", name: "heroTitle", widget: "text", required: false }
-      - { label: "Hero Subtitle", name: "heroSubtitle", widget: "text", required: false }
-      - { label: "Primary CTA Text", name: "heroCtaText", widget: "string", required: false }
-      - { label: "Primary CTA Link", name: "heroCtaUrl", widget: "string", required: false }
-      - { label: "Hero Image", name: "heroImage", widget: "image", required: false }
-      - { label: "Default Social Share Image (OG)", name: "defaultOgImage", widget: "image", required: false }
-      - label: "Stats Row"
-        name: "stats"
-        widget: "list"
-        required: false
         fields:
-          - { label: "Value", name: "value", widget: "string" }
-          - { label: "Label", name: "label", widget: "string" }
+          - { label: "Site Name", name: "siteName", widget: "string" }
+          - { label: "Tagline", name: "tagline", widget: "string", required: false, hint: "Shown under the logo, e.g. “Web & App Development”" }
+          - { label: "Short Description (default meta description)", name: "shortDescription", widget: "text" }
+          - { label: "Site URL", name: "url", widget: "string", hint: "Do not change unless the domain changes — include https://" }
+          - { label: "Logo Text", name: "logoText", widget: "string", required: false }
+          - { label: "Logo Initial (1 letter)", name: "logoInitial", widget: "string", required: false }
+
+          - { label: "Email", name: "email", widget: "string" }
+          - { label: "Phone (display)", name: "phone", widget: "string" }
+          - { label: "WhatsApp (international format)", name: "whatsapp", widget: "string", required: false, hint: "e.g. +92 300 1234567" }
+          - { label: "Street Address", name: "streetAddress", widget: "string", required: false }
+          - { label: "City / Locality", name: "addressLocality", widget: "string", required: false }
+          - { label: "Region / Province", name: "addressRegion", widget: "string", required: false }
+          - { label: "Country", name: "addressCountry", widget: "string", required: false }
+          - { label: "Postal Code", name: "postalCode", widget: "string", required: false }
+          - { label: "Opening Hours", name: "openingHours", widget: "string", required: false, hint: "Schema format, e.g. Mo-Sa 09:00-18:00" }
+          - { label: "Price Range", name: "priceRange", widget: "string", required: false }
+
+          - { label: "Facebook URL", name: "facebook", widget: "string", required: false }
+          - { label: "Instagram URL", name: "instagram", widget: "string", required: false }
+          - { label: "LinkedIn URL", name: "linkedin", widget: "string", required: false }
+          - { label: "YouTube URL", name: "youtube", widget: "string", required: false }
+          - { label: "GitHub URL", name: "github", widget: "string", required: false }
+          - { label: "X / Twitter URL", name: "twitter", widget: "string", required: false }
+
+          - { label: "Google Site Verification Token", name: "googleSiteVerification", widget: "string", required: false, hint: "Search Console → Add property → HTML tag → paste ONLY the content token (google-site-verification=...). Injected into every page <head>. Leave blank if you verified via DNS TXT record." }
+
+          - { label: "GA4 Measurement ID", name: "googleAnalyticsId", widget: "string", required: false, hint: "e.g. G-XXXXXXXXXX — blank disables GA4" }
+
+          - { label: "Enable AdSense", name: "adsenseEnabled", widget: "boolean", default: false }
+          - { label: "AdSense Publisher ID", name: "adsenseClient", widget: "string", required: false, hint: "ca-pub-XXXXXXXXXXXXXXXX — script loads automatically when enabled" }
+
+          - { label: "Hero Badge Text", name: "heroBadge", widget: "string", required: false }
+          - { label: "Hero Title (H1)", name: "heroTitle", widget: "text", required: false }
+          - { label: "Hero Subtitle", name: "heroSubtitle", widget: "text", required: false }
+          - { label: "Primary CTA Text", name: "heroCtaText", widget: "string", required: false }
+          - { label: "Primary CTA Link", name: "heroCtaUrl", widget: "string", required: false }
+          - { label: "Hero Image", name: "heroImage", widget: "image", required: false }
+          - { label: "Default Social Share Image (OG)", name: "defaultOgImage", widget: "image", required: false }
+          - label: "Stats Row"
+            name: "stats"
+            widget: "list"
+            required: false
+            fields:
+              - { label: "Value", name: "value", widget: "string" }
+              - { label: "Label", name: "label", widget: "string" }
 
   # ─────────────────────────────────────────────────────────────────────────
   # PAGES — static pages with full SEO control

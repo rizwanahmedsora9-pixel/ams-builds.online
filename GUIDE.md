@@ -108,7 +108,7 @@ For local-only editing, uncomment `local_backend: true` in `public/admin/config.
 
 ## Part 6 — First-time checklist inside the CMS (do this in order)
 
-1. **⚙️ Site Settings:**
+1. **⚙️ Site Settings** (click it in the left sidebar, then open the single **Site Settings** entry):
    - Replace placeholder phone `+92 300 0000000`, email, address, hours with your real details
    - Paste your **Google Search Console token** (see Part 7) and/or GA4 ID (Part 8) — or leave blank
    - Check the **hero** (badge/title/subtitle/CTA) and **social icons**
@@ -225,6 +225,7 @@ Common tweaks:
 
 | Symptom | Cause → Fix |
 |---|---|
+| `/admin` shows **Error loading the CMS configuration** | `public/admin/config.yml` breaks one of Decap's rules; the message names the collection. Each collection needs either `folder` + `fields`, or a `files:` list — a single file such as Site Settings is still a `files:` list with one entry. `npm test` checks this before you push |
 | `/admin` blank page or endless loader | Check the browser console, confirm `config.yml` has the correct backend URL, then verify the Vercel deployment includes the `/api` OAuth functions |
 | Login OK, but "repo not found" | `repo:` typo, or OAuth app lacks repo access → revoke app at github.com/settings/applications, re-login; verify `owner/repo` exactly |
 | Published content not on live site | Wait for the Vercel deployment to finish; hard-refresh; if the build **failed**, inspect its logs (often a YAML/frontmatter typo — fix quotes/colons) |
