@@ -6,8 +6,7 @@
  * - Playlist (fixed order, loops forever, NO shuffle):
  *     1. /audio/baila-lento.mp3   — BAILA LENTO (sma$her & MC DA$ILVA)
  *     2. /audio/tulin-tulin-phonk.mp3 — Tulin Tulin (phonk)
- * - If the browser blocks unmuted autoplay, playback starts MUTED and sound is
- *   enabled on the visitor's first tap/click/keypress anywhere (autoplay policy).
+ * - If the browser blocks autoplay, the visitor can start sound with the button.
  * - Clicking ENTER stops the music, fades the overlay out, and reveals the site.
  * - Shown once per session via sessionStorage (key: ams_intro_seen).
  */
@@ -175,13 +174,13 @@
     <span id="ams-now-playing-title" class="text-xs md:text-sm text-slate-300 truncate">Now playing…</span>
   </div>
 
-  <!-- Sound status hint (shown only if the browser blocked unmuted autoplay) -->
-  <div id="ams-sound-hint" class="relative mt-6 hidden">
+  <!-- Sound control remains available whenever playback needs a gesture or retry. -->
+  <div id="ams-sound-hint" class="relative mt-6">
     <button
       id="ams-unmute-btn"
       class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white text-sm font-medium hover:bg-white/20 transition-colors backdrop-blur-sm"
     >
-      <span>🔊</span> Tap anywhere for sound
+      <span aria-hidden="true">🔊</span> <span id="ams-sound-label">Play sound</span>
     </button>
   </div>
 
@@ -231,6 +230,7 @@
   const dotsContainer = track?.nextElementSibling;
   const soundHint = document.getElementById('ams-sound-hint');
   const unmuteBtn = document.getElementById('ams-unmute-btn');
+  const soundLabel = document.getElementById('ams-sound-label');
   const nowPlaying = document.getElementById('ams-now-playing');
   const nowPlayingTitle = document.getElementById('ams-now-playing-title');
   const audio = document.getElementById('ams-audio-player');
@@ -258,110 +258,87 @@
   /* --------------------------------------------------------------
    * LOCAL mp3 playlist — continuous loop, fixed order, no shuffle
    * -------------------------------------------------------------- */
-  function setNowPlaying(index) {
-    if (nowPlayingTitle) nowPlayingTitle.textContent = 'Now playing: ' + PLAYLIST[index].title;
-  }
+  let exiting = false;
+  let playRequest = 0;
+  let consecutiveErrors = 0;
 
-  function showNowPlaying() {
-    nowPlaying?.classList.remove('hidden');
-    nowPlaying?.classList.add('flex');
-  }
-
-  function hideSoundHint() {
-    soundHint?.classList.add('hidden');
-  }
-
-  function showSoundHint() {
+  function showSoundHint(message) {
+    if (soundLabel) soundLabel.textContent = message;
     soundHint?.classList.remove('hidden');
+    nowPlaying?.classList.add('hidden');
+    nowPlaying?.classList.remove('flex');
   }
 
-  function loadTrack(index, autoplay = true) {
-    if (!audio) return Promise.resolve();
+  function loadTrack(index) {
+    if (!audio) return;
     trackIndex = ((index % PLAYLIST.length) + PLAYLIST.length) % PLAYLIST.length;
     audio.src = PLAYLIST[trackIndex].src;
-    setNowPlaying(trackIndex);
-    if (!autoplay) return Promise.resolve();
-    const p = audio.play();
-    return (p && typeof p.then === 'function') ? p : Promise.resolve();
   }
 
-  function onAudioError() {
-    // If one file fails, skip to the next so music never just stops
-    console.warn('Intro audio failed to load:', audio?.src);
-    loadTrack(trackIndex + 1).catch(() => showSoundHint());
-  }
-
-  // Advance to the next track when one ends; wraps around forever (continuous)
-  audio?.addEventListener('ended', () => {
-    loadTrack(trackIndex + 1).catch(() => {
-      // Autoplay of the next track was blocked — wait for first gesture
-      showSoundHint();
-    });
-  });
-  audio?.addEventListener('error', onAudioError);
-  audio?.addEventListener('playing', () => {
-    showNowPlaying();
-    if (!audio.muted) hideSoundHint();
-  });
-
-  // Start playback. Browsers block UNMUTED autoplay without a user gesture,
-  // so: try with sound first → if blocked, start MUTED (guaranteed to play)
-  // and switch sound on at the visitor's first tap/click/keypress anywhere.
-  async function startMusic() {
-    if (!audio) return false;
-    audio.volume = 1;
-    try {
-      await loadTrack(0);
-      hideSoundHint();
-      showNowPlaying();
-      return true;
-    } catch (err) {
-      console.info('Unmuted autoplay blocked, falling back to muted autoplay + gesture-to-unmute.');
-      try {
-        audio.muted = true;
-        await loadTrack(0);
-        showNowPlaying();
-        showSoundHint();
-        return true;
-      } catch (err2) {
-        console.warn('Muted autoplay also blocked:', err2);
-        showSoundHint();
-        return false;
-      }
-    }
-  }
-
-  // Enable sound from any first interaction anywhere on the page
-  let soundUnlocked = false;
-  function unlockSound() {
-    if (soundUnlocked || !audio) return;
-    soundUnlocked = true;
-    try {
-      audio.muted = false;
-      audio.volume = 1;
-      const p = audio.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
-      hideSoundHint();
-    } catch (e) {}
-  }
-  ['pointerdown', 'touchstart', 'mousedown', 'keydown', 'wheel', 'scroll'].forEach((evt) => {
-    window.addEventListener(evt, unlockSound, { passive: true });
-  });
-
-  startMusic();
-
-  /* --------------------------------------------------------------
-   * Tap-anywhere-for-sound button (visible only when blocked)
-   * -------------------------------------------------------------- */
-  unmuteBtn?.addEventListener('click', () => {
-    if (!audio) return;
-    soundUnlocked = true;
+  // Call play() directly from the button's click handler so it retains the
+  // browser's user activation. Do not fall back to misleading muted playback.
+  function requestPlayback() {
+    if (!audio || exiting) return;
+    const request = ++playRequest;
     audio.muted = false;
     audio.volume = 1;
-    const p = audio.play();
-    if (p && typeof p.catch === 'function') p.catch(() => {});
-    hideSoundHint();
+    let result;
+    try {
+      result = audio.play();
+    } catch (error) {
+      showSoundHint('Unable to play sound — tap to retry');
+      return;
+    }
+    if (result) result.catch((error) => {
+      // Ignore an older autoplay attempt if the visitor has already clicked.
+      if (exiting || request !== playRequest) return;
+      if (error.name === 'NotAllowedError') {
+        showSoundHint('Tap to play sound');
+      } else if (error.name !== 'AbortError') {
+        showSoundHint('Unable to play sound — tap to retry');
+      }
+    });
+  }
+
+  audio?.addEventListener('playing', () => {
+    if (exiting || audio.muted || audio.volume === 0) return;
+    consecutiveErrors = 0;
+    if (nowPlayingTitle) nowPlayingTitle.textContent = 'Now playing: ' + PLAYLIST[trackIndex].title;
+    nowPlaying?.classList.remove('hidden');
+    nowPlaying?.classList.add('flex');
+    soundHint?.classList.add('hidden');
   });
+
+  audio?.addEventListener('ended', () => {
+    if (exiting) return;
+    loadTrack(trackIndex + 1);
+    requestPlayback();
+  });
+
+  audio?.addEventListener('error', () => {
+    if (exiting) return;
+    ++playRequest; // Invalidate the rejected play() for the failed source.
+    console.warn('Intro audio failed to load:', audio?.src);
+    consecutiveErrors++;
+    if (consecutiveErrors < PLAYLIST.length) {
+      loadTrack(trackIndex + 1);
+      requestPlayback();
+    } else {
+      showSoundHint('Audio unavailable — tap to retry');
+    }
+  });
+
+  unmuteBtn?.addEventListener('click', () => {
+    if (!audio || exiting) return;
+    if (audio.error) {
+      consecutiveErrors = 0;
+      loadTrack(trackIndex);
+    }
+    requestPlayback();
+  });
+
+  loadTrack(0);
+  requestPlayback();
 
   /* --------------------------------------------------------------
    * Auto-swiping carousel
@@ -402,6 +379,9 @@
    * ENTER button — stop music, fade out overlay, reveal site
    * -------------------------------------------------------------- */
   function enterSite() {
+    if (exiting) return;
+    exiting = true;
+    ++playRequest;
     if (audio) {
       try { audio.pause(); } catch (e) {}
       try { audio.currentTime = 0; } catch (e) {}
@@ -422,12 +402,9 @@
 
   enterBtn?.addEventListener('click', enterSite);
 
-  // Also allow any key press to enter (accessibility + convenience)
+  // Escape dismisses the overlay; Enter and Space retain native button behavior.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
-      e.preventDefault();
-      enterSite();
-    }
-  }, { once: true });
+    if (e.key === 'Escape') enterSite();
+  });
   }
 </script>
