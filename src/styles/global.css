@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+html { scroll-behavior: smooth; }
+body { @apply bg-white text-slate-800 antialiased; }
+::selection { background: #f59e0b; color: #0f172a; }
+
+/* Typography for CMS content */
+.prose-ams h1 { @apply text-3xl md:text-4xl font-extrabold text-slate-900 mt-8 mb-4 leading-tight; }
+.prose-ams h2 { @apply text-2xl font-bold text-slate-900 mt-10 mb-4 leading-snug; }
+.prose-ams h3 { @apply text-xl font-bold text-slate-900 mt-8 mb-3; }
+.prose-ams p { @apply leading-7 text-slate-700 my-4; }
+.prose-ams a { @apply text-amber-600 underline decoration-amber-300 underline-offset-4 hover:text-amber-700; }
+.prose-ams ul { @apply list-disc pl-6 my-4 space-y-2 text-slate-700; }
+.prose-ams ol { @apply list-decimal pl-6 my-4 space-y-2 text-slate-700; }
+.prose-ams blockquote { @apply border-l-4 border-amber-500 bg-amber-50 px-5 py-4 my-6 italic text-slate-700 rounded-r-lg; }
+.prose-ams img { @apply rounded-xl shadow-soft my-6 w-full; }
+.prose-ams table { @apply w-full my-6 text-sm border border-slate-200 rounded-lg overflow-hidden; }
+.prose-ams th { @apply bg-slate-900 text-white px-4 py-3 text-left; }
+.prose-ams td { @apply px-4 py-3 border-t border-slate-200; }
+.prose-ams code { @apply bg-slate-100 px-1.5 py-0.5 rounded text-sm font-mono text-slate-800; }
+.prose-ams pre { @apply bg-slate-900 text-slate-100 p-5 rounded-xl overflow-x-auto my-6; }
+.prose-ams pre code { @apply bg-transparent text-inherit p-0; }
+
+/* AdSense placeholder — visible until real ads load */
+.ad-slot { @apply my-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 text-center text-xs text-slate-500 overflow-hidden; min-height: 90px; display:flex; align-items:center; justify-content:center; }
+.ad-slot ins { display:block; width:100%; }
+.ad-slot--leaderboard { min-height: 90px; }
+.ad-slot--rectangle { min-height: 250px; }
+.ad-slot--in-article { min-height: 120px; }
+
+/* Mobile nav checkbox hack (zero JS) */
+#mobile-menu-toggle:checked ~ #mobile-menu { display: block; }
+#mobile-menu-toggle:checked ~ .menu-icon-open { display: none; }
+#mobile-menu-toggle:not(:checked) ~ .menu-icon-close { display: none; }

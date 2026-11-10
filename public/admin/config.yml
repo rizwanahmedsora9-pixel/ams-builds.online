@@ -1,0 +1,181 @@
+# Decap CMS Configuration — AMS Builds (ams-builds.online)
+# Docs: https://decapcms.org/docs/intro/
+#
+# IMPORTANT — 3 steps before /admin works in production (see GUIDE.md):
+#   1. Replace `repo:` below with YOUR GitHub repository (owner/repo).
+#   2. Deploy a GitHub OAuth proxy (required by the GitHub backend outside Netlify)
+#      and put its URL in `base_url` — see GUIDE.md → "Step 5: Enable the CMS".
+#   3. Commit & push. Then open https://ams-builds.online/admin/ and log in with GitHub.
+#
+# Local editing without any OAuth setup (optional): set `local_backend: true`,
+# run `npx decap-server` alongside `npm run dev`, and edit at http://localhost:4321/admin/
+
+backend:
+  name: github
+  repo: your-github-username/ams-builds-website   # ← CHANGE THIS (owner/repo)
+  branch: main
+  base_url: https://your-oauth-proxy.workers.dev  # ← CHANGE THIS (your deployed OAuth proxy)
+  open_authoring: false
+
+# local_backend: true   # uncomment for local-only editing (npx decap-server)
+
+slug:
+  encoding: "ascii"
+  clean_accents: true
+  sanitize_replacement: "-"
+
+publish_mode: editorial_workflow
+media_folder: public/images/uploads
+public_folder: /images/uploads
+
+site_url: https://ams-builds.online
+display_url: https://ams-builds.online
+logo:
+  src: /favicon.svg
+  show_in_header: true
+
+collections:
+  # ─────────────────────────────────────────────────────────────────────────
+  # SITE SETTINGS — singleton: brand, contact, socials, hero & stats,
+  # Google Search Console verification, GA4, AdSense (toggle + publisher ID)
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: "settings"
+    label: "⚙️ Site Settings"
+    file: "src/content/settings/site.yml"
+    fields:
+      - { label: "Site Name", name: "siteName", widget: "string" }
+      - { label: "Tagline", name: "tagline", widget: "string", required: false, hint: "Shown under the logo, e.g. “Web & App Development”" }
+      - { label: "Short Description (default meta description)", name: "shortDescription", widget: "text" }
+      - { label: "Site URL", name: "url", widget: "string", hint: "Do not change unless the domain changes — include https://" }
+      - { label: "Logo Text", name: "logoText", widget: "string", required: false }
+      - { label: "Logo Initial (1 letter)", name: "logoInitial", widget: "string", required: false }
+
+      - { label: "Email", name: "email", widget: "string" }
+      - { label: "Phone (display)", name: "phone", widget: "string" }
+      - { label: "WhatsApp (international format)", name: "whatsapp", widget: "string", required: false, hint: "e.g. +92 300 1234567" }
+      - { label: "Street Address", name: "streetAddress", widget: "string", required: false }
+      - { label: "City / Locality", name: "addressLocality", widget: "string", required: false }
+      - { label: "Region / Province", name: "addressRegion", widget: "string", required: false }
+      - { label: "Country", name: "addressCountry", widget: "string", required: false }
+      - { label: "Postal Code", name: "postalCode", widget: "string", required: false }
+      - { label: "Opening Hours", name: "openingHours", widget: "string", required: false, hint: "Schema format, e.g. Mo-Sa 09:00-18:00" }
+      - { label: "Price Range", name: "priceRange", widget: "string", required: false }
+
+      - { label: "Facebook URL", name: "facebook", widget: "string", required: false }
+      - { label: "Instagram URL", name: "instagram", widget: "string", required: false }
+      - { label: "LinkedIn URL", name: "linkedin", widget: "string", required: false }
+      - { label: "YouTube URL", name: "youtube", widget: "string", required: false }
+      - { label: "GitHub URL", name: "github", widget: "string", required: false }
+      - { label: "X / Twitter URL", name: "twitter", widget: "string", required: false }
+
+      - { label: "Google Site Verification Token", name: "googleSiteVerification", widget: "string", required: false, hint: "Search Console → Add property → HTML tag → paste ONLY the content token (google-site-verification=...). Injected into every page <head>. Leave blank if you verified via DNS TXT record." }
+
+      - { label: "GA4 Measurement ID", name: "googleAnalyticsId", widget: "string", required: false, hint: "e.g. G-XXXXXXXXXX — blank disables GA4" }
+
+      - { label: "Enable AdSense", name: "adsenseEnabled", widget: "boolean", default: false }
+      - { label: "AdSense Publisher ID", name: "adsenseClient", widget: "string", required: false, hint: "ca-pub-XXXXXXXXXXXXXXXX — script loads automatically when enabled" }
+
+      - { label: "Hero Badge Text", name: "heroBadge", widget: "string", required: false }
+      - { label: "Hero Title (H1)", name: "heroTitle", widget: "text", required: false }
+      - { label: "Hero Subtitle", name: "heroSubtitle", widget: "text", required: false }
+      - { label: "Primary CTA Text", name: "heroCtaText", widget: "string", required: false }
+      - { label: "Primary CTA Link", name: "heroCtaUrl", widget: "string", required: false }
+      - { label: "Hero Image", name: "heroImage", widget: "image", required: false }
+      - { label: "Default Social Share Image (OG)", name: "defaultOgImage", widget: "image", required: false }
+      - label: "Stats Row"
+        name: "stats"
+        widget: "list"
+        required: false
+        fields:
+          - { label: "Value", name: "value", widget: "string" }
+          - { label: "Label", name: "label", widget: "string" }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PAGES — static pages with full SEO control
+  # Slug = filename; Decap generates it from the title when you create an entry
+  # (ascii, clean accents, hyphens). Rename the file in GitHub to change it later.
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: "pages"
+    label: "Pages"
+    folder: "src/content/pages"
+    create: true
+    delete: true
+    extension: "md"
+    format: "frontmatter"
+    summary: "{{title}} (/{{slug}}/)"
+    fields:
+      - { label: "Title", name: "title", widget: "string", hint: "Page H1 and default <title>. Slug is generated from this on creation." }
+      - { label: "Description (SEO)", name: "description", widget: "text", required: false, hint: "Meta description, ~155 characters." }
+      - { label: "Hero Title", name: "heroTitle", widget: "string", required: false }
+      - { label: "Hero Subtitle", name: "heroSubtitle", widget: "text", required: false }
+      - { label: "Featured Image", name: "featuredImage", widget: "image", required: false }
+      - { label: "SEO Title (overrides Title)", name: "seoTitle", widget: "string", required: false }
+      - { label: "SEO Description (overrides Description)", name: "seoDescription", widget: "text", required: false }
+      - { label: "Social Share Image (og:image)", name: "ogImage", widget: "image", required: false }
+      - { label: "Noindex (hide from Google)", name: "noindex", widget: "boolean", default: false, required: false }
+      - { label: "Nav Order (lower = earlier)", name: "navOrder", widget: "number", value_type: "int", default: 99, required: false }
+      - { label: "Show in Navigation", name: "showInNav", widget: "boolean", default: false, required: false }
+      - { label: "Show in Footer", name: "showInFooter", widget: "boolean", default: false, required: false }
+      - { label: "Draft", name: "draft", widget: "boolean", default: false, required: false }
+      - { label: "Updated Date", name: "updatedDate", widget: "datetime", date_format: "YYYY-MM-DD", required: false }
+      - { label: "Body", name: "body", widget: "markdown" }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PROJECTS — case studies (web / Android / software / e-commerce)
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: "projects"
+    label: "Projects"
+    folder: "src/content/projects"
+    create: true
+    delete: true
+    extension: "md"
+    format: "frontmatter"
+    summary: "{{title}} — {{category}}"
+    fields:
+      - { label: "Title", name: "title", widget: "string", hint: "Case study headline. Slug is generated from this on creation." }
+      - { label: "Description (SEO)", name: "description", widget: "text" }
+      - { label: "Client", name: "client", widget: "string", required: false }
+      - label: "Category"
+        name: "category"
+        widget: "select"
+        options: ["web", "android", "software", "ecommerce"]
+        default: "web"
+      - { label: "Technologies", name: "technologies", widget: "list", required: false }
+      - { label: "Cover Image", name: "coverImage", widget: "image", required: false }
+      - { label: "Featured (show on homepage)", name: "featured", widget: "boolean", default: false, required: false }
+      - { label: "Date", name: "date", widget: "datetime", date_format: "YYYY-MM-DD" }
+      - { label: "Results", name: "results", widget: "list", required: false, hint: "e.g. “PageSpeed 98/100”, “3× more WhatsApp orders”" }
+      - { label: "Live URL", name: "liveUrl", widget: "string", required: false }
+      - { label: "SEO Title (overrides Title)", name: "seoTitle", widget: "string", required: false }
+      - { label: "SEO Description (overrides Description)", name: "seoDescription", widget: "text", required: false }
+      - { label: "Social Share Image (og:image)", name: "ogImage", widget: "image", required: false }
+      - { label: "Noindex (hide from Google)", name: "noindex", widget: "boolean", default: false, required: false }
+      - { label: "Draft", name: "draft", widget: "boolean", default: false, required: false }
+      - { label: "Body (Case Study)", name: "body", widget: "markdown" }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # BLOG — AdSense-targeted articles & local business insights
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: "blog"
+    label: "Blog"
+    folder: "src/content/blog"
+    create: true
+    delete: true
+    extension: "md"
+    format: "frontmatter"
+    summary: "{{title}}"
+    fields:
+      - { label: "Title", name: "title", widget: "string", hint: "Post headline (H1). Slug is generated from this on creation." }
+      - { label: "Description (SEO)", name: "description", widget: "text", hint: "Meta description, ~155 characters." }
+      - { label: "Publish Date", name: "pubDate", widget: "datetime", date_format: "YYYY-MM-DD" }
+      - { label: "Updated Date", name: "updatedDate", widget: "datetime", date_format: "YYYY-MM-DD", required: false }
+      - { label: "Author", name: "author", widget: "string", default: "AMS Builds Team", required: false }
+      - { label: "Tags", name: "tags", widget: "list", required: false }
+      - { label: "Hero Image", name: "heroImage", widget: "image", required: false }
+      - { label: "Featured", name: "featured", widget: "boolean", default: false, required: false }
+      - { label: "SEO Title (overrides Title)", name: "seoTitle", widget: "string", required: false }
+      - { label: "SEO Description (overrides Description)", name: "seoDescription", widget: "text", required: false }
+      - { label: "Social Share Image (og:image)", name: "ogImage", widget: "image", required: false }
+      - { label: "Noindex (hide from Google)", name: "noindex", widget: "boolean", default: false, required: false }
+      - { label: "Draft", name: "draft", widget: "boolean", default: false, required: false }
+      - { label: "Body", name: "body", widget: "markdown" }

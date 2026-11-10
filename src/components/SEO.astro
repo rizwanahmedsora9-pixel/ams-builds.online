@@ -1,0 +1,78 @@
+---
+import { getSite, orUndef } from '../utils/site';
+export interface Props {
+  title?: string;
+  description?: string;
+  image?: string;
+  canonical?: string;
+  type?: 'website' | 'article';
+  publishedTime?: string;
+  updatedTime?: string;
+  noindex?: boolean;
+}
+const site = await getSite();
+const {
+  title = `${site.siteName} | ${site.tagline}`,
+  description = site.shortDescription,
+  image = site.defaultOgImage,
+  canonical,
+  type = 'website',
+  publishedTime,
+  updatedTime,
+  noindex = false,
+} = Astro.props;
+const base = site.url.replace(/\/$/, '');
+const fullTitle = title.includes('|') ? title : `${title} | ${site.siteName}`;
+const ogImage = image.startsWith('http') ? image : `${base}${image}`;
+const canonicalUrl = canonical || `${base}${Astro.url.pathname}`;
+const sameAs = [site.facebook, site.instagram, site.linkedin, site.youtube, site.github, site.twitter].map(orUndef).filter(Boolean);
+const gsv = orUndef(site.googleSiteVerification);
+const localityParts = [orUndef(site.addressLocality), orUndef(site.addressRegion), orUndef(site.addressCountry)].filter(Boolean);
+---
+<title>{fullTitle}</title>
+<meta name="description" content={description} />
+<link rel="canonical" href={canonicalUrl} />
+{noindex && <meta name="robots" content="noindex, nofollow" />}
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#0f172a" />
+{gsv && <meta name="google-site-verification" content={gsv} />}
+
+<!-- Open Graph -->
+<meta property="og:type" content={type} />
+<meta property="og:site_name" content={site.siteName} />
+<meta property="og:title" content={fullTitle} />
+<meta property="og:description" content={description} />
+<meta property="og:url" content={canonicalUrl} />
+<meta property="og:image" content={ogImage} />
+<meta property="og:locale" content="en_PK" />
+{publishedTime && <meta property="article:published_time" content={publishedTime} />}
+{updatedTime && <meta property="article:modified_time" content={updatedTime} />}
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content={fullTitle} />
+<meta name="twitter:description" content={description} />
+<meta name="twitter:image" content={ogImage} />
+
+<!-- JSON-LD LocalBusiness (all values from CMS Site Settings) -->
+<script type="application/ld+json" set:html={JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "ProfessionalService",
+  name: site.siteName,
+  description: site.shortDescription,
+  url: base,
+  telephone: site.phone,
+  email: site.email,
+  address: {
+    "@type": "PostalAddress",
+    ...(orUndef(site.streetAddress) ? { streetAddress: site.streetAddress } : {}),
+    addressLocality: site.addressLocality,
+    addressRegion: site.addressRegion,
+    ...(orUndef(site.postalCode) ? { postalCode: site.postalCode } : {}),
+    addressCountry: site.addressCountry === 'Pakistan' ? 'PK' : site.addressCountry,
+  },
+  openingHours: site.openingHours,
+  priceRange: site.priceRange,
+  areaServed: localityParts.join(', '),
+  sameAs,
+})} />

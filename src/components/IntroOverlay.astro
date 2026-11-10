@@ -1,0 +1,367 @@
+---
+/*
+ * IntroOverlay — full-screen entrance overlay shown once per session.
+ * - Auto-swiping catalogue of landing-page design styles (CSS-driven carousel)
+ * - YouTube music plays continuously until the visitor clicks ENTER
+ * - Clicking ENTER stops the music, fades the overlay out, and reveals the site
+ * - Respected once per session via sessionStorage (key: ams_intro_seen)
+ *
+ * YouTube track: https://youtu.be/VxkOd7z96-k  (video id: VxkOd7z96-k)
+ */
+---
+<div
+  id="ams-intro-overlay"
+  class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-slate-950 text-slate-100 font-sans transition-opacity duration-700 ease-in-out"
+  data-show="true"
+>
+  <!-- Backdrop shapes (gentle animated gradient ambience) -->
+  <div class="absolute inset-0 overflow-hidden -z-10">
+    <div class="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] rounded-full bg-brand-500/20 blur-[120px] animate-pulse"></div>
+    <div class="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] rounded-full bg-amber-500/15 blur-[120px] animate-pulse" style="animation-delay: 2s;"></div>
+    <div class="absolute top-[20%] right:[20%] w-[40%] h-[40%] rounded-full bg-purple-500/10 blur-[100px] animate-pulse" style="animation-delay: 4s;"></div>
+  </div>
+
+  <!-- Headline -->
+  <div class="relative text-center px-6 max-w-xl">
+    <h2 class="text-4xl md:text-6xl font-bold tracking-tight text-white mb-3 leading-tight">
+      AMS Builds
+      <span class="block text-brand-500">Landing-Page Catalogue</span>
+    </h2>
+    <p class="text-slate-400 text-lg md:text-xl max-w-2xl mx-auto leading-relaxed">
+      Hand-crafted website &amp; app designs — auto-previewing while you listen.
+    </p>
+  </div>
+
+  <!-- Auto-swiping catalogue carousel -->
+  <div
+    class="relative w-full max-w-5xl mx-auto px-6 mt-10 mb-12 overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-2xl"
+  >
+    <div
+      id="ams-carousel-track"
+      class="flex h-96 md:h-[340px] transition-transform duration-700 ease-in-out will-change-transform"
+    >
+      {/* Slide 1 — Dark SaaS */}
+      <div
+        class="flex-shrink-0 w-full h-full p-8 md:p-12 flex flex-col justify-between gap-6 bg-slate-900/60 border border-white/5"
+      >
+        <div>
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 text-sm font-medium border border-amber-500/20 mb-4">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+            SaaS · Dark Mode
+          </div>
+          <h3 class="text-3xl md:text-4xl font-bold text-white mb-2">Scale your product.</h3>
+          <p class="text-slate-400 text-lg max-w-md leading-relaxed">
+            Clean conversion-focused pages built for software companies that want to grow fast.
+          </p>
+        </div>
+        <div class="flex items-end gap-3">
+          <span class="text-6xl font-black text-white tracking-tighter opacity-90">01</span>
+          <div class="w-full h-24 rounded-xl bg-gradient-to-br from-brand-500/40 to-amber-500/20 border border-white/10 shadow-[0_0_40px_rgba(245,158,11,0.15)]"></div>
+        </div>
+      </div>
+
+      {/* Slide 2 — Bright E-commerce */}
+      <div
+        class="flex-shrink-0 w-full h-full p-8 md:p-12 flex flex-col justify-between gap-6 bg-white/10 border border-white/5"
+      >
+        <div>
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-white text-sm font-medium border border-white/20 mb-4">
+            <span class="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+            E-commerce · Bright
+          </div>
+          <h3 class="text-3xl md:text-4xl font-bold text-white mb-2">Shop the new season.</h3>
+          <p class="text-slate-300 text-lg max-w-md leading-relaxed">
+            Vibrant product pages that convert browsers into buyers with bold imagery and clear offers.
+          </p>
+        </div>
+        <div class="flex items-end gap-3">
+          <span class="text-6xl font-black text-white tracking-tighter opacity-90">02</span>
+          <div class="w-full h-24 rounded-xl bg-gradient-to-tr from-rose-500/40 to-orange-400/30 border border-white/10 shadow-[0_0_40px_rgba(244,63,94,0.2)]"></div>
+        </div>
+      </div>
+
+      {/* Slide 3 — Minimal Portfolio */}
+      <div
+        class="flex-shrink-0 w-full h-full p-8 md:p-12 flex flex-col justify-between gap-6 bg-slate-900/40 border border-white/5"
+      >
+        <div>
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-white text-sm font-medium border border-white/20 mb-4">
+            <span class="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+            Portfolio · Minimal
+          </div>
+          <h3 class="text-3xl md:text-4xl font-bold text-white mb-2">Let the work speak.</h3>
+          <p class="text-slate-300 text-lg max-w-md leading-relaxed">
+            Quiet confidence and generous whitespace — perfect for studios, freelancers and creators.
+          </p>
+        </div>
+        <div class="flex items-end gap-3">
+          <span class="text-6xl font-black text-white tracking-tighter opacity-90">03</span>
+          <div class="w-full h-24 rounded-xl bg-gradient-to-b from-slate-800/40 to-slate-900/60 border border-white/10"></div>
+        </div>
+      </div>
+
+      {/* Slide 4 — Bold Agency */}
+      <div
+        class="flex-shrink-0 w-full h-full p-8 md:p-12 flex flex-col justify-between gap-6 bg-black border border-white/5"
+      >
+        <div>
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 text-sm font-medium border border-amber-500/30 mb-4">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+            Agency · Bold
+          </div>
+          <h3 class="text-3xl md:text-4xl font-bold text-white mb-2">We build brands.</h3>
+          <p class="text-slate-300 text-lg max-w-md leading-relaxed">
+            High-impact, typography-led agency pages that command attention and win clients.
+          </p>
+        </div>
+        <div class="flex items-end gap-3">
+          <span class="text-6xl font-black text-white tracking-tighter opacity-90">04</span>
+          <div class="w-full h-24 rounded-xl bg-gradient-to-r from-amber-600/40 to-rose-500/30 border border-white/10"></div>
+        </div>
+      </div>
+
+      {/* Slide 5 — Creative Glass */}
+      <div
+        class="flex-shrink-0 w-full h-full p-8 md:p-12 flex flex-col justify-between gap-6 bg-indigo-950/60 border border-white/10 backdrop-blur-sm"
+      >
+        <div>
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/20 text-purple-400 text-sm font-medium border border-purple-500/30 mb-4">
+            <span class="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
+            Creative · Glass
+          </div>
+          <h3 class="text-3xl md:text-4xl font-bold text-white mb-2">Imagine differently.</h3>
+          <p class="text-slate-300 text-lg max-w-md leading-relaxed">
+            Frosted glass, vivid gradients and motion — for the boldest creative ideas.
+          </p>
+        </div>
+        <div class="flex items-end gap-3">
+          <span class="text-6xl font-black text-white tracking-tighter opacity-90">05</span>
+          <div class="w-full h-24 rounded-xl bg-gradient-to-tr from-purple-500/30 to-pink-500/30 border border-white/10 shadow-[0_0_40px_rgba(168,85,247,0.15)]"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Navigation dots -->
+    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2">
+      {[0,1,2,3,4].map((i) => (
+        <button
+          class={`w-2 h-2 rounded-full transition-all duration-300 ${
+            i === 0 ? 'bg-brand-500 w-8 rounded-full' : 'bg-white/20 hover:bg-white/40'
+          }`}
+          aria-label={`Slide ${i + 1}`}
+        ></button>
+      ))}
+    </div>
+  </div>
+
+  <!-- Sound status hint (shown only if autoplay is blocked by the browser) -->
+  <div id="ams-sound-hint" class="relative mt-6 hidden">
+    <button
+      id="ams-unmute-btn"
+      class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white text-sm font-medium hover:bg-white/20 transition-colors backdrop-blur-sm"
+    >
+      <span>🔊</span> Enable sound
+    </button>
+  </div>
+
+  <!-- ENTER button -->
+  <button
+    id="ams-enter-btn"
+    class="mt-10 relative px-10 py-4 rounded-full bg-brand-500 text-white text-xl font-bold tracking-widest uppercase shadow-[0_0_30px_rgba(245,158,11,0.4)] hover:bg-amber-600 hover:shadow-[0_0_45px_rgba(245,158,11,0.6)] transition-all duration-300 transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+  >
+    Enter
+  </button>
+
+  <!-- Bottom hint -->
+  <p class="relative mt-6 text-xs text-slate-500 tracking-widest uppercase">Best experienced with sound · Headphones recommended</p>
+</div>
+
+<style>
+  #ams-intro-overlay[data-exiting="true"] {
+    opacity: 0 !important;
+    pointer-events: none;
+  }
+  #ams-carousel-track > div {
+    min-width: 100%;
+  }
+</style>
+
+<script>
+  /* --------------------------------------------------------------
+   * Only show once per session
+   * -------------------------------------------------------------- */
+  const STORAGE_KEY = 'ams_intro_seen';
+  const overlay = document.getElementById('ams-intro-overlay');
+  const enterBtn = document.getElementById('ams-enter-btn');
+  const track = document.getElementById('ams-carousel-track');
+  const slides = track?.children;
+  const dotsContainer = track?.nextElementSibling;
+  const soundHint = document.getElementById('ams-sound-hint');
+  const unmuteBtn = document.getElementById('ams-unmute-btn');
+
+  let slideIndex = 0;
+  let slideCount = slides ? slides.length : 0;
+  let timer = null;
+  let player = null;
+  let audioStarted = false;
+
+  // Skip if already seen this session
+  const alreadySeen = sessionStorage.getItem(STORAGE_KEY);
+  if (alreadySeen) {
+    overlay?.remove();
+    document.body.style.overflow = '';
+  } else {
+    // Keep body from scrolling behind overlay
+    document.body.style.overflow = 'hidden';
+
+  /* --------------------------------------------------------------
+   * YouTube IFrame API — music
+   * -------------------------------------------------------------- */
+  function loadYouTubeAPI() {
+    return new Promise((resolve) => {
+      if (window.YT && window.YT.Player) {
+        resolve(window.YT);
+        return;
+      }
+      window.onYouTubeIframeAPIReady = () => resolve(window.YT);
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      const first = document.getElementsByTagName('script')[0];
+      first.parentNode.insertBefore(tag, first);
+    });
+  }
+
+  async function initMusic() {
+    try {
+      const YT = await loadYouTubeAPI();
+      player = new YT.Player('ams-youtube-player', {
+        videoId: 'VxkOd7z96-k',
+        host: 'https://www.youtube-nocookie.com',
+        playerVars: {
+          autoplay: 1,
+          mute: 0,
+          loop: 1,
+          playlist: 'VxkOd7z96-k',
+          controls: 0,
+          disablekb: 1,
+          modestbranding: 1,
+          rel: 0,
+          fs: 0,
+          playsinline: 1,
+        },
+        events: {
+          onReady: (e) => {
+            try {
+              e.target.playVideo();
+              audioStarted = true;
+              soundHint?.classList.add('hidden');
+            } catch (err) {
+              // Autoplay blocked — show hint
+              soundHint?.classList.remove('hidden');
+            }
+          },
+          onError: () => {
+            soundHint?.classList.remove('hidden');
+          },
+          onStateChange: (e) => {
+            // Keep looping manually as a fallback
+            if (e.data === YT.PlayerState.ENDED && player) {
+              player.seekTo(0);
+              player.playVideo();
+            }
+          },
+        },
+      });
+    } catch (err) {
+      console.warn('Intro music unavailable:', err);
+      soundHint?.classList.remove('hidden');
+    }
+  }
+
+  // Create hidden player container
+  const playerWrap = document.createElement('div');
+  playerWrap.id = 'ams-youtube-player';
+  playerWrap.className = 'fixed inset-0 -z-10 pointer-events-none';
+  document.body.insertBefore(playerWrap, document.body.firstChild);
+
+  initMusic();
+
+  /* --------------------------------------------------------------
+   * Unmute fallback (browser blocked autoplay)
+   * -------------------------------------------------------------- */
+  unmuteBtn?.addEventListener('click', async () => {
+    if (player && typeof player.unMute === 'function') {
+      player.unMute();
+      try { player.playVideo(); } catch (e) {}
+      audioStarted = true;
+    }
+    soundHint?.classList.add('hidden');
+  });
+
+  /* --------------------------------------------------------------
+   * Auto-swiping carousel
+   * -------------------------------------------------------------- */
+  function updateDots() {
+    if (!dotsContainer) return;
+    const allDots = dotsContainer.querySelectorAll('button');
+    allDots.forEach((d, i) => {
+      d.className = i === slideIndex
+        ? 'w-8 h-2 rounded-full bg-brand-500'
+        : 'w-2 h-2 rounded-full bg-white/20 hover:bg-white/40 transition-colors';
+    });
+  }
+
+  function goToSlide(index) {
+    if (!track || slideCount === 0) return;
+    slideIndex = ((index % slideCount) + slideCount) % slideCount;
+    track.style.transform = `translateX(-${slideIndex * 100}%)`;
+    updateDots();
+  }
+
+  function nextSlide() {
+    goToSlide(slideIndex + 1);
+  }
+
+  function startCarousel() {
+    if (!track) return;
+    updateDots();
+    timer = setInterval(nextSlide, 4000);
+  }
+
+  track?.addEventListener('mouseenter', () => clearInterval(timer));
+  track?.addEventListener('mouseleave', startCarousel);
+
+  startCarousel();
+
+  /* --------------------------------------------------------------
+   * ENTER button — stop music, fade out overlay, reveal site
+   * -------------------------------------------------------------- */
+  function enterSite() {
+    if (player) {
+      try { player.stopVideo(); } catch (e) {}
+      try { player.destroy(); } catch (e) {}
+    }
+    clearInterval(timer);
+    sessionStorage.setItem(STORAGE_KEY, '1');
+
+    overlay?.classList.add('opacity-0', 'pointer-events-none');
+    overlay?.setAttribute('data-exiting', 'true');
+
+    // Fade out then remove from DOM and restore scrolling
+    setTimeout(() => {
+      overlay?.remove();
+      document.body.style.overflow = '';
+    }, 900);
+  }
+
+  enterBtn?.addEventListener('click', enterSite);
+
+  // Also allow any key press to enter (accessibility + convenience)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+      e.preventDefault();
+      enterSite();
+    }
+  }, { once: true });
+  }
+</script>

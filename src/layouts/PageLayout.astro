@@ -1,0 +1,26 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import Breadcrumbs from '../components/Breadcrumbs.astro';
+import AdSlot from '../components/AdSlot.astro';
+export interface Props {
+  title: string; description?: string; heroTitle?: string; heroSubtitle?: string; slug: string;
+  seoTitle?: string; seoDescription?: string; ogImage?: string; noindex?: boolean;
+}
+const { title, description, heroTitle, heroSubtitle, seoTitle, seoDescription, ogImage, noindex } = Astro.props;
+const seoDesc = seoDescription || description;
+const pageTitle = seoTitle || title;
+---
+<BaseLayout title={pageTitle} description={seoDesc} image={ogImage} noindex={noindex}>
+  <section class="bg-slate-900 text-white">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-14 md:py-20">
+      <Breadcrumbs items={[{label:'Home', href:'/'}, {label: title}]} />
+      <h1 class="text-3xl md:text-5xl font-extrabold tracking-tight leading-tight">{heroTitle || title}</h1>
+      {heroSubtitle && <p class="mt-4 text-lg text-slate-300 leading-8">{heroSubtitle}</p>}
+    </div>
+  </section>
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <AdSlot format="leaderboard" slot="1111111111" />
+    <div class="prose-ams"><slot /></div>
+    <AdSlot format="in-article" slot="2222222222" />
+  </div>
+</BaseLayout>

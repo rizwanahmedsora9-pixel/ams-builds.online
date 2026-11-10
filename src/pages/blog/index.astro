@@ -1,0 +1,23 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import BlogCard from '../../components/BlogCard.astro';
+import AdSlot from '../../components/AdSlot.astro';
+import { getCollection } from 'astro:content';
+const posts = (await getCollection('blog', ({data}) => !data.draft)).sort((a,b) => +new Date(b.data.pubDate) - +new Date(a.data.pubDate));
+const tags = [...new Set(posts.flatMap(p => p.data.tags || []))];
+---
+<BaseLayout title="Blog — Business Tips & Guides" description="Practical guides on website costs, Android apps, SEO and growing your business online in Pakistan.">
+  <section class="bg-slate-900 text-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
+      <p class="text-amber-400 text-xs font-bold tracking-widest uppercase">Blog</p>
+      <h1 class="text-3xl md:text-5xl font-extrabold mt-3">Business tips & guides</h1>
+      <p class="mt-3 text-slate-300 max-w-2xl leading-7">Website costs, app development, SEO and local business growth — written for Pakistani businesses.</p>
+      <div class="flex flex-wrap gap-2 mt-6">{tags.map(t => <span class="bg-white/10 px-3 py-1.5 rounded-full text-xs font-semibold">{t}</span>)}</div>
+    </div>
+  </section>
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <AdSlot format="leaderboard" slot="9999999999" />
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">{posts.map(p => <BlogCard post={p} />)}</div>
+    {posts.length === 0 && <p class="text-center text-slate-500 py-16">No articles yet. Add one via Decap CMS at <a href="/admin/" class="text-amber-600 font-bold">/admin/</a></p>}
+  </div>
+</BaseLayout>
