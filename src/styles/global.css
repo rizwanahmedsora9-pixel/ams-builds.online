@@ -33,5 +33,7 @@ body { @apply bg-white text-slate-800 antialiased; }
 
 /* Mobile nav checkbox hack (zero JS) */
 #mobile-menu-toggle:checked ~ #mobile-menu { display: block; }
-#mobile-menu-toggle:checked ~ .menu-icon-open { display: none; }
-#mobile-menu-toggle:not(:checked) ~ .menu-icon-close { display: none; }
+/* Icons live inside the header, so toggle them via :has() */
+.menu-icon-close { display: none; }
+header:has(#mobile-menu-toggle:checked) .menu-icon-open { display: none; }
+header:has(#mobile-menu-toggle:checked) .menu-icon-close { display: block; }
