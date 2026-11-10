@@ -1,27 +1,59 @@
 import { defineCollection, z } from 'astro:content';
 
+// Helpers so CMS-authored YAML (unquoted YYYY-MM-DD dates parsed as Date,
+// cleared optional strings/images saved as null/empty) always builds cleanly.
+const optString = () =>
+  z.preprocess((val) => (val === null ? undefined : val), z.string().optional());
+
+const optStringDefault = (fallback = '') =>
+  z.preprocess((val) => (val === null || val === undefined ? fallback : val), z.string());
+
+const reqDateString = () =>
+  z.preprocess(
+    (val) => (val instanceof Date ? val.toISOString().slice(0, 10) : val),
+    z.string(),
+  );
+
+const optDateString = () =>
+  z.preprocess((val) => {
+    if (val === null || val === undefined || val === '') return undefined;
+    return val instanceof Date ? val.toISOString().slice(0, 10) : val;
+  }, z.string().optional());
+
+const optStringList = () =>
+  z.preprocess(
+    (val) => (val === null || val === undefined ? [] : val),
+    z.array(z.string()),
+  );
+
+const optBoolean = (fallback = false) =>
+  z.preprocess((val) => (val === null || val === undefined ? fallback : val), z.boolean());
+
 // Shared SEO fields — editors get full control of slug (filename), SEO title,
 // SEO description, OG image and noindex for every Pages / Projects / Blog entry.
 const seoFields = {
-  seoTitle: z.string().optional(),
-  seoDescription: z.string().optional(),
-  ogImage: z.string().optional(),
-  noindex: z.boolean().optional().default(false),
+  seoTitle: optString(),
+  seoDescription: optString(),
+  ogImage: optString(),
+  noindex: optBoolean(false),
 };
 
 const pages = defineCollection({
   schema: z.object({
     title: z.string(),
-    description: z.string().optional().default(''),
-    heroTitle: z.string().optional(),
-    heroSubtitle: z.string().optional(),
-    featuredImage: z.string().optional(),
+    description: optStringDefault(''),
+    heroTitle: optString(),
+    heroSubtitle: optString(),
+    featuredImage: optString(),
     ...seoFields,
-    navOrder: z.number().optional().default(99),
-    showInNav: z.boolean().optional().default(false),
-    showInFooter: z.boolean().optional().default(false),
-    draft: z.boolean().optional().default(false),
-    updatedDate: z.string().optional(),
+    navOrder: z.preprocess(
+      (val) => (val === null || val === undefined || val === '' ? 99 : Number(val)),
+      z.number(),
+    ),
+    showInNav: optBoolean(false),
+    showInFooter: optBoolean(false),
+    draft: optBoolean(false),
+    updatedDate: optDateString(),
   }),
 });
 
@@ -29,16 +61,16 @@ const projects = defineCollection({
   schema: z.object({
     title: z.string(),
     description: z.string(),
-    client: z.string().optional().default(''),
+    client: optStringDefault(''),
     category: z.enum(['web', 'android', 'software', 'ecommerce']).default('web'),
-    technologies: z.array(z.string()).optional().default([]),
-    coverImage: z.string().optional(),
-    featured: z.boolean().optional().default(false),
-    date: z.string(),
-    results: z.array(z.string()).optional().default([]),
-    liveUrl: z.string().optional(),
+    technologies: optStringList(),
+    coverImage: optString(),
+    featured: optBoolean(false),
+    date: reqDateString(),
+    results: optStringList(),
+    liveUrl: optString(),
     ...seoFields,
-    draft: z.boolean().optional().default(false),
+    draft: optBoolean(false),
   }),
 });
 
@@ -46,14 +78,14 @@ const blog = defineCollection({
   schema: z.object({
     title: z.string(),
     description: z.string(),
-    pubDate: z.string(),
-    updatedDate: z.string().optional(),
-    author: z.string().optional().default('AMS Builds Team'),
-    tags: z.array(z.string()).optional().default([]),
-    heroImage: z.string().optional(),
+    pubDate: reqDateString(),
+    updatedDate: optDateString(),
+    author: optStringDefault('AMS Builds Team'),
+    tags: optStringList(),
+    heroImage: optString(),
     ...seoFields,
-    draft: z.boolean().optional().default(false),
-    featured: z.boolean().optional().default(false),
+    draft: optBoolean(false),
+    featured: optBoolean(false),
   }),
 });
 
@@ -64,39 +96,42 @@ const settings = defineCollection({
   type: 'data',
   schema: z.object({
     siteName: z.string(),
-    tagline: z.string().optional().default(''),
+    tagline: optStringDefault(''),
     shortDescription: z.string(),
-    url: z.string().default('https://ams-builds.online'),
-    logoText: z.string().optional().default('AMS Builds'),
-    logoInitial: z.string().optional().default('A'),
+    url: optStringDefault('https://ams-builds.online'),
+    logoText: optStringDefault('AMS Builds'),
+    logoInitial: optStringDefault('A'),
     email: z.string(),
     phone: z.string(),
-    whatsapp: z.string().optional().default(''),
-    streetAddress: z.string().optional().default(''),
-    addressLocality: z.string().optional().default('Gujrat'),
-    addressRegion: z.string().optional().default('Punjab'),
-    addressCountry: z.string().optional().default('Pakistan'),
-    postalCode: z.string().optional().default(''),
-    openingHours: z.string().optional().default('Mo-Sa 09:00-18:00'),
-    priceRange: z.string().optional().default('PKR'),
-    facebook: z.string().optional().default(''),
-    instagram: z.string().optional().default(''),
-    linkedin: z.string().optional().default(''),
-    youtube: z.string().optional().default(''),
-    github: z.string().optional().default(''),
-    twitter: z.string().optional().default(''),
-    googleSiteVerification: z.string().optional().default(''),
-    googleAnalyticsId: z.string().optional().default(''),
-    adsenseEnabled: z.boolean().optional().default(false),
-    adsenseClient: z.string().optional().default(''),
-    heroBadge: z.string().optional().default(''),
-    heroTitle: z.string().optional().default(''),
-    heroSubtitle: z.string().optional().default(''),
-    heroCtaText: z.string().optional().default('Get a Free Quote'),
-    heroCtaUrl: z.string().optional().default('/contact/'),
-    heroImage: z.string().optional().default('/images/uploads/hero-dashboard.jpg'),
-    defaultOgImage: z.string().optional().default('/images/uploads/og-default.jpg'),
-    stats: z.array(z.object({ value: z.string(), label: z.string() })).optional().default([]),
+    whatsapp: optStringDefault(''),
+    streetAddress: optStringDefault(''),
+    addressLocality: optStringDefault('Gujrat'),
+    addressRegion: optStringDefault('Punjab'),
+    addressCountry: optStringDefault('Pakistan'),
+    postalCode: optStringDefault(''),
+    openingHours: optStringDefault('Mo-Sa 09:00-18:00'),
+    priceRange: optStringDefault('PKR'),
+    facebook: optStringDefault(''),
+    instagram: optStringDefault(''),
+    linkedin: optStringDefault(''),
+    youtube: optStringDefault(''),
+    github: optStringDefault(''),
+    twitter: optStringDefault(''),
+    googleSiteVerification: optStringDefault(''),
+    googleAnalyticsId: optStringDefault(''),
+    adsenseEnabled: optBoolean(false),
+    adsenseClient: optStringDefault(''),
+    heroBadge: optStringDefault(''),
+    heroTitle: optStringDefault(''),
+    heroSubtitle: optStringDefault(''),
+    heroCtaText: optStringDefault('Get a Free Quote'),
+    heroCtaUrl: optStringDefault('/contact/'),
+    heroImage: optStringDefault('/images/uploads/hero-dashboard.jpg'),
+    defaultOgImage: optStringDefault('/images/uploads/og-default.jpg'),
+    stats: z.preprocess(
+      (val) => (val === null || val === undefined ? [] : val),
+      z.array(z.object({ value: z.string(), label: z.string() })),
+    ),
   }),
 });
 
