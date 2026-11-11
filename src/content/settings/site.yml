@@ -1,6 +1,6 @@
-# AMS Builds — Site Settings (managed 100% via Decap CMS at /admin)
-# Change anything here from the CMS: Site Settings → Publish. Cloudflare Pages
-# rebuilds automatically on every commit to main.
+# AMS Builds — Site Settings (defaults; overridden by the admin)
+# Change anything here from /admin → Site settings → Save → Publish.
+# The git file stays as the baseline — the admin store wins once saved.
 siteName: "AMS Builds"
 tagline: "Web & App Development"
 shortDescription: "AMS Builds — custom business websites, Android apps and software for clients. Fast, SEO-ready, conversion-focused and affordable."

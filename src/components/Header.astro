@@ -1,9 +1,9 @@
 ---
-import { getCollection } from 'astro:content';
+import { contentCollection } from '../lib/content-source';
 import { getSite } from '../utils/site';
 
 const site = await getSite();
-const allPages = await getCollection('pages', ({ data }) => !data.draft && data.showInNav);
+const allPages = await contentCollection('pages', ({ data }) => !data.draft && data.showInNav);
 const navPages = allPages.sort((a,b) => (a.data.navOrder ?? 99) - (b.data.navOrder ?? 99));
 const fixedLinks = [
   { href: '/', label: 'Home' },

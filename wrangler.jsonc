@@ -1,21 +1,27 @@
 {
+  // Cloudflare Workers entry: the Astro SSR bundle plus the CmsSite
+  // Durable Object that stores every CMS entry, image and admin session.
   "name": "ams-builds-online",
-  "main": "./worker/index.js",
+  "main": "./worker/main.js",
   "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "html_handling": "auto-trailing-slash",
-    "not_found_handling": "404-page",
-    "run_worker_first": [
-      "/admin",
-      "/auth",
-      "/callback",
-      "/api/auth",
-      "/api/callback"
-    ]
+    "not_found_handling": "404-page"
   },
-  "previews": {},
+  "durable_objects": {
+    "bindings": [{ "name": "CMS", "class_name": "CmsSite" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CmsSite"] }],
+  // Worker Previews (branch builds) get their own auto-provisioned CmsSite
+  // namespace — same class, isolated storage.
+  "previews": {
+    "durable_objects": {
+      "bindings": [{ "name": "CMS", "class_name": "CmsSite" }]
+    }
+  },
   "observability": {
     "enabled": true
   }

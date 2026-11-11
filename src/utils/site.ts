@@ -1,15 +1,15 @@
-import { getEntry } from 'astro:content';
+import { getSettingsEntry } from '../lib/content-source';
 
 /**
- * Loads the singleton Site Settings entry (src/content/settings/site.yml).
- * Fully editable from Decap CMS → "Site Settings". Every layout/component
- * should read brand, contact, socials, hero and Google tags from here
- * instead of hardcoding strings.
+ * Loads the singleton Site Settings entry (src/content/settings/site.yml,
+ * overridden by the admin's Site Settings). Every layout/component should
+ * read brand, contact, socials, hero and Google tags from here instead of
+ * hardcoding strings.
  */
 export async function getSite() {
-  const entry = await getEntry('settings', 'site');
+  const entry = await getSettingsEntry();
   if (!entry) {
-    throw new Error('Missing src/content/settings/site.yml — required for build.');
+    throw new Error('Missing site settings — required for build.');
   }
   return entry.data;
 }

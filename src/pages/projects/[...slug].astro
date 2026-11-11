@@ -1,11 +1,13 @@
 ---
+export const prerender = true;
 import ProjectLayout from '../../layouts/ProjectLayout.astro';
-import { getCollection } from 'astro:content';
+import { contentCollection } from '../../lib/content-source';
+import { renderMarkdown } from '../../lib/render-markdown.mjs';
 export async function getStaticPaths() {
-  const projects = await getCollection('projects', ({data}) => !data.draft);
+  const projects = await contentCollection('projects', ({data}) => !data.draft);
   return projects.map(project => ({ params: { slug: project.slug }, props: { project } }));
 }
 const { project } = Astro.props;
-const Content = await project.render();
+const html = await renderMarkdown(project.body);
 ---
-<ProjectLayout project={project}><Content.Content /></ProjectLayout>
+<ProjectLayout project={project}><Fragment set:html={html} /></ProjectLayout>

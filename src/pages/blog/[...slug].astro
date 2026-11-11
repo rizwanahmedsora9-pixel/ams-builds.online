@@ -1,13 +1,15 @@
 ---
+export const prerender = true;
 import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
-import { getCollection } from 'astro:content';
+import { contentCollection } from '../../lib/content-source';
+import { renderMarkdown } from '../../lib/render-markdown.mjs';
 export async function getStaticPaths() {
-  const posts = await getCollection('blog', ({data}) => !data.draft);
+  const posts = await contentCollection('blog', ({data}) => !data.draft);
   return posts.map(post => ({ params: { slug: post.slug }, props: { post } }));
 }
 const { post } = Astro.props;
-const all = await getCollection('blog', ({data}) => !data.draft);
+const all = await contentCollection('blog', ({data}) => !data.draft);
 const related = all.filter(p => p.slug !== post.slug && p.data.tags?.some(t => post.data.tags?.includes(t))).slice(0,3);
-const Content = await post.render();
+const html = await renderMarkdown(post.body);
 ---
-<BlogPostLayout post={post} related={related.length ? related : all.slice(0,3)}><Content.Content /></BlogPostLayout>
+<BlogPostLayout post={post} related={related.length ? related : all.slice(0,3)}><Fragment set:html={html} /></BlogPostLayout>

@@ -1,8 +1,8 @@
 export const prerender = true;
 import rss from '@astrojs/rss';
-import { getCollection } from 'astro:content';
+import { contentCollection } from '../lib/content-source';
 export async function GET(context) {
-  const posts = await getCollection('blog', ({data}) => !data.draft);
+  const posts = await contentCollection('blog', ({data}) => !data.draft);
   return rss({
     title: 'AMS Builds Blog',
     description: 'Business tips, website & app guides for Pakistani businesses.',

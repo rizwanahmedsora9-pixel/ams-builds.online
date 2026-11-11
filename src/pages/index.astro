@@ -3,12 +3,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import AdSlot from '../components/AdSlot.astro';
 import BlogCard from '../components/BlogCard.astro';
 import ProjectCard from '../components/ProjectCard.astro';
-import { getCollection } from 'astro:content';
+export const prerender = true;
+import { contentCollection } from '../lib/content-source';
 import { getSite } from '../utils/site';
 
 const site = await getSite();
-const featuredProjects = (await getCollection('projects', ({data}) => !data.draft && data.featured)).slice(0,3);
-const latestPosts = (await getCollection('blog', ({data}) => !data.draft)).sort((a,b) => +new Date(b.data.pubDate) - +new Date(a.data.pubDate)).slice(0,3);
+const featuredProjects = (await contentCollection('projects', ({data}) => !data.draft && data.featured)).slice(0,3);
+const latestPosts = (await contentCollection('blog', ({data}) => !data.draft)).sort((a,b) => +new Date(b.data.pubDate) - +new Date(a.data.pubDate)).slice(0,3);
 const services = [
   { icon:'🌐', title:'Business Websites', desc:'Custom, lightning-fast websites for shops, clinics, schools & companies — SEO-ready, mobile-first and built to convert visitors into customers.', href:'/services/' },
   { icon:'📱', title:'Android App Development', desc:'Native & cross-platform Android apps — from idea and UI design to Play Store launch and ongoing maintenance.', href:'/services/' },
@@ -85,7 +86,7 @@ const stats = site.stats?.length ? site.stats : [{ value:'50+', label:'Projects 
     <div>
       <h2 class="text-3xl md:text-4xl font-extrabold text-slate-900 leading-tight tracking-tight">Why businesses choose AMS Builds</h2>
       <ul class="mt-6 space-y-4">
-        {['Lightning-fast Astro websites — 95+ PageSpeed, zero bloat','SEO & AdSense-ready from day one — clean semantic HTML','Direct support in Urdu & English — WhatsApp, phone or email','Affordable PKR pricing with transparent packages','Easy CMS — edit pages, projects & blog yourself via Decap CMS'].map(t => <li class="flex gap-3"><span class="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-sm font-bold shrink-0">✓</span><span class="text-slate-700 leading-6">{t}</span></li>)}
+        {['Lightning-fast Astro websites — 95+ PageSpeed, zero bloat','SEO & AdSense-ready from day one — clean semantic HTML','Direct support in Urdu & English — WhatsApp, phone or email','Affordable PKR pricing with transparent packages','Simple CMS — log in at /admin and edit pages, projects & blog yourself'].map(t => <li class="flex gap-3"><span class="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-sm font-bold shrink-0">✓</span><span class="text-slate-700 leading-6">{t}</span></li>)}
       </ul>
       <a href="/about/" class="inline-block mt-8 bg-slate-900 text-white font-bold px-6 py-3 rounded-xl">About our agency →</a>
     </div>
