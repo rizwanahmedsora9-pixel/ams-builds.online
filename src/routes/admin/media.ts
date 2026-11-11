@@ -5,11 +5,11 @@ import { bumpCache } from '../../lib/config';
 import { mediaUrl } from '../../lib/content';
 import { slugify } from '../../lib/security';
 import { randomToken } from '../../lib/auth';
+import { MAX_FILE_BYTES as MAX_BYTES, deleteFile, putFile } from '../../lib/files';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 
 const media = new Hono<AppEnv>();
 
-const MAX_BYTES = 20 * 1024 * 1024;
 // The stored Content-Type comes from this table, never from the browser.
 const TYPES: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif',
@@ -82,7 +82,7 @@ media.post('/media/upload', async (c) => {
     const stem = slugify(file.name.slice(0, dot)) || 'file';
     const filename = `${stem}.${ext}`;
     const key = `${folder}/${randomToken(6)}-${filename}`;
-    await c.env.MEDIA.put(key, file.stream(), { httpMetadata: { contentType: mime } });
+    await putFile(c.env, key, await file.arrayBuffer(), mime);
     await c.env.DB.prepare('INSERT INTO media (site_id,r2_key,filename,mime,size,uploaded_by,created_at) VALUES (1,?,?,?,?,?,?)')
       .bind(key, filename, mime.split(';')[0], file.size, c.var.user.id, now.toISOString()).run();
     saved++;
@@ -96,7 +96,7 @@ media.post('/media/:id{[0-9]+}/delete', async (c) => {
   const row = await c.env.DB.prepare('SELECT r2_key, uploaded_by FROM media WHERE id=? AND site_id=1').bind(id).first<{ r2_key: string; uploaded_by: number | null }>();
   if (!row) return errorPage(c, 404, 'File not found.');
   if (!can(c.var.user, 'editor') && row.uploaded_by !== c.var.user.id) return errorPage(c, 403, 'You can only delete your own uploads.');
-  await c.env.MEDIA.delete(row.r2_key);
+  await deleteFile(c.env, row.r2_key);
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE content SET featured_media_id=NULL WHERE featured_media_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM media WHERE id=?').bind(id),

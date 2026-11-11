@@ -1,18 +1,17 @@
 /**
- * Node.js implementations of the three Cloudflare bindings the CMS uses, so
+ * Node.js implementations of the storage the CMS uses, so
  * the exact same app code runs on a VPS, in Docker or on a laptop:
  *   D1  -> SQLite file (node:sqlite, built into Node 22.13+)
  *   KV  -> table in the same SQLite file (with expiry)
- *   R2  -> files on disk + a small metadata table
+ *   uploads -> files on disk + a small metadata table (Cloudflare keeps them in KV)
  * Only the parts of each API that the CMS calls are implemented.
  */
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream, mkdirSync } from 'node:fs';
-import { rename, rm, stat } from 'node:fs/promises';
+import { createReadStream, mkdirSync } from 'node:fs';
+import { rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import type { Env } from '../types';
 
 type Meta = { changes: number; last_row_id: number; duration: number };
@@ -100,13 +99,13 @@ class KeyValue {
   }
 }
 
-/* ----------------------------------------------------------------------- R2 */
-class Bucket {
+/* -------------------------------------------------------------------- files */
+class DiskFiles {
   private root: string;
   constructor(private db: DatabaseSync, dir: string) {
     this.root = resolve(dir);
     mkdirSync(this.root, { recursive: true });
-    db.exec('CREATE TABLE IF NOT EXISTS _r2 (key TEXT PRIMARY KEY, content_type TEXT, size INTEGER NOT NULL, etag TEXT NOT NULL, uploaded TEXT NOT NULL)');
+    db.exec('CREATE TABLE IF NOT EXISTS _files (key TEXT PRIMARY KEY, content_type TEXT, size INTEGER NOT NULL, etag TEXT NOT NULL, uploaded TEXT NOT NULL)');
   }
 
   /** Maps an object key to a path that is guaranteed to stay inside the media folder. */
@@ -118,53 +117,40 @@ class Bucket {
 
   async get(key: string) {
     const file = this.path(key);
-    const row = this.db.prepare('SELECT content_type, size, etag, uploaded FROM _r2 WHERE key=?').get(key) as
-      { content_type: string | null; size: number; etag: string; uploaded: string } | undefined;
+    const row = this.db.prepare('SELECT content_type, etag FROM _files WHERE key=?').get(key) as { content_type: string | null; etag: string } | undefined;
     if (!file || !row || !(await stat(file).catch(() => null))) return null;
     return {
-      key, size: row.size, etag: row.etag, httpEtag: `"${row.etag}"`, uploaded: new Date(row.uploaded),
-      httpMetadata: { contentType: row.content_type || undefined },
+      contentType: row.content_type || 'application/octet-stream',
+      etag: row.etag,
       body: Readable.toWeb(createReadStream(file)) as unknown as ReadableStream,
     };
   }
 
-  async put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | Blob, opts?: { httpMetadata?: { contentType?: string } }) {
+  async put(key: string, data: ArrayBuffer, contentType: string): Promise<void> {
     const file = this.path(key);
-    if (!file) throw new Error('Invalid object key');
+    if (!file) throw new Error('Invalid file key');
     mkdirSync(dirname(file), { recursive: true });
-    const source =
-      typeof value === 'string' ? Readable.from([Buffer.from(value)])
-      : value instanceof Blob ? Readable.fromWeb(value.stream() as never)
-      : value instanceof ArrayBuffer ? Readable.from([Buffer.from(value)])
-      : ArrayBuffer.isView(value) ? Readable.from([Buffer.from(value.buffer, value.byteOffset, value.byteLength)])
-      : Readable.fromWeb(value as never);
-    const hash = createHash('md5');
-    let size = 0;
-    source.on('data', (chunk: Buffer) => { hash.update(chunk); size += chunk.length; });
+    const buf = Buffer.from(data);
     const tmp = `${file}.${process.pid}.tmp`;
     try {
-      await pipeline(source, createWriteStream(tmp));
+      await writeFile(tmp, buf);
       await rename(tmp, file); // readers never see a half-written file
     } catch (err) {
       await rm(tmp, { force: true });
       throw err;
     }
-    const etag = hash.digest('hex');
-    this.db.prepare('INSERT INTO _r2 (key,content_type,size,etag,uploaded) VALUES (?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET content_type=excluded.content_type, size=excluded.size, etag=excluded.etag, uploaded=excluded.uploaded')
-      .run(key, opts?.httpMetadata?.contentType ?? null, size, etag, new Date().toISOString());
-    return { key, size, etag, httpEtag: `"${etag}"` };
+    this.db.prepare('INSERT INTO _files (key,content_type,size,etag,uploaded) VALUES (?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET content_type=excluded.content_type, size=excluded.size, etag=excluded.etag, uploaded=excluded.uploaded')
+      .run(key, contentType, buf.length, createHash('sha1').update(buf).digest('hex'), new Date().toISOString());
   }
 
-  async delete(keys: string | string[]): Promise<void> {
-    for (const key of Array.isArray(keys) ? keys : [keys]) {
-      const file = this.path(key);
-      if (file) await rm(file, { force: true });
-      this.db.prepare('DELETE FROM _r2 WHERE key=?').run(key);
-    }
+  async delete(key: string): Promise<void> {
+    const file = this.path(key);
+    if (file) await rm(file, { force: true });
+    this.db.prepare('DELETE FROM _files WHERE key=?').run(key);
   }
 }
 
-/** Opens (creating if needed) the data directory and returns Cloudflare-shaped bindings. */
+/** Opens (creating if needed) the data directory and returns the bindings the app expects. */
 export function openStorage(dataDir: string): { env: Env; purgeExpired: () => void; close: () => void } {
   const dir = resolve(dataDir);
   mkdirSync(dir, { recursive: true });
@@ -174,7 +160,7 @@ export function openStorage(dataDir: string): { env: Env; purgeExpired: () => vo
   const env = {
     DB: new Database(db),
     KV: kv,
-    MEDIA: new Bucket(db, join(dir, 'media')),
+    FILES: new DiskFiles(db, join(dir, 'media')),
   } as unknown as Env;
   return { env, purgeExpired: () => kv.purgeExpired(), close: () => db.close() };
 }

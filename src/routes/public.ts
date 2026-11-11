@@ -4,6 +4,7 @@ import type { AppEnv, Ctx } from '../types';
 import { SESSION_COOKIE, sessionUser } from '../lib/auth';
 import { cfgFor, getConfig, getSettings, type Settings } from '../lib/config';
 import { findContent, listPosts, permalinkStyle, postUrl, toViews, type ContentView } from '../lib/content';
+import { getFile } from '../lib/files';
 import { PAGE_CACHE_TTL, cacheKey, renderTheme, type PageMeta } from '../lib/render';
 
 const site = new Hono<AppEnv>();
@@ -13,7 +14,7 @@ site.use('*', async (c, next) => {
   await next();
 });
 
-/* -------------------------------------------------------------- media (R2) */
+/* -------------------------------------------------------------- uploaded media */
 site.get('/media/*', async (c) => {
   let key: string;
   try {
@@ -22,18 +23,19 @@ site.get('/media/*', async (c) => {
     return c.notFound();
   }
   if (!key || key.startsWith('backups/')) return c.notFound();
-  const obj = await c.env.MEDIA.get(key);
-  if (!obj) return c.notFound();
+  const file = await getFile(c.env, key);
+  if (!file) return c.notFound();
+  const etag = `"${file.etag}"`;
   const headers = new Headers({
-    'Content-Type': obj.httpMetadata?.contentType || 'application/octet-stream',
+    'Content-Type': file.contentType,
     'Cache-Control': 'public, max-age=31536000, immutable',
     'X-Content-Type-Options': 'nosniff',
     // Uploaded files may never run script in the site's origin (matters for SVG/HTML-ish files).
     'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; media-src 'self'; sandbox",
-    ETag: obj.httpEtag,
+    ETag: etag,
   });
-  if (c.req.header('if-none-match') === obj.httpEtag) return new Response(null, { status: 304, headers });
-  return new Response(obj.body, { headers });
+  if (c.req.header('if-none-match') === etag) return new Response(null, { status: 304, headers });
+  return new Response(file.body, { headers });
 });
 
 /* ------------------------------------------------------------------ pages */
