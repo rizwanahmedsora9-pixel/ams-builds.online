@@ -103,7 +103,7 @@ and start the CMS with `TRUST_PROXY=1 npm start`. For nginx, forward `Host`, `X-
 
 **Platforms like Render, Railway or Fly:** build command `npm install && npm run build`, start command `node dist/server.mjs`, `TRUST_PROXY=1`, and a persistent disk mounted at `DATA_DIR`. Without a persistent disk the site resets on every deploy.
 
-**Termux, directly on the phone (untested):** `pkg install nodejs git`, then the commands above, using `npm install --ignore-scripts` so the Cloudflare tooling's Android-incompatible install step is skipped. Needs Termux's Node to be 22.13 or newer. If it fails, use the Ubuntu container from Option A.
+**Termux, directly on the phone:** `pkg install nodejs git`, then the same four commands. The Cloudflare tooling is an optional dependency, so `npm install` is meant to skip it on Android instead of failing. This path has not been run on a real phone yet; if `npm install` fails, use the Ubuntu container from Option A.
 
 Static-only hosts (GitHub Pages, shared PHP hosting) cannot run it. Vercel and Netlify functions have no persistent disk, so they are not supported.
 
@@ -116,6 +116,18 @@ npm run typecheck
 ```
 
 Delete `.wrangler/` or `data/` to start again from the installer.
+
+## Tests
+
+```bash
+npm test                  # end-to-end on the Node.js runtime
+npm run test:cloudflare   # the same steps on the Cloudflare runtime (wrangler dev)
+npm run test:all
+```
+
+Each run starts a real server on an empty temporary data folder and drives it over HTTP: health check, installer (bad input, success, lock), public site and cache, login and CSRF, pages, media, posts, drafts and scheduling, settings, password change, restart, deletion, logout and rate limiting. It prints one line per step and removes the folder afterwards.
+
+`GET /api/health` reports the runtime, whether the site is installed, and whether the database, key-value store and media storage answer. Use it for uptime monitoring.
 
 ## How it works
 
@@ -138,6 +150,7 @@ On Cloudflare, KV allows 1,000 writes a day on the free plan. Each first view of
 ```
 wrangler.toml
 Dockerfile, docker-compose.yml
+tests/e2e.mjs              end-to-end tests for both runtimes
 src/
   index.ts                 install gate, admin/public dispatch, cron handler
   types.ts

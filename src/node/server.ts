@@ -62,6 +62,14 @@ const tick = () => {
   worker.scheduled({ cron: '* * * * *', scheduledTime: Date.now() } as ScheduledController, env, ctx).catch((err) => console.error('cron failed:', err));
   try { purgeExpired(); } catch (err) { console.error('cache cleanup failed:', err); }
 };
+// Say what state the site is in, so the first run is obvious.
+(env.KV.get('config', 'json') as Promise<{ adminSlug?: string } | null>).then(async (cfg) => {
+  const installed = !!(await env.KV.get('installed'));
+  console.log(installed && cfg?.adminSlug
+    ? `Site is installed. Admin panel: /${cfg.adminSlug}`
+    : 'Site is not installed yet. Open /install in your browser to set it up.');
+}).catch((err) => console.error('startup check failed:', err));
+
 const timer = setInterval(tick, 60_000);
 tick();
 

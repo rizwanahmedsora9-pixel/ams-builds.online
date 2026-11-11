@@ -15,8 +15,8 @@ const typeOf = (kind: Kind) => (kind === 'pages' ? 'page' : 'post');
 const kindOf = (c: Ctx): Kind => c.req.param('kind') as Kind;
 
 // Pages need editor or above. Authors work on posts (their own only).
-content.use('/:kind{pages|posts}/*', guard);
-content.use('/:kind{pages|posts}', guard);
+content.use('/:kind{(?:pages|posts)}/*', guard);
+content.use('/:kind{(?:pages|posts)}', guard);
 async function guard(c: Ctx, next: () => Promise<void>) {
   if (kindOf(c) === 'pages' && !can(c.var.user, 'editor')) return errorPage(c, 403, 'Your role cannot manage pages.');
   await next();
@@ -24,7 +24,7 @@ async function guard(c: Ctx, next: () => Promise<void>) {
 const mayEdit = (c: Ctx, row: { author_id: number | null }) => can(c.var.user, 'editor') || row.author_id === c.var.user.id;
 
 /* -------------------------------------------------------------------- list */
-content.get('/:kind{pages|posts}', async (c) => {
+content.get('/:kind{(?:pages|posts)}', async (c) => {
   const kind = kindOf(c);
   const type = typeOf(kind);
   const per = 30;
@@ -173,9 +173,9 @@ ${row ? html`<form method="post" action="${base}/${kind}/${row.id}/delete" id="d
 ${raw(EDITOR_JS)}`, '/' + kind);
 }
 
-content.get('/:kind{pages|posts}/new', (c) => editor(c, kindOf(c), null));
+content.get('/:kind{(?:pages|posts)}/new', (c) => editor(c, kindOf(c), null));
 
-content.get('/:kind{pages|posts}/:id{[0-9]+}', async (c) => {
+content.get('/:kind{(?:pages|posts)}/:id{[0-9]+}', async (c) => {
   const kind = kindOf(c);
   const row = await c.env.DB.prepare('SELECT * FROM content WHERE id=? AND type=? AND site_id=1').bind(Number(c.req.param('id')), typeOf(kind)).first<ContentRow>();
   if (!row) return errorPage(c, 404, 'Not found.');
@@ -184,7 +184,7 @@ content.get('/:kind{pages|posts}/:id{[0-9]+}', async (c) => {
 });
 
 /* -------------------------------------------------------------------- save */
-content.post('/:kind{pages|posts}/save', async (c) => {
+content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   const kind = kindOf(c);
   const type = typeOf(kind);
   const f = c.var.form;
@@ -263,7 +263,7 @@ content.post('/:kind{pages|posts}/save', async (c) => {
 });
 
 /* ------------------------------------------------------------------ delete */
-content.post('/:kind{pages|posts}/:id{[0-9]+}/delete', async (c) => {
+content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/delete', async (c) => {
   const kind = kindOf(c);
   const id = Number(c.req.param('id'));
   const row = await c.env.DB.prepare('SELECT id, author_id FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<{ id: number; author_id: number | null }>();

@@ -9,10 +9,20 @@ const api = new Hono<{ Bindings: Env }>();
 api.use('*', async (c, next) => {
   await next();
   c.header('Access-Control-Allow-Origin', '*');
-  c.header('Cache-Control', 'public, max-age=60');
+  if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'public, max-age=60');
 });
 
-api.get('/health', (c) => c.json({ ok: true }));
+/** Read-only self-check of the three storage backends. Works before and after install. */
+api.get('/health', async (c) => {
+  const checks = { database: false, keyvalue: false, media: false };
+  let installed = false;
+  try { await c.env.DB.prepare('SELECT 1 AS x').first(); checks.database = true; } catch { /* reported below */ }
+  try { installed = !!(await c.env.KV.get('installed')); checks.keyvalue = true; } catch { /* reported below */ }
+  try { await c.env.MEDIA.get('health-check/none'); checks.media = true; } catch { /* reported below */ }
+  const ok = checks.database && checks.keyvalue && checks.media;
+  const runtime = typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers' ? 'cloudflare-workers' : 'node';
+  return c.json({ ok, runtime, installed, checks }, ok ? 200 : 503, { 'Cache-Control': 'no-store' });
+});
 
 api.get('/posts', async (c) => {
   const page = Math.max(1, Number(c.req.query('page')) || 1);
@@ -22,7 +32,7 @@ api.get('/posts', async (c) => {
   return c.json({ page, per_page: perPage, total, posts: await toViews(c.env, rows, settings) });
 });
 
-api.get('/:kind{posts|pages}/:slug', async (c) => {
+api.get('/:kind{(?:posts|pages)}/:slug', async (c) => {
   const type = c.req.param('kind') === 'posts' ? 'post' : 'page';
   const row = await findContent(c.env, { type, slug: c.req.param('slug') });
   if (!row) return c.json({ error: 'not_found' }, 404);

@@ -16,6 +16,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.use('*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
   const onInstaller = path === '/install' || path.startsWith('/install/');
+  if (path === '/api/health') return next(); // must answer before install too
   const installed = await isInstalled(c.env);
   if (!installed && !onInstaller) {
     return new Response(null, { status: 302, headers: { Location: '/install', 'Cache-Control': 'no-store' } });
