@@ -93,6 +93,11 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
 .handle{cursor:grab;touch-action:none;user-select:none;padding:.6rem .3rem;color:var(--muted);letter-spacing:-.25em}
 .mi-btns{display:flex;gap:.2rem}
 .mi-btns button{width:2.1rem;height:2.1rem;border:1px solid var(--line);border-radius:.4rem;background:var(--card);color:var(--fg);font:inherit;cursor:pointer}
+.store{display:grid;gap:.8rem;grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))}
+.store-item{margin:0;display:flex;flex-direction:column}
+.store-item h3{margin:.7rem 0 .2rem;font-size:1.05rem}
+.store-item p{margin:0 0 .8rem;font-size:.9rem;flex:1}
+.swatch{height:5.5rem;border-radius:.5rem;border:1px solid var(--line)}
 .pre{background:var(--bg);border:1px solid var(--line);border-radius:.5rem;padding:.7rem;overflow-x:auto;font-size:.82rem}
 form.inline{display:inline}
 `;

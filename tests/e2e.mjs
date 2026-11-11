@@ -47,7 +47,7 @@ async function startServer() {
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`server exited early:\n${output}`);
     try {
-      const res = await fetch(`${base}/api/health`);
+      const res = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(3000) });
       if (res.ok) return res.json();
     } catch { /* not listening yet */ }
     await new Promise((r) => setTimeout(r, 200));
@@ -82,7 +82,7 @@ after(async () => {
 async function request(path, { method = 'GET', body, cookies = true, headers = {} } = {}) {
   const h = { ...headers };
   if (cookies && jar.size) h.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
-  const res = await fetch(base + path, { method, body, headers: h, redirect: 'manual' });
+  const res = await fetch(base + path, { method, body, headers: h, redirect: 'manual', signal: AbortSignal.timeout(20000) });
   if (cookies) {
     for (const line of res.headers.getSetCookie()) {
       const [pair] = line.split(';');
@@ -454,14 +454,49 @@ test('12b. themes: upload JSON and zip, activate, replace, download, delete', as
   assert.equal(JSON.parse(dl.text).version, '1.0');
 
   assert.match((await adminPost(`/themes/${zipId}/delete`, {})).location, /Activate another theme/);
-  const defaultId = await themeId('Default');
-  await adminPost(`/themes/${defaultId}/activate`, {});
+  const baseId = await themeId('AMS Base');
+  await adminPost(`/themes/${baseId}/activate`, {});
   assert.match((await anon('/')).text, /class="site-header"/);
   assert.match((await adminPost(`/themes/${zipId}/delete`, {})).location, /Theme deleted/);
   assert.match((await adminPost(`/themes/${jsonId}/delete`, {})).location, /Theme deleted/);
-  assert.match((await adminPost('/themes/restore-default', {})).location, /Default theme restored/);
-  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only the Default theme is left');
+  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only AMS Base is left');
   log('5 bad uploads rejected with reasons; JSON + zip themes installed, activated, replaced live, downloaded, deleted');
+});
+
+test('12c. theme store: AMS Base, AMS Pro and AMS Premium install and switch with one click', async () => {
+  const store = await get(`${admin}/themes`);
+  for (const name of ['AMS Base', 'AMS Pro', 'AMS Premium']) assert.ok(store.text.includes(`<h3>${name} `), name);
+  assert.equal((store.text.match(/store\/[a-z-]+\/install/g) || []).length, 4, 'Pro and Premium each offer Install and Install-and-activate');
+
+  assert.match((await adminPost('/themes/store/ams-pro/install', {})).location, /AMS Pro v1\.0\.0 installed/);
+  assert.match((await anon('/')).text, /class="site-header"/, 'installing alone does not switch theme');
+  assert.match((await adminPost('/themes/store/ams-pro/install', { activate: 1 })).location, /AMS Pro is now your active theme/);
+  const paths = ['/', '/blog', `/${new Date().getUTCFullYear()}/${String(new Date().getUTCMonth() + 1).padStart(2, '0')}/launch-day-more`, '/about-us', '/nowhere'];
+  const check = async (marker) => {
+    for (const path of paths) {
+      const res = await anon(path);
+      assert.equal(res.status, path === '/nowhere' ? 404 : 200, path);
+      assert.match(res.text, marker, path);
+      assert.match(res.text, /<nav class="tabs"[^]*<a href="\/"[^>]*>Home<\/a>/, `${path} has the tab navigation`);
+      assert.match(res.text, /<footer class="ftr">[^]*All rights reserved|<footer class="ftr">[^]*Back to top/, `${path} has the footer`);
+      assert.doesNotMatch(res.text, /\{\{/, `${path} has no unrendered template tags`);
+      assert.doesNotMatch(res.text, /<script|https?:\/\/(?!127\.0\.0\.1|example\.)/, `${path} loads nothing external`);
+    }
+  };
+  await check(/class="brand-mark" aria-hidden="true"><\/span>/);
+  assert.match((await anon('/')).text, /<section class="hero">[^]*Renamed Site/);
+
+  assert.match((await adminPost('/themes/store/ams-premium/install', { activate: 1 })).location, /AMS Premium is now your active theme/);
+  await check(/class="topbar"/);
+  assert.match((await anon('/')).text, /class="eyebrow">Now with a tagline/);
+  assert.match((await anon('/')).text, /<a href="\/" aria-current="page">Home<\/a>/, 'current tab is marked');
+
+  const after = await get(`${admin}/themes`);
+  assert.equal((after.text.match(/store\/[a-z-]+\/install/g) || []).length, 2, 'installed themes only offer Activate');
+  assert.match((await adminPost('/themes/store/nope/install', {})).text, /not in the store/);
+  assert.match((await adminPost('/themes/store/default/install', { activate: 1 })).location, /AMS Base is now your active theme/);
+  assert.match((await anon('/')).text, /class="site-header"/);
+  log('store lists 3 themes; Pro and Premium render home, blog, post, page and 404 with tabs + footer; switched back to Base');
 });
 
 test('13. deleting content and media removes them from the site', async () => {

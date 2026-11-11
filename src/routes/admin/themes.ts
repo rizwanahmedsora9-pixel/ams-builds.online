@@ -2,9 +2,10 @@ import { Hono } from 'hono';
 import type { AppEnv, Ctx } from '../../types';
 import { can } from '../../lib/auth';
 import { bumpCache } from '../../lib/config';
-import { MAX_THEME_UPLOAD, ThemeError, readThemeUpload, restoreDefaultTheme, saveTheme } from '../../lib/themes';
+import { MAX_THEME_UPLOAD, ThemeError, readThemeUpload, saveTheme } from '../../lib/themes';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
-import { TEMPLATE_NAMES, defaultTheme } from '../../themes/default';
+import { TEMPLATE_NAMES } from '../../themes/default';
+import { storeThemes } from '../../themes';
 
 /** Themes contain raw HTML and scripts, so everything here is admin-only. */
 const themes = new Hono<AppEnv>();
@@ -23,6 +24,25 @@ themes.get('/themes', async (c) => {
   const base = c.var.base;
   return layout(c, 'Themes', html`
 <h1>Themes</h1>
+<h2>Theme store</h2>
+<div class="store">
+  ${storeThemes.map((st) => {
+    const have = results.find((t) => t.slug === st.slug);
+    const update = have && have.version !== st.version;
+    return html`<div class="card store-item">
+      <div class="swatch" style="background:linear-gradient(135deg,${st.preview[1]} 0 50%,${st.preview[2]} 50% 100%);border-top:1.6rem solid ${st.preview[0]}" aria-hidden="true"></div>
+      <h3>${st.name} <small class="muted">v${st.version}</small></h3>
+      <p class="muted">${st.description}</p>
+      <div class="row">
+        ${have?.active && !update ? html`<span class="badge published">Active</span>` : ''}
+        ${have && !have.active && !update ? html`<span class="badge draft">Installed</span>` : ''}
+        ${!have || update ? html`<form method="post" action="${base}/themes/store/${st.slug}/install" class="inline">${csrfField(c)}<button class="btn ghost small" type="submit">${update ? `Update from v${have!.version}` : 'Install'}</button></form>` : ''}
+        ${have?.active ? '' : html`<form method="post" action="${base}/themes/store/${st.slug}/install" class="inline">${csrfField(c)}<input type="hidden" name="activate" value="1"><button class="btn small" type="submit">${have ? 'Activate' : 'Install and activate'}</button></form>`}
+      </div>
+    </div>`;
+  })}
+</div>
+<h2 style="margin-top:1.4rem">Installed themes</h2>
 <div class="card">
   <ul class="list">
     ${results.map((t) => {
@@ -58,8 +78,7 @@ themes.get('/themes', async (c) => {
   },
   "css": "body { ... }"
 }</pre>
-  <p class="hint">Only <b>base</b> is required; the others fall back to the Default theme. Or upload a .zip with <code>theme.json</code> next to <code>${TEMPLATE_NAMES.map((n) => n + '.html').join(', ')}</code> and <code>style.css</code>. Template tags are listed in the README.</p>
-  <form method="post" action="${base}/themes/restore-default">${csrfField(c)}<button class="btn ghost small" type="submit">Restore the built-in Default theme (v${defaultTheme.version})</button></form>
+  <p class="hint">Only <b>base</b> is required; the others fall back to the AMS Base theme. Or upload a .zip with <code>theme.json</code> next to <code>${TEMPLATE_NAMES.map((n) => n + '.html').join(', ')}</code> and <code>style.css</code>. Template tags are listed in the README.</p>
 </div>
 ${raw(`<script>document.querySelectorAll('[data-confirm]').forEach(function(f){f.addEventListener('submit',function(e){if(!confirm(f.getAttribute('data-confirm')))e.preventDefault()})});</script>`)}`, '/themes');
 });
@@ -79,20 +98,31 @@ themes.post('/themes/upload', async (c) => {
   }
 });
 
-themes.post('/themes/restore-default', async (c) => {
-  await restoreDefaultTheme(c.env);
+async function activate(c: Ctx, where: string, value: string | number): Promise<void> {
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE themes SET active=0 WHERE NOT ${where}=?`).bind(value),
+    c.env.DB.prepare(`UPDATE themes SET active=1 WHERE ${where}=?`).bind(value),
+  ]);
   await bumpCache(c.env, c.var.cfg);
-  return go(c, '/themes', { ok: 'Default theme restored.' });
+}
+
+// Theme store: install (or update) a built-in theme, optionally switching to it.
+themes.post('/themes/store/:slug/install', async (c) => {
+  const theme = storeThemes.find((t) => t.slug === c.req.param('slug'));
+  if (!theme) return errorPage(c, 404, 'That theme is not in the store.');
+  await saveTheme(c.env, theme);
+  if (c.var.form.get('activate') === '1') {
+    await activate(c, 'slug', theme.slug);
+    return go(c, '/themes', { ok: `${theme.name} is now your active theme.` });
+  }
+  await bumpCache(c.env, c.var.cfg); // it may be the active theme being updated
+  return go(c, '/themes', { ok: `${theme.name} v${theme.version} installed.` });
 });
 
 themes.post('/themes/:id{[0-9]+}/activate', async (c) => {
   const id = Number(c.req.param('id'));
   if (!(await c.env.DB.prepare('SELECT 1 AS x FROM themes WHERE id=?').bind(id).first())) return errorPage(c, 404, 'Theme not found.');
-  await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE themes SET active=0 WHERE id<>?').bind(id),
-    c.env.DB.prepare('UPDATE themes SET active=1 WHERE id=?').bind(id),
-  ]);
-  await bumpCache(c.env, c.var.cfg);
+  await activate(c, 'id', id);
   return go(c, '/themes', { ok: 'Theme activated.' });
 });
 

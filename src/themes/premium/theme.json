@@ -1,0 +1,17 @@
+{
+  "name": "AMS Premium",
+  "slug": "ams-premium",
+  "version": "1.0.0",
+  "author": "AMS",
+  "description": "Upscale look: dark header with top bar and underlined tabs, serif headlines, large hero and a rich footer.",
+  "preview": [
+    "#0b1220",
+    "#f5b942",
+    "#faf8f3"
+  ],
+  "templates": {
+    "base": "base.html",
+    "home": "home.html"
+  },
+  "css": "style.css"
+}

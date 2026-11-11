@@ -1,7 +1,7 @@
 import type { Env } from '../types';
 import { slugify } from './security';
 import { isZip, unzip } from './zip';
-import { TEMPLATE_NAMES, defaultTheme, type ThemeBundle } from '../themes/default';
+import { TEMPLATE_NAMES, type ThemeBundle } from '../themes/default';
 
 export const MAX_THEME_UPLOAD = 2 * 1024 * 1024;
 const MAX_BUNDLE = 1024 * 1024; // stored size (one D1 row)
@@ -101,5 +101,3 @@ export async function saveTheme(env: Env, t: ThemeBundle): Promise<void> {
      ON CONFLICT(slug) DO UPDATE SET name=excluded.name, version=excluded.version, templates=excluded.templates, css=excluded.css`,
   ).bind(t.slug, t.name, t.version, JSON.stringify(t.templates), t.css, new Date().toISOString()).run();
 }
-
-export const restoreDefaultTheme = (env: Env): Promise<void> => saveTheme(env, defaultTheme);

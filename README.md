@@ -137,7 +137,17 @@ Each run starts a real server on an empty temporary data folder and drives it ov
 
 ## Themes
 
-**Themes** in the admin panel lists installed themes and lets an admin upload, activate, download and delete them. Download the Default theme to get a working file to edit.
+**Themes** in the admin panel has a built-in theme store and lets an admin upload, activate, download and delete themes.
+
+| Store theme | Look |
+| --- | --- |
+| AMS Base | The standard theme: light and minimal. Installed by default. |
+| AMS Pro | Sticky header with pill-style tab navigation, colour hero, post grid, three-column dark footer. |
+| AMS Premium | Dark header with top bar and underlined tabs, serif headlines, large hero, rich footer. |
+
+All three use system fonts, load nothing from other servers, need no JavaScript and follow the visitor's light or dark setting. Store themes live in `src/themes/`; add a folder and list it in `src/themes/index.ts` to ship another.
+
+Download any installed theme to get a working file to edit.
 
 A theme is one JSON file:
 
@@ -150,7 +160,7 @@ A theme is one JSON file:
 }
 ```
 
-Only `base` is required and it must contain `{{{content}}}`; missing templates fall back to the Default theme. A `.zip` also works: put `theme.json` next to `base.html`, `home.html`, `page.html`, `post.html`, `archive.html`, `404.html` and `style.css` (the layout of `src/themes/default/`).
+Only `base` is required and it must contain `{{{content}}}`; missing templates fall back to AMS Base. A `.zip` also works: put `theme.json` next to `base.html`, `home.html`, `page.html`, `post.html`, `archive.html`, `404.html` and `style.css` (the layout of `src/themes/default/`).
 
 Template tags: `{{value}}` (escaped), `{{{value}}}` (raw HTML), `{{#if x}}…{{else}}…{{/if}}`, `{{#unless x}}…{{/unless}}`, `{{#each list}}…{{/each}}`.
 
@@ -220,5 +230,9 @@ src/
     config.ts              KV config, settings
     time.ts                timezone helpers
     ui.ts                  admin HTML helpers and CSS
-  themes/default/          theme.json, templates, style.css
+  themes/
+    index.ts               theme store list
+    default/               AMS Base
+    pro/                   AMS Pro
+    premium/               AMS Premium
 ```
