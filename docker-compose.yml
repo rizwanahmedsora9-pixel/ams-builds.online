@@ -1,0 +1,14 @@
+services:
+  cms:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      # Set to 1 only when a reverse proxy (nginx, Caddy, Traefik) sits in front.
+      TRUST_PROXY: "0"
+    volumes:
+      - cms-data:/data
+
+volumes:
+  cms-data:

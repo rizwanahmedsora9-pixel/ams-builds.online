@@ -1,6 +1,6 @@
 # Edge CMS
 
-A WordPress-style CMS that runs entirely on Cloudflare: one Worker (TypeScript + Hono) serves the public site and the admin panel, with D1 for data, R2 for media and KV for the install lock, config and page cache. The only runtime dependency is Hono.
+A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) serving the public site and the admin panel, with D1 for data, R2 for media and KV for the install lock, config and page cache. The same code also runs on plain Node.js with a SQLite file and a media folder, so it works on any VPS, in Docker or on your own computer.
 
 ## Status
 
@@ -12,68 +12,110 @@ A WordPress-style CMS that runs entirely on Cloudflare: one Worker (TypeScript +
 
 The full database schema for all three phases is already created at install.
 
-## Deploy from a PC
+## Where it runs
 
-Needs Node.js 20+ and a Cloudflare account (the free plan works; R2 has to be enabled once in the dashboard).
+The same code runs in two ways. Pick whichever fits; the installer, admin panel and themes are identical.
+
+| | Cloudflare Workers | Node.js (VPS, Docker, PaaS, your PC) |
+| --- | --- | --- |
+| Database | D1 | SQLite file in `data/cms.sqlite` |
+| Media | R2 | files in `data/media/` |
+| Config and cache | KV | table in the same SQLite file |
+| Scheduled publishing | Cron Trigger (every 5 min) | built-in timer (every minute) |
+| Start | `npx wrangler deploy` | `npm start` |
+
+## Option A: Cloudflare
+
+Needs a Cloudflare account. The free plan works; enable R2 once in the dashboard (it asks for a card but has a free tier).
+
+**No terminal (works from a phone):** make the GitHub repository public, then open
+
+```
+https://deploy.workers.cloudflare.com/?url=https://github.com/rizwanahmedsora9-pixel/ams-builds.online
+```
+
+or go to **Workers & Pages → Create → Import a repository**. Cloudflare creates the database, KV namespace and bucket, deploys, and redeploys on every push.
+
+**From a PC** (Node.js 22+):
 
 ```bash
 git clone https://github.com/rizwanahmedsora9-pixel/ams-builds.online.git
 cd ams-builds.online
 npm install
 npx wrangler login
-
-npx wrangler d1 create edge_cms            # prints database_id
-npx wrangler kv namespace create KV        # prints id
-npx wrangler r2 bucket create edge-cms-media
-```
-
-Paste the two IDs into `wrangler.toml` (`REPLACE_WITH_D1_DATABASE_ID`, `REPLACE_WITH_KV_NAMESPACE_ID`), then:
-
-```bash
 npx wrangler deploy
 ```
 
-Open the `*.workers.dev` URL wrangler prints. Every URL redirects to `/install` until you finish the wizard. Tables are created by the installer, so there is no migration command to run.
+`wrangler.toml` has no resource IDs on purpose: the first deploy creates the D1 database, KV namespace and R2 bucket and later deploys reuse them. If your wrangler refuses to do that, create them yourself (`npx wrangler d1 create edge_cms`, `npx wrangler kv namespace create KV`, `npx wrangler r2 bucket create edge-cms-media`) and add `database_id = "..."` and `id = "..."` to the matching blocks.
 
-To use your own domain, add it under **Workers & Pages → your worker → Settings → Domains & Routes**, or uncomment the `[[routes]]` block in `wrangler.toml` and redeploy.
+Open the `*.workers.dev` URL wrangler prints and finish the installer. To use your own domain, add it under **Workers & Pages → your worker → Settings → Domains & Routes**.
 
-## Deploy from a phone (Termux)
-
-Wrangler's local runtime has no Android build, so it will not install in plain Termux. Run it inside an Ubuntu container instead:
+**From Termux:** wrangler's local runtime has no Android build, so run it inside an Ubuntu container:
 
 ```bash
 pkg update && pkg install proot-distro
-proot-distro install ubuntu
-proot-distro login ubuntu
-
-# now inside Ubuntu
+proot-distro install ubuntu && proot-distro login ubuntu
 apt update && apt install -y git curl
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt install -y nodejs
 git clone https://github.com/rizwanahmedsora9-pixel/ams-builds.online.git
 cd ams-builds.online && npm install
-```
-
-Browser login is unreliable on a phone, so use an API token: in the Cloudflare dashboard go to **My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template**, add **D1: Edit** to its permissions, then:
-
-```bash
-export CLOUDFLARE_API_TOKEN=your-token
-npx wrangler d1 create edge_cms
-npx wrangler kv namespace create KV
-npx wrangler r2 bucket create edge-cms-media
-nano wrangler.toml          # paste the two IDs
+export CLOUDFLARE_API_TOKEN=your-token   # dashboard → My Profile → API Tokens → "Edit Cloudflare Workers" template, plus D1: Edit
 npx wrangler deploy
 ```
 
-No terminal at all: put the IDs in `wrangler.toml`, push to GitHub, and connect the repository under **Workers & Pages → Create → Import a repository**. Cloudflare then deploys on every push.
+## Option B: any server or your own computer
 
-## Local development
+Needs Node.js 22.13 or newer. Nothing else: no database server, no PHP, no native modules.
 
 ```bash
-npm run dev          # http://localhost:8787, local D1/KV/R2 in .wrangler/
+git clone https://github.com/rizwanahmedsora9-pixel/ams-builds.online.git
+cd ams-builds.online
+npm install
+npm start                # http://localhost:8787
+```
+
+Everything the site stores lives in `data/`. Back up that folder and you have backed up the site.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PORT` | `8787` | port to listen on |
+| `HOST` | `0.0.0.0` | address to bind |
+| `DATA_DIR` | `./data` | database and uploads |
+| `TRUST_PROXY` | off | set to `1` behind nginx, Caddy or a PaaS router, so HTTPS, the real hostname and visitor IPs are detected. Leave off when the port is exposed directly. |
+
+**Docker:**
+
+```bash
+docker compose up -d     # http://localhost:8787, data in the cms-data volume
+```
+
+**Behind a reverse proxy** (gives you HTTPS). Caddy needs two lines:
+
+```
+example.com {
+    reverse_proxy localhost:8787
+}
+```
+
+and start the CMS with `TRUST_PROXY=1 npm start`. For nginx, forward `Host`, `X-Forwarded-Proto` and `X-Forwarded-For`.
+
+**Keep it running on a VPS:** `npm run build` once, then run `node dist/server.mjs` under systemd or pm2. `dist/server.mjs` is a single self-contained file.
+
+**Platforms like Render, Railway or Fly:** build command `npm install && npm run build`, start command `node dist/server.mjs`, `TRUST_PROXY=1`, and a persistent disk mounted at `DATA_DIR`. Without a persistent disk the site resets on every deploy.
+
+**Termux, directly on the phone (untested):** `pkg install nodejs git`, then the commands above, using `npm install --ignore-scripts` so the Cloudflare tooling's Android-incompatible install step is skipped. Needs Termux's Node to be 22.13 or newer. If it fails, use the Ubuntu container from Option A.
+
+Static-only hosts (GitHub Pages, shared PHP hosting) cannot run it. Vercel and Netlify functions have no persistent disk, so they are not supported.
+
+## Development
+
+```bash
+npm run dev          # Cloudflare runtime locally (state in .wrangler/)
+npm start            # Node runtime (state in data/)
 npm run typecheck
 ```
 
-Delete `.wrangler/` to start again from the installer. Trigger the cron locally with `npx wrangler dev --test-scheduled` and `curl "http://localhost:8787/__scheduled"`.
+Delete `.wrangler/` or `data/` to start again from the installer.
 
 ## How it works
 
@@ -89,12 +131,13 @@ Delete `.wrangler/` to start again from the installer. Trigger the cron locally 
 
 ## Free-plan limits worth knowing
 
-KV allows 1,000 writes a day on the free plan. Each first view of a page after an edit costs one write, as does each edit and each failed login. A small site stays well inside this; a busy one should move to the paid plan.
+On Cloudflare, KV allows 1,000 writes a day on the free plan. Each first view of a page after an edit costs one write, as does each edit and each failed login. A small site stays well inside this; a busy one should move to the paid plan.
 
 ## File tree
 
 ```
 wrangler.toml
+Dockerfile, docker-compose.yml
 src/
   index.ts                 install gate, admin/public dispatch, cron handler
   types.ts
@@ -107,6 +150,9 @@ src/
       content.ts           pages and posts
       media.ts             R2 media library
       settings.ts
+  node/
+    server.ts              Node.js entry point (PORT, DATA_DIR, TRUST_PROXY)
+    storage.ts             SQLite + disk versions of D1, KV and R2
   db/
     schema.sql
     index.ts               schema runner
