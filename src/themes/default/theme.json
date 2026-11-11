@@ -1,0 +1,16 @@
+{
+  "name": "Default",
+  "slug": "default",
+  "version": "1.0.0",
+  "author": "Edge CMS",
+  "description": "Clean, responsive starter theme.",
+  "templates": {
+    "base": "base.html",
+    "home": "home.html",
+    "page": "page.html",
+    "post": "post.html",
+    "archive": "archive.html",
+    "404": "404.html"
+  },
+  "css": "style.css"
+}

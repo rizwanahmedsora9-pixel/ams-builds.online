@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>{{{theme_css}}}</style>
+{{{head}}}
+</head>
+<body class="{{body_class}}">
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="/">{{site.title}}</a>
+    {{#if menu.primary}}
+    <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Toggle menu">
+    <label for="nav-toggle" class="nav-button" aria-hidden="true"><span></span></label>
+    <nav class="site-nav" aria-label="Primary">
+      {{#each menu.primary}}<a href="{{url}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>{{/each}}
+    </nav>
+    {{/if}}
+  </div>
+</header>
+<main id="main" class="wrap">
+{{{content}}}
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    {{#if menu.footer}}<nav class="footer-nav" aria-label="Footer">{{#each menu.footer}}<a href="{{url}}">{{label}}</a>{{/each}}</nav>{{/if}}
+    <p>&copy; {{year}} {{site.title}}{{#if site.tagline}} &middot; {{site.tagline}}{{/if}}</p>
+  </div>
+</footer>
+{{{footer}}}
+</body>
+</html>
