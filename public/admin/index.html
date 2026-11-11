@@ -1,12 +1,31 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="robots" content="noindex, nofollow" />
-  <title>Content Manager | AMS Builds</title>
-</head>
-<body>
-  <script src="https://unpkg.com/decap-cms@^3.0.0/dist/decap-cms.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Content Manager | AMS Builds</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="cms-config-url" type="text/yaml" href="/admin/config.yml" />
+  </head>
+  <body>
+    <script>
+      window.CMS_MANUAL_INIT = true;
+    </script>
+    <script src="https://unpkg.com/decap-cms@^3.0.0/dist/decap-cms.js"></script>
+    <script>
+      (function () {
+        var origin = window.location.origin;
+        window.CMS.init({
+          config: {
+            site_url: origin,
+            display_url: origin,
+            backend: {
+              base_url: origin,
+            },
+          },
+        });
+      })();
+    </script>
+  </body>
 </html>

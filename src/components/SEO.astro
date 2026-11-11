@@ -23,7 +23,10 @@ const {
 } = Astro.props;
 const base = site.url.replace(/\/$/, '');
 const fullTitle = title.includes('|') ? title : `${title} | ${site.siteName}`;
-const ogImage = image.startsWith('http') ? image : `${base}${image}`;
+const resolvedImage = orUndef(image) || orUndef(site.defaultOgImage) || '/images/uploads/og-default.jpg';
+const ogImage = resolvedImage.startsWith('http')
+  ? resolvedImage
+  : `${base}${resolvedImage.startsWith('/') ? '' : '/'}${resolvedImage}`;
 const canonicalUrl = canonical || `${base}${Astro.url.pathname}`;
 const sameAs = [site.facebook, site.instagram, site.linkedin, site.youtube, site.github, site.twitter].map(orUndef).filter(Boolean);
 const gsv = orUndef(site.googleSiteVerification);

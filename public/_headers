@@ -6,3 +6,6 @@
 /admin/*
   Cache-Control: no-cache
   X-Robots-Tag: noindex, nofollow
+/admin/config.yml
+  Content-Type: text/yaml; charset=utf-8
+
