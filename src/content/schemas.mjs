@@ -87,15 +87,23 @@ export const blogSchema = z.object({
 // Site Settings — singleton edited from the admin (/admin → "Site Settings").
 // Controls: brand, contact, socials, hero, stats, Google Search Console
 // verification, Google Analytics 4 and Google AdSense.
+// Site Settings — singleton edited from the admin (/admin → "Site Settings").
+// Controls: brand, contact, socials, hero, stats, Google Search Console
+// verification, Google Analytics 4 and Google AdSense.
+//
+// All fields are optional at schema level (defaults below). This means a
+// fresh/empty deployment builds cleanly — the admin panel fills in real
+// values the first time you save Site Settings. Git-tracked site.yml
+// (if present) is the seed; the CMS store wins once saved.
 export const settingsSchema = z.object({
-  siteName: z.string(),
-  tagline: optStringDefault(''),
-  shortDescription: z.string(),
+  siteName: optStringDefault('AMS Builds'),
+  tagline: optStringDefault('Web & App Development'),
+  shortDescription: optStringDefault(''),
   url: optStringDefault('https://ams-builds.online'),
   logoText: optStringDefault('AMS Builds'),
   logoInitial: optStringDefault('A'),
-  email: z.string(),
-  phone: z.string(),
+  email: optStringDefault('hello@example.com'),
+  phone: optStringDefault('+92 300 0000000'),
   whatsapp: optStringDefault(''),
   streetAddress: optStringDefault(''),
   addressLocality: optStringDefault('Gujrat'),
@@ -123,7 +131,7 @@ export const settingsSchema = z.object({
   defaultOgImage: optStringDefault('/images/uploads/og-default.jpg'),
   stats: z.preprocess(
     (val) => (val === null || val === undefined ? [] : val),
-    z.array(z.object({ value: z.string(), label: z.string() })),
+    z.array(z.object({ value: z.string(), label: z.string() })).default([]),
   ),
 });
 
