@@ -1,0 +1,35 @@
+name = "edge-cms"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+# Import theme CSS files as text (.html and .sql are text by default).
+[[rules]]
+type = "Text"
+globs = ["**/*.css"]
+fallthrough = true
+
+# Scheduled publishing + migrations.
+[triggers]
+crons = ["*/5 * * * *"]
+
+# --- Bindings -------------------------------------------------------------
+# No IDs needed: `wrangler deploy` creates the D1 database, KV namespace and
+# R2 bucket automatically on the first deploy and reuses them afterwards.
+# To use resources you created yourself, add `database_id = "..."` / `id = "..."`.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "edge_cms"
+
+[[kv_namespaces]]
+binding = "KV"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "edge-cms-media"
+
+# Custom domain (optional). The CMS works on workers.dev without this.
+# [[routes]]
+# pattern = "example.com"
+# custom_domain = true

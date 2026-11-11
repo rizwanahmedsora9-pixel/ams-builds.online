@@ -1,0 +1,23 @@
+{{#if page}}
+<article class="entry home-entry">
+  <div class="content">{{{page.content}}}</div>
+</article>
+{{/if}}
+{{#if posts}}
+<section class="latest">
+  <h2 class="section-title">Latest posts</h2>
+  <div class="cards">
+    {{#each posts}}
+    <article class="card">
+      {{#if featured_image}}<a href="{{url}}" tabindex="-1"><img src="{{featured_image}}" alt="{{featured_alt}}" loading="lazy"></a>{{/if}}
+      <div class="card-body">
+        <h3><a href="{{url}}">{{title}}</a></h3>
+        <p class="meta"><time datetime="{{date_iso}}">{{date}}</time></p>
+        <p>{{excerpt}}</p>
+      </div>
+    </article>
+    {{/each}}
+  </div>
+  <p><a class="more" href="/blog">All posts &rarr;</a></p>
+</section>
+{{/if}}
