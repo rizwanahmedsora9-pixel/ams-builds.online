@@ -1,9 +1,9 @@
 {
-  "name": "Default",
+  "name": "AMS Base",
   "slug": "default",
-  "version": "1.0.0",
-  "author": "Edge CMS",
-  "description": "Clean, responsive starter theme.",
+  "version": "1.1.0",
+  "author": "AMS",
+  "description": "The standard theme: light, minimal and quick. A good starting point for any site.",
   "templates": {
     "base": "base.html",
     "home": "home.html",
@@ -12,5 +12,10 @@
     "archive": "archive.html",
     "404": "404.html"
   },
-  "css": "style.css"
+  "css": "style.css",
+  "preview": [
+    "#ffffff",
+    "#1c2330",
+    "#2457d6"
+  ]
 }

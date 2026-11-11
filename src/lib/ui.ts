@@ -85,6 +85,20 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
 .auth h1{text-align:center}
 .checks{max-height:11rem;overflow:auto;border:1px solid var(--line);border-radius:.5rem;padding:.4rem .7rem}
 .muted{color:var(--muted)}
+.mis{list-style:none;margin:0;padding:0}
+.mi{display:flex;align-items:center;gap:.5rem;padding:.5rem;margin-bottom:.4rem;border:1px solid var(--line);border-radius:.5rem;background:var(--bg)}
+.mi.dragging{opacity:.6;border-color:var(--accent)}
+.mi .grow{display:grid;gap:.3rem;min-width:0}
+@media (min-width:640px){.mi .grow{grid-template-columns:1fr 1.4fr}}
+.handle{cursor:grab;touch-action:none;user-select:none;padding:.6rem .3rem;color:var(--muted);letter-spacing:-.25em}
+.mi-btns{display:flex;gap:.2rem}
+.mi-btns button{width:2.1rem;height:2.1rem;border:1px solid var(--line);border-radius:.4rem;background:var(--card);color:var(--fg);font:inherit;cursor:pointer}
+.store{display:grid;gap:.8rem;grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))}
+.store-item{margin:0;display:flex;flex-direction:column}
+.store-item h3{margin:.7rem 0 .2rem;font-size:1.05rem}
+.store-item p{margin:0 0 .8rem;font-size:.9rem;flex:1}
+.swatch{height:5.5rem;border-radius:.5rem;border:1px solid var(--line)}
+.pre{background:var(--bg);border:1px solid var(--line);border-radius:.5rem;padding:.7rem;overflow-x:auto;font-size:.82rem}
 form.inline{display:inline}
 `;
 
@@ -110,6 +124,8 @@ export function layout(c: Ctx, title: string, body: Raw, active = ''): Response 
     ['/pages', 'Pages', can(user, 'editor')],
     ['/posts', 'Posts', true],
     ['/media', 'Media', true],
+    ['/menus', 'Menus', can(user, 'editor')],
+    ['/themes', 'Themes', can(user, 'admin')],
     ['/settings', 'Settings', can(user, 'admin')],
     ['/profile', 'Profile', true],
   ];

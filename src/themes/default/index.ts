@@ -18,6 +18,7 @@ export type ThemeBundle = {
 
 export const TEMPLATE_NAMES = ['base', 'home', 'page', 'post', 'archive', '404'] as const;
 
+/** "AMS Base": the standard theme, installed and activated by the installer. */
 export const defaultTheme: ThemeBundle = {
   name: manifest.name,
   slug: manifest.slug,
