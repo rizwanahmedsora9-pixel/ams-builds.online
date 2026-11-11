@@ -10,9 +10,7 @@ featured: true
 draft: false
 ---
 
-*📷 Cover photo: Board Bazaar, Peshawar — photo by [Drsaeed90](https://commons.wikimedia.org/wiki/File:Board_Bazaar_Peshawar.jpg) via Wikimedia Commons, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/).*
-
-Walk through any bazaar in **Gujrat, Gujrat, Kharian or Lalamusa** and you will see the same pattern: great shops, honest traders — but no website. Customers today do not just walk in. They **search on Google first**: "best furniture shop in Gujrat", "clinic near Gujrat", "school admissions Gujrat". If you are not online, your competitor is getting that customer.
+Walk through any bazaar in **Gujrat, Kharian, Lalamusa or anywhere in Punjab** and you will see the same pattern: great shops, honest traders — but no website. Customers today do not just walk in. They **search on Google first**: "best furniture shop in Gujrat", "clinic near Gujrat", "school admissions Gujrat". If you are not online, your competitor is getting that customer.
 
 ## 1. Customers search before they buy
 
@@ -28,7 +26,7 @@ A clean, fast website signals that your business is serious. Parents trust schoo
 
 ## 4. Google Maps and local SEO
 
-With a website + Google Business Profile, you appear on **Google Maps** when people search near Gujrat or Gujrat. This is free advertising that works while you sleep.
+With a website + Google Business Profile, you appear on **Google Maps** when people search near Gujrat or surrounding cities. This is free advertising that works while you sleep.
 
 ## 5. It costs less than you think
 

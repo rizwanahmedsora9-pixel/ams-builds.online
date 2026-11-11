@@ -2,21 +2,21 @@
 import { defineConfig } from 'astro/config';
 import tailwind from '@astrojs/tailwind';
 import sitemap from '@astrojs/sitemap';
-import cloudflare from '@astrojs/cloudflare';
 
 // https://docs.astro.build/en/reference/configuration-reference/
 //
-// The site builds to static HTML for every content page (prerender = true)
-// and runs a thin Cloudflare Worker for the admin app, its API and media
-// that only exists in Durable Object storage (see worker/ and src/pages/admin*).
+// Builds to pure static HTML/CSS/JS in dist/ (deployable anywhere: Vercel,
+// Cloudflare Workers/Pages, Netlify, or any static host), including /admin/
+// which runs the built-in client-side CMS.
 export default defineConfig({
   site: 'https://ams-builds.online',
   integrations: [
     tailwind({ applyBaseStyles: false }),
-    sitemap(),
+    sitemap({
+      filter: (page) => !page.includes('/admin'),
+    }),
   ],
-  output: 'server',
-  adapter: cloudflare({ platformProxy: { enabled: false } }),
+  output: 'static',
   build: { format: 'directory' },
   vite: {
     server: {

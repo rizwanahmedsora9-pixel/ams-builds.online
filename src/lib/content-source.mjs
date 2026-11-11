@@ -1,45 +1,18 @@
-// Build-time content source: git files + CMS overrides (from the dev store in
-// `astro dev`, from the public export endpoint during `astro build`), validated
-// with the same zod schemas the collections use. Draft entries are excluded
-// from validation — the build only needs their existence to keep them unrouted.
+// Build-time content source: reads src/content/ files and validates them
+// with the zod schemas in src/content/schemas.mjs.
 import { blogSchema, pageSchema, projectSchema, settingsSchema } from '../content/schemas.mjs';
 import { fileEntries, fileSettings } from './content-files.mjs';
-import { mergeEntries, mergeSettings } from './merge.mjs';
-import { exportUrl } from './publish.mjs';
 
 const schemas = { blog: blogSchema, pages: pageSchema, projects: projectSchema };
 
 let buildCache = null;
-let overridesCache; // promise, build mode only
 
-async function fetchOverrides() {
-  if (import.meta.env.DEV) {
-    const { createDevStore } = await import('./dev-store.mjs');
-    return createDevStore().exportAll();
-  }
-  if (!overridesCache) {
-    overridesCache = (async () => {
-      try {
-        const response = await fetch(exportUrl(import.meta.env.SITE), {
-          headers: { accept: 'application/json' },
-          signal: AbortSignal.timeout(10000),
-        });
-        if (!response.ok) return null;
-        const payload = await response.json();
-        if (!payload || !Array.isArray(payload.entries)) return null;
-        return payload;
-      } catch {
-        return null; // offline / first deploy → git files only
-      }
-    })();
-  }
-  return overridesCache;
-}
-
-async function build() {
-  const overrides = await fetchOverrides();
-  const entries = mergeEntries(fileEntries(), overrides?.entries ?? []);
-  const settings = mergeSettings(fileSettings(), overrides?.settings);
+function build() {
+  const entries = fileEntries().map((entry) => ({
+    ...entry,
+    data: entry.data ? { ...entry.data } : {},
+  }));
+  const settings = { ...fileSettings() };
 
   for (const entry of entries) {
     if (entry.data?.draft === true) continue; // never routed; metadata may be partial

@@ -24,20 +24,20 @@ const stats = site.stats?.length ? site.stats : [{ value:'50+', label:'Projects 
     <div class="pointer-events-none absolute -top-32 -right-32 w-[30rem] h-[30rem] rounded-full bg-amber-500/10 blur-[120px]" aria-hidden="true"></div>
     <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 sm:py-20 md:py-24 grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
       <div>
-        <p class="inline-flex items-center gap-2 bg-white/10 border border-white/15 text-amber-300 text-xs font-bold tracking-widest uppercase px-3 py-1.5 rounded-full">📍 {site.heroBadge}</p>
-        <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.08] mt-5 text-balance">{site.heroTitle}</h1>
-        <p class="mt-5 text-base sm:text-lg text-slate-300 leading-7 sm:leading-8 max-w-xl">{site.heroSubtitle}</p>
+        <p data-cms-hero-badge class="inline-flex items-center gap-2 bg-white/10 border border-white/15 text-amber-300 text-xs font-bold tracking-widest uppercase px-3 py-1.5 rounded-full">📍 {site.heroBadge}</p>
+        <h1 data-cms-hero-title class="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.08] mt-5 text-balance">{site.heroTitle}</h1>
+        <p data-cms-hero-subtitle class="mt-5 text-base sm:text-lg text-slate-300 leading-7 sm:leading-8 max-w-xl">{site.heroSubtitle}</p>
         <div class="flex flex-col sm:flex-row gap-3 mt-8">
-          <a href={site.heroCtaUrl} class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-7 py-3.5 rounded-xl text-center shadow-lg shadow-amber-500/20 transition">{site.heroCtaText} →</a>
+          <a data-cms-hero-cta href={site.heroCtaUrl} class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-7 py-3.5 rounded-xl text-center shadow-lg shadow-amber-500/20 transition">{site.heroCtaText} →</a>
           <a href="/projects/" class="bg-white/10 hover:bg-white/15 border border-white/20 font-bold px-7 py-3.5 rounded-xl text-center transition">View Our Work</a>
         </div>
-        <dl class="grid grid-cols-3 gap-4 mt-10 pt-8 border-t border-white/10 text-center">
+        <dl data-cms-stats class="grid grid-cols-3 gap-4 mt-10 pt-8 border-t border-white/10 text-center">
           {stats.slice(0,3).map(s => <div><dt class="text-2xl font-extrabold text-white">{s.value}</dt><dd class="text-xs text-slate-400 mt-1">{s.label}</dd></div>)}
         </dl>
       </div>
       <div class="relative max-w-md w-full mx-auto lg:max-w-none">
         <div class="bg-white rounded-2xl shadow-2xl p-2 lg:rotate-1">
-          <img src={site.heroImage} alt={`${site.siteName} website dashboard preview`} class="rounded-xl w-full aspect-[1200/630] object-cover bg-slate-100" onerror="this.style.display='none'" />
+          <img data-cms-hero-image src={site.heroImage} alt={`${site.siteName} website dashboard preview`} class="rounded-xl w-full aspect-[1200/630] object-cover bg-slate-100" onerror="this.style.display='none'" />
           <div class="p-5">
             <p class="font-bold text-slate-900">Your business, online — 24/7</p>
             <p class="text-sm text-slate-600 mt-1">WhatsApp orders, Google Maps, online catalog & more.</p>
@@ -77,7 +77,7 @@ const stats = site.stats?.length ? site.stats : [{ value:'50+', label:'Projects 
         <div><h2 class="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight">Featured projects</h2><p class="text-slate-600 mt-2">Real work for real businesses.</p></div>
         <a href="/projects/" class="hidden sm:inline-block font-bold text-amber-600 shrink-0">All projects →</a>
       </div>
-      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">{featuredProjects.map(p => <ProjectCard project={p} />)}</div>
+      <div data-cms-featured-projects class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">{featuredProjects.map(p => <ProjectCard project={p} />)}</div>
     </div>
   </section>
 
@@ -94,7 +94,7 @@ const stats = site.stats?.length ? site.stats : [{ value:'50+', label:'Projects 
       <h3 class="font-extrabold text-xl">Get a website like this</h3>
       <p class="text-slate-300 mt-2 leading-7 text-sm">Tell us about your business — we reply within 24 hours with a free quote and timeline.</p>
       <a href="/contact/" class="block text-center mt-6 bg-amber-500 text-slate-900 font-bold py-3.5 rounded-xl">Contact Us →</a>
-      <p class="text-xs text-slate-400 mt-4 text-center">📞 {site.phone} · ✉️ {site.email}</p>
+      <p data-cms-contact-meta class="text-xs text-slate-400 mt-4 text-center">📞 {site.phone} · ✉️ {site.email}</p>
     </div>
   </section>
 
@@ -106,7 +106,7 @@ const stats = site.stats?.length ? site.stats : [{ value:'50+', label:'Projects 
       <p class="relative mt-4 text-slate-300 max-w-2xl mx-auto leading-7">Tell us about your business. We reply within 24 hours with a free quote and a clear timeline.</p>
       <div class="relative flex flex-col sm:flex-row justify-center gap-3 mt-8">
         <a href="/contact/" class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-7 py-3.5 rounded-xl transition">Get a Free Quote →</a>
-        <a href={`https://wa.me/${site.whatsapp.replace(/[^\d]/g, '')}`} rel="noopener" class="bg-white/10 hover:bg-white/15 border border-white/20 font-bold px-7 py-3.5 rounded-xl transition">Chat on WhatsApp</a>
+        <a data-cms-wa-link href={`https://wa.me/${site.whatsapp.replace(/[^\d]/g, '')}`} rel="noopener" class="bg-white/10 hover:bg-white/15 border border-white/20 font-bold px-7 py-3.5 rounded-xl transition">Chat on WhatsApp</a>
       </div>
     </div>
   </section>
@@ -118,7 +118,7 @@ const stats = site.stats?.length ? site.stats : [{ value:'50+', label:'Projects 
         <div><h2 class="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight">Latest from our blog</h2><p class="text-slate-600 mt-2">Local business tips, costs & guides — AdSense-friendly content.</p></div>
         <a href="/blog/" class="hidden sm:inline-block font-bold text-amber-600 shrink-0">All articles →</a>
       </div>
-      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">{latestPosts.map(p => <BlogCard post={p} />)}</div>
+      <div data-cms-latest-posts class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">{latestPosts.map(p => <BlogCard post={p} />)}</div>
     </div>
   </section>
 </BaseLayout>

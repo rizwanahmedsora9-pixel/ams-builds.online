@@ -9,7 +9,8 @@ export async function getStaticPaths() {
 }
 const { post } = Astro.props;
 const all = await contentCollection('blog', ({data}) => !data.draft);
-const related = all.filter(p => p.slug !== post.slug && p.data.tags?.some(t => post.data.tags?.includes(t))).slice(0,3);
+const others = all.filter(p => p.slug !== post.slug);
+const related = others.filter(p => p.data.tags?.some(t => post.data.tags?.includes(t))).slice(0,3);
 const html = await renderMarkdown(post.body);
 ---
-<BlogPostLayout post={post} related={related.length ? related : all.slice(0,3)}><Fragment set:html={html} /></BlogPostLayout>
+<BlogPostLayout post={post} related={related.length ? related : others.slice(0,3)}><Fragment set:html={html} /></BlogPostLayout>

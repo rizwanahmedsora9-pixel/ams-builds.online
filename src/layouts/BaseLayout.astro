@@ -43,5 +43,9 @@ const gaId = orUndef(site.googleAnalyticsId);
     <Header />
     <main id="main"><slot /></main>
     <Footer />
+    <script>
+      import { initCmsLive } from '../lib/cms-live.mjs';
+      initCmsLive();
+    </script>
   </body>
 </html>

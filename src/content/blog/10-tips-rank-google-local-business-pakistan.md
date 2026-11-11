@@ -10,10 +10,10 @@ featured: false
 draft: false
 ---
 
-Ranking on Google is not magic — it is a system. For local businesses in **Gujrat, Gujrat and across Pakistan**, these 10 practical tips will help you appear on Google Search and Maps and get more calls, WhatsApp messages and walk-ins.
+Ranking on Google is not magic — it is a system. For local businesses in **Gujrat, Punjab and across Pakistan**, these 10 practical tips will help you appear on Google Search and Maps and get more calls, WhatsApp messages and walk-ins.
 
 ## 1. Claim your Google Business Profile
-Go to google.com/business, create your profile, verify your address in Gujrat/Gujrat, add photos, hours and WhatsApp number. This is **free** and the single biggest local ranking factor.
+Go to google.com/business, create your profile, verify your address in Gujrat, add photos, hours and WhatsApp number. This is **free** and the single biggest local ranking factor.
 
 ## 2. Use your city in your website
 Your homepage title should say what you do + where: e.g. "Furniture Shop in Gujrat" — not just "Welcome to our shop".
