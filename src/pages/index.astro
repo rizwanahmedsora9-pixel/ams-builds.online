@@ -77,7 +77,10 @@ const stats = site.stats?.length ? site.stats : [{ value:'50+', label:'Projects 
         <div><h2 class="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight">Featured projects</h2><p class="text-slate-600 mt-2">Real work for real businesses.</p></div>
         <a href="/projects/" class="hidden sm:inline-block font-bold text-amber-600 shrink-0">All projects →</a>
       </div>
-      <div data-cms-featured-projects class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">{featuredProjects.map(p => <ProjectCard project={p} />)}</div>
+      <div data-cms-featured-projects class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+        {featuredProjects.length ? featuredProjects.map(p => <ProjectCard project={p} />)
+          : <p class="col-span-full text-center text-slate-400 py-12">No projects yet. <a href="/admin/" class="text-amber-600 font-semibold">Add your first project</a> in the admin panel.</p>}
+      </div>
     </div>
   </section>
 
@@ -118,7 +121,10 @@ const stats = site.stats?.length ? site.stats : [{ value:'50+', label:'Projects 
         <div><h2 class="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight">Latest from our blog</h2><p class="text-slate-600 mt-2">Local business tips, costs & guides — AdSense-friendly content.</p></div>
         <a href="/blog/" class="hidden sm:inline-block font-bold text-amber-600 shrink-0">All articles →</a>
       </div>
-      <div data-cms-latest-posts class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">{latestPosts.map(p => <BlogCard post={p} />)}</div>
+      <div data-cms-latest-posts class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+        {latestPosts.length ? latestPosts.map(p => <BlogCard post={p} />)
+          : <p class="col-span-full text-center text-slate-400 py-12">No articles yet. <a href="/admin/" class="text-amber-600 font-semibold">Write the first post</a> in the admin panel.</p>}
+      </div>
     </div>
   </section>
 </BaseLayout>

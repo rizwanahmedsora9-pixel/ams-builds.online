@@ -1,5 +1,85 @@
 # AMS Builds — Shared CMS Guide
 
+## 0. Clean install (WordPress-style deployment)
+
+This system works like WordPress: deploy to an empty server, then create everything through the admin panel. No old website files are needed on the server.
+
+### How it compares to WordPress
+
+| WordPress | This system |
+|---|---|
+| MySQL database | Cloudflare Durable Object (SQLite) — the only content store |
+| `wp-admin/` | `/admin/` — full panel for settings, pages, posts, media |
+| Install wizard creates admin user | First login (`admin` / `admin12345`) auto-creates the admin account |
+| Content lives in MySQL | Content lives in the Durable Object — no files on disk |
+| `wp-content/uploads/` | `/images/uploads/*` — images stored in the Durable Object |
+| `wp-config.php` | `wrangler.jsonc` + Cloudflare Worker bindings |
+| Theme files (PHP) | Astro components (`src/components/`, `src/layouts/`) |
+
+### Deploy to a fresh/empty server
+
+```bash
+npm install
+npm run build
+npx wrangler deploy
+```
+
+This deploys **only the compiled Worker**. The Durable Object starts completely empty — no pages, no posts, no settings, no images. The `src/content/` files in the repo are optional seed data; they are not required for deployment and do not get written to the live store.
+
+To keep your old website as a backup without it touching the server:
+
+```bash
+# Move the old site out of the repo — it will not be deployed
+mv old-website-backup.zip /safe/storage/
+# Or keep a copy in a backup/ folder inside the repo (git-tracked, not deployed)
+```
+
+### First login — auto-creates the admin account
+
+Visit `https://yourdomain.com/admin/`. The login screen appears. Sign in with:
+
+- **Username:** `admin`
+- **Password:** `admin12345`
+
+On the very first login, the system detects that no admin account exists yet and creates one automatically — exactly like WordPress's install wizard, but integrated into the login flow. After that, the panel is fully available.
+
+**Immediately change the password** via **Account → Change password**. The default credentials are only for the first login.
+
+### Set up the site through the panel
+
+After logging in, everything is created through the admin panel — no code changes, no file uploads, no rebuild:
+
+1. **Site settings** — fill in brand name, tagline, email, phone, WhatsApp, address, social links, homepage hero (heading, subtitle, button, image, stats), Google Search Console verification tag, GA4 measurement ID, AdSense publisher ID, and your custom domain. One "Save settings" button writes everything.
+
+2. **Pages** — create About, Contact, Services, Privacy Policy, Terms, and any other pages. Each page has a title, description, hero heading/subheading, featured image, menu order, show-in-nav and show-in-footer toggles, draft mode, SEO fields, and optional layout sections.
+
+3. **Blog posts** — create posts with title, description, publish date, author, tags, hero image, featured toggle, draft mode, SEO fields, and Markdown body.
+
+4. **Projects** — create portfolio items with title, description, client, category, technologies, cover image, featured toggle, date, results/highlights, live URL, draft mode, SEO fields, and optional layout sections.
+
+5. **Media** — upload images from the media library. They are immediately available in the image picker for any page, post, or project.
+
+### How the public site behaves on a fresh install
+
+Before any content is created, the public site renders with sensible defaults:
+
+- The homepage shows empty-state messages: "No projects yet. Add your first project in the admin panel." and "No articles yet. Write the first post in the admin panel."
+- All site settings use defaults (site name, email, phone, hero text) so the site is always presentable.
+- Pages, posts, and projects that don't exist yet return a styled 404.
+
+Once you save the first settings and create the first pages, the site comes alive — instantly, with no rebuild.
+
+### Moving to a new domain
+
+The panel works on any domain with no per-domain configuration:
+
+1. Add the new domain as a Custom Domain in the Cloudflare Dashboard, pointing to this Worker.
+2. Visit `https://newdomain.com/admin/` and log in with the same credentials.
+3. Go to **Site settings** and set **Custom domain** to `https://newdomain.com`.
+4. Save. The "View live site" link and all SEO URLs now use the new domain.
+
+No environment variables, no config files, no rebuild. Same Durable Object, same content, same credentials — different domain.
+
 ## 1. What happens when you save
 
 The CMS is shared server-side storage, not a browser preview.
@@ -13,13 +93,14 @@ There is **no Publish step and no rebuild**. A successful “live now for every 
 
 ### Repository content and CMS content
 
-`src/content/` and `public/images/uploads/` are the baseline included with the code. Shared edits are layered over that baseline at request time:
+`src/content/` and `public/images/uploads/` are optional baseline/seed files included with the code. They are **not required for deployment**. Shared edits are layered over the baseline at request time if present:
 
 - Editing an existing entry creates a shared override; it does not rewrite the Git file.
 - Creating an entry creates a real dynamic public URL.
 - Deleting a baseline entry creates a tombstone so redeployment does not restore it.
 - “Revert to file version” removes an override where that action is offered.
 - Redeploying the Worker preserves shared content as long as the same Durable Object binding is retained.
+- A fresh deployment with no `src/content/` files builds cleanly — the public site uses schema defaults until the admin panel is used.
 
 ## 2. Sign in and secure the account
 

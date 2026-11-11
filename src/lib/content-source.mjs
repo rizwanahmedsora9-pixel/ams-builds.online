@@ -2,6 +2,11 @@
 // saved CMS entries override it in the Durable Object (or .dev-cms locally).
 // Runtime requests always read the current store and cache only within that
 // request, so an admin save is visible on the very next page load everywhere.
+//
+// A fresh/empty deployment (no src/content/*.md files and no CMS store yet)
+// builds cleanly: entries is an empty array and settings uses schema defaults.
+// The public site renders with empty lists and fallback site settings — the
+// admin panel is the setup tool, exactly like a WordPress install.
 import { blogSchema, pageSchema, projectSchema, settingsSchema } from '../content/schemas.mjs';
 import { fileEntries, fileSettings } from './content-files.mjs';
 import { mergeEntries, mergeSettings } from './merge.mjs';
@@ -24,11 +29,10 @@ async function fetchOverrides(locals) {
   return null;
 }
 
-async function build(locals) {
-  const overrides = await fetchOverrides(locals);
-  const entries = mergeEntries(fileEntries(), overrides?.entries ?? []);
-  const settings = mergeSettings(fileSettings(), overrides?.settings);
-
+function validateEntries(entries) {
+  // Only validate when there are entries to validate (empty CMS / empty
+  // content directory is a valid state — fresh install).
+  if (!entries || entries.length === 0) return;
   for (const entry of entries) {
     if (entry.data?.draft === true) continue;
     const schema = schemas[entry.type];
@@ -43,17 +47,34 @@ async function build(locals) {
     }
     entry.data = result.data;
   }
+}
 
-  const settingsResult = settingsSchema.safeParse(settings);
-  if (!settingsResult.success) {
-    const issues = settingsResult.error.issues
+function validateSettings(settings) {
+  // Settings always parse with defaults (schema fields are optional).
+  // Only flag genuinely malformed non-empty settings objects.
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return {};
+  }
+  const result = settingsSchema.safeParse(settings);
+  if (!result.success) {
+    const issues = result.error.issues
       .slice(0, 5)
       .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
       .join('; ');
     throw new Error(`Invalid site settings: ${issues}`);
   }
+  return result.data;
+}
 
-  return { entries, settings: settingsResult.data };
+async function build(locals) {
+  const overrides = await fetchOverrides(locals);
+  const entries = mergeEntries(fileEntries(), overrides?.entries ?? []);
+  const settings = mergeSettings(fileSettings(), overrides?.settings);
+
+  validateEntries(entries);
+  const settingsData = validateSettings(settings);
+
+  return { entries, settings: settingsData };
 }
 
 /** Load current content, with at most one store read per HTTP request. */

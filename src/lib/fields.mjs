@@ -166,16 +166,26 @@ export function defaultSettings() {
       else data[field.name] = '';
     }
   }
+  // Site-wide defaults — used for a fresh install when no settings exist.
+  // These match the schema defaults so the public site always has something
+  // to render before the admin panel is used for the first time.
   data.url = 'https://ams-builds.online';
+  data.siteName = 'AMS Builds';
+  data.tagline = 'Web & App Development';
   data.logoText = 'AMS Builds';
   data.logoInitial = 'A';
+  data.email = 'hello@example.com';
+  data.phone = '+92 300 0000000';
   data.addressLocality = 'Gujrat';
   data.addressRegion = 'Punjab';
   data.addressCountry = 'Pakistan';
   data.openingHours = 'Mo-Sa 09:00-18:00';
   data.priceRange = 'PKR';
+  data.heroCtaText = 'Get a Free Quote';
+  data.heroCtaUrl = '/contact/';
   data.heroImage = '/images/uploads/hero-dashboard.jpg';
   data.defaultOgImage = '/images/uploads/og-default.jpg';
+  data.stats = [];
   return data;
 }
 
