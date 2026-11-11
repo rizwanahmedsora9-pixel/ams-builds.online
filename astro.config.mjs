@@ -1,22 +1,16 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import tailwind from '@astrojs/tailwind';
-import sitemap from '@astrojs/sitemap';
+import cloudflare from '@astrojs/cloudflare';
 
-// https://docs.astro.build/en/reference/configuration-reference/
-//
-// Builds to pure static HTML/CSS/JS in dist/ (deployable anywhere: Vercel,
-// Cloudflare Workers/Pages, Netlify, or any static host), including /admin/
-// which runs the built-in client-side CMS.
+// Public pages are server-rendered from the shared CMS store on every request.
+// Saving in /admin therefore updates the site immediately for every visitor;
+// no browser-local overlay, GitHub token, or rebuild hook is involved.
 export default defineConfig({
   site: 'https://ams-builds.online',
-  integrations: [
-    tailwind({ applyBaseStyles: false }),
-    sitemap({
-      filter: (page) => !page.includes('/admin'),
-    }),
-  ],
-  output: 'static',
+  integrations: [tailwind({ applyBaseStyles: false })],
+  output: 'server',
+  adapter: cloudflare({ platformProxy: { enabled: false } }),
   build: { format: 'directory' },
   vite: {
     server: {

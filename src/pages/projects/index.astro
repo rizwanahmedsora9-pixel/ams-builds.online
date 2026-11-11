@@ -2,9 +2,9 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import ProjectCard from '../../components/ProjectCard.astro';
 import AdSlot from '../../components/AdSlot.astro';
-export const prerender = true;
+export const prerender = false;
 import { contentCollection } from '../../lib/content-source';
-const projects = (await contentCollection('projects', ({data}) => !data.draft)).sort((a,b) => +new Date(b.data.date) - +new Date(a.data.date));
+const projects = (await contentCollection('projects', ({data}) => !data.draft, Astro.locals)).sort((a,b) => +new Date(b.data.date) - +new Date(a.data.date));
 ---
 <BaseLayout title="Our Projects — Websites & Apps" description="Case studies of business websites, Android apps and software built by AMS Builds in Gujrat, Pakistan.">
   <section class="bg-slate-900 text-white">

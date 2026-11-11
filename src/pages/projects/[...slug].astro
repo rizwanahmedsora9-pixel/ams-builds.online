@@ -1,13 +1,21 @@
 ---
-export const prerender = true;
+export const prerender = false;
+import BaseLayout from '../../layouts/BaseLayout.astro';
 import ProjectLayout from '../../layouts/ProjectLayout.astro';
+import NotFound from '../../components/NotFound.astro';
 import { contentCollection } from '../../lib/content-source';
 import { renderMarkdown } from '../../lib/render-markdown.mjs';
-export async function getStaticPaths() {
-  const projects = await contentCollection('projects', ({data}) => !data.draft);
-  return projects.map(project => ({ params: { slug: project.slug }, props: { project } }));
-}
-const { project } = Astro.props;
-const html = await renderMarkdown(project.body);
+
+const slug = Array.isArray(Astro.params.slug) ? Astro.params.slug.join('/') : Astro.params.slug;
+const projects = await contentCollection('projects', ({ data }) => !data.draft, Astro.locals);
+const project = projects.find((entry) => entry.slug === slug);
+if (!project) Astro.response.status = 404;
+const html = project ? await renderMarkdown(project.body) : '';
 ---
-<ProjectLayout project={project}><Fragment set:html={html} /></ProjectLayout>
+{project ? (
+  <ProjectLayout project={project}><Fragment set:html={html} /></ProjectLayout>
+) : (
+  <BaseLayout title="Project Not Found" description="The project you requested could not be found." noindex={true}>
+    <NotFound />
+  </BaseLayout>
+)}

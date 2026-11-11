@@ -17,7 +17,8 @@ export interface Props {
   noindex?: boolean;
 }
 const props = Astro.props;
-const site = await getSite();
+Astro.response.headers.set('cache-control', 'no-store, max-age=0');
+const site = await getSite(Astro.locals);
 const adsenseClient = orUndef(site.adsenseClient);
 const gaId = orUndef(site.googleAnalyticsId);
 ---
@@ -43,9 +44,5 @@ const gaId = orUndef(site.googleAnalyticsId);
     <Header />
     <main id="main"><slot /></main>
     <Footer />
-    <script>
-      import { initCmsLive } from '../lib/cms-live.mjs';
-      initCmsLive();
-    </script>
   </body>
 </html>

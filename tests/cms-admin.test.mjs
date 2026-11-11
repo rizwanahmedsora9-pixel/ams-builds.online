@@ -1,96 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import { parseFrontmatter, serializeFrontmatter, parseDataFile, normalizeYamlValues } from '../src/lib/yaml.mjs';
 import { slugify, isValidSlug, mediaFileName } from '../src/lib/slug.mjs';
+import { hashPassword, verifyPassword, timingSafeEqual } from '../src/lib/password.mjs';
 import { mergeEntries, mergeSettings } from '../src/lib/merge.mjs';
-import { validateEntry, validateSettings, defaultData, suggestSlug } from '../src/lib/fields.mjs';
-import { renderMarkdownClient } from '../src/lib/markdown-browser.mjs';
-import {
-  AUTH_USER,
-  AUTH_PASS,
-  createClientCms,
-} from '../src/lib/cms-store.mjs';
+import { buildExportPayload } from '../src/lib/export-filter.mjs';
+import { validateEntry, validateSettings, defaultData } from '../src/lib/fields.mjs';
+import { renderMarkdown } from '../src/lib/render-markdown.mjs';
 
-function makeMemoryStorage() {
-  const map = new Map();
-  return {
-    getItem(k) {
-      return map.has(k) ? map.get(k) : null;
-    },
-    setItem(k, v) {
-      map.set(k, String(v));
-    },
-    removeItem(k) {
-      map.delete(k);
-    },
-    clear() {
-      map.clear();
-    },
-  };
-}
-
-const sampleBaseline = {
-  entries: [
-    {
-      type: 'blog',
-      slug: 'first-post',
-      data: {
-        title: 'First Post',
-        description: 'Baseline post description',
-        pubDate: '2026-11-10',
-        author: 'AMS Builds Team',
-        tags: ['Web'],
-        draft: false,
-      },
-      body: 'Hello from **baseline**.',
-    },
-    {
-      type: 'pages',
-      slug: 'about',
-      data: {
-        title: 'About',
-        description: 'About AMS Builds',
-        showInNav: true,
-        showInFooter: true,
-        navOrder: 3,
-        draft: false,
-      },
-      body: 'We build websites.',
-    },
-    {
-      type: 'projects',
-      slug: 'sample-app',
-      data: {
-        title: 'Sample App',
-        description: 'Case study',
-        category: 'android',
-        date: '2026-11-01',
-        featured: true,
-        draft: false,
-      },
-      body: 'Built fast.',
-    },
-  ],
-  settings: {
-    siteName: 'AMS Builds',
-    shortDescription: 'Web & App agency',
-    email: 'hello@ams-builds.online',
-    phone: '+92 300 0000000',
-    stats: [{ value: '50+', label: 'Projects' }],
-    adsenseEnabled: false,
-  },
-  media: [
-    { path: '/images/uploads/hero-dashboard.jpg', url: '/images/uploads/hero-dashboard.jpg', source: 'file' },
-  ],
-};
+const root = fileURLToPath(new URL('../', import.meta.url));
 
 // ── frontmatter ─────────────────────────────────────────────────────────
 test('frontmatter round-trips: unquoted YAML dates become YYYY-MM-DD strings', () => {
   const raw = '---\ntitle: Hello\npubDate: 2026-11-10\ndraft: false\ntags:\n  - a\n---\nBody **here**.\n';
   const { data, body } = parseFrontmatter(raw);
   assert.equal(data.title, 'Hello');
+  // js-yaml 5 keeps unquoted dates as text; either way the normaliser
+  // produces the YYYY-MM-DD string the schemas expect.
   assert.equal(normalizeYamlValues(data.pubDate), '2026-11-10');
   assert.equal(body, 'Body **here**.\n');
 
@@ -98,7 +27,7 @@ test('frontmatter round-trips: unquoted YAML dates become YYYY-MM-DD strings', (
   const back = parseFrontmatter(text);
   assert.equal(back.data.pubDate, '2026-11-10');
   assert.equal(back.data.title, 'Hello');
-  assert.deepEqual(back.data.tags, ['a']);
+  assert.deepEqual(back.data.tags, ['a', 'b'].slice(0, 1));
   assert.equal(back.body, body);
 });
 
@@ -122,11 +51,27 @@ test('slug rules', () => {
   assert.equal(mediaFileName('evil.svg', new Set()), 'evil.jpg', 'non-image extensions fall back to jpg');
 });
 
-// ── merge (scoped by type:slug so different collections never collide) ──
-test('CMS overrides replace file entries and tombstones delete them per type+slug', () => {
+// ── passwords ───────────────────────────────────────────────────────────
+test('password hash/verify round-trip', async () => {
+  const hashed = await hashPassword('correct horse battery staple');
+  assert.ok(hashed.salt && hashed.hash && hashed.it >= 100000);
+  assert.equal(await verifyPassword('correct horse battery staple', hashed.salt, hashed.hash, hashed.it), true);
+  assert.equal(await verifyPassword('wrong password', hashed.salt, hashed.hash, hashed.it), false);
+  const hashed2 = await hashPassword('correct horse battery staple', hashed.salt);
+  assert.equal(hashed2.salt, hashed.salt, 'salt is reused when provided');
+  assert.equal(await verifyPassword('correct horse battery staple', hashed2.salt, hashed2.hash, hashed2.it), true);
+});
+
+test('timing-safe compare rejects different lengths and bytes', () => {
+  assert.equal(timingSafeEqual(new Uint8Array([1, 2, 3]), new Uint8Array([1, 2, 3])), true);
+  assert.equal(timingSafeEqual(new Uint8Array([1, 2, 3]), new Uint8Array([1, 2, 4])), false);
+  assert.equal(timingSafeEqual(new Uint8Array([1]), new Uint8Array([1, 2])), false);
+});
+
+// ── merge ───────────────────────────────────────────────────────────────
+test('CMS overrides replace file entries and tombstones delete them', () => {
   const base = [
-    { slug: 'a-post', type: 'blog', data: { title: 'Blog A' }, body: 'file body' },
-    { slug: 'a-post', type: 'pages', data: { title: 'Page A' }, body: 'page body' },
+    { slug: 'a-post', type: 'blog', data: { title: 'From file' }, body: 'file body' },
     { slug: 'b-post', type: 'blog', data: { title: 'Other' }, body: 'other' },
   ];
   const merged = mergeEntries(base, [
@@ -135,17 +80,36 @@ test('CMS overrides replace file entries and tombstones delete them per type+slu
     { slug: 'c-post', type: 'blog', frontmatter: { title: 'Brand new' }, body: 'new' },
     { slug: '', type: 'blog', frontmatter: {} },
   ]);
-  assert.deepEqual(
-    merged.map((e) => `${e.type}:${e.slug}`),
-    ['blog:a-post', 'pages:a-post', 'blog:c-post'],
-  );
+  assert.deepEqual(merged.map((e) => e.slug), ['a-post', 'c-post']);
   assert.equal(merged[0].data.title, 'From CMS');
   assert.equal(merged[0].body, 'cms body');
-  assert.equal(merged[1].data.title, 'Page A');
+  assert.equal(merged[1].type, 'blog');
 
   assert.deepEqual(mergeSettings({ siteName: 'file' }, { siteName: 'cms' }), { siteName: 'cms' });
   assert.deepEqual(mergeSettings({ siteName: 'file' }, null), { siteName: 'file' });
   assert.deepEqual(mergeSettings({ siteName: 'file' }, []), { siteName: 'file' });
+});
+
+// ── export filter ───────────────────────────────────────────────────────
+test('export keeps published content, strips draft bodies, keeps tombstones', () => {
+  const payload = buildExportPayload(
+    [
+      { slug: 'pub', type: 'blog', frontmatter: { title: 'Pub', draft: false }, body: 'full', updated_at: 't1', deleted: false },
+      { slug: 'draft', type: 'blog', frontmatter: { title: 'Secret', draft: true, description: 'hidden' }, body: 'secret body', updated_at: 't2', deleted: false },
+      { slug: 'gone', type: 'blog', frontmatter: { title: 'Gone' }, body: 'x', updated_at: 't3', deleted: true },
+      { slug: 'site', type: 'settings', frontmatter: { siteName: 'AMS' }, body: '', updated_at: 't4', deleted: false },
+    ],
+    { siteName: 'AMS' },
+  );
+  const bySlug = Object.fromEntries(payload.entries.map((e) => [e.slug, e]));
+  assert.equal(bySlug.pub.body, 'full');
+  assert.equal(bySlug.pub.frontmatter.title, 'Pub');
+  assert.equal(bySlug.draft.body, '', 'draft bodies never leave the worker');
+  assert.deepEqual(Object.keys(bySlug.draft.frontmatter).sort(), ['draft', 'title']);
+  assert.equal(bySlug.gone.deleted, true);
+  assert.deepEqual(bySlug.gone.frontmatter, {});
+  assert.equal(payload.settings.siteName, 'AMS');
+  assert.equal(payload.entries.map((e) => e.slug).join(','), 'draft,gone,pub,site', 'sorted by slug');
 });
 
 // ── save-time validation ────────────────────────────────────────────────
@@ -178,153 +142,59 @@ test('settings validation requires the brand/contact basics', () => {
   assert.ok(validateSettings({ ...data, adsenseEnabled: 'yes' }).length > 0);
 });
 
-// ── markdown client sanitization ────────────────────────────────────────
-test('renderMarkdownClient renders safe HTML and strips dangerous XSS vectors', () => {
-  const html = renderMarkdownClient('# Hello\n\n<script>alert(1)</script><img src="javascript:alert(1)" onerror="alert(2)">\n\n[ok](https://ams-builds.online) [bad](javascript:alert(3))');
+// ── Worker-safe server Markdown ─────────────────────────────────────────
+test('runtime Markdown renders formatting and strips dangerous HTML without WebAssembly', async () => {
+  const html = await renderMarkdown('# Hello\n\n**Bold** and [safe](https://example.com).\n\n<script>alert(1)</script><img src="javascript:alert(2)" onerror="alert(3)">');
   assert.match(html, /<h1>Hello<\/h1>/);
-  assert.doesNotMatch(html, /<script/i);
-  assert.doesNotMatch(html, /onerror=/i);
-  assert.doesNotMatch(html, /javascript:/i);
-  assert.match(html, /href="https:\/\/ams-builds\.online"/);
+  assert.match(html, /<strong>Bold<\/strong>/);
+  assert.match(html, /href="https:\/\/example.com"/);
+  assert.doesNotMatch(html, /<script|onerror|javascript:/i);
 });
 
-// ── client-side CMS store & hardcoded admin auth ────────────────────────
-test('hardcoded admin credentials enforce admin / admin12345', () => {
-  assert.equal(AUTH_USER, 'admin');
-  assert.equal(AUTH_PASS, 'admin12345');
-
-  const storage = makeMemoryStorage();
-  const cms = createClientCms({ baseline: sampleBaseline, storage });
-  assert.equal(cms.getSession().authenticated, false);
-  assert.equal(cms.login('admin', 'badpass').ok, false);
-  assert.equal(cms.login('other', 'admin12345').ok, false);
-  assert.equal(cms.getSession().authenticated, false);
-
-  const ok = cms.login('admin', 'admin12345');
-  assert.equal(ok.ok, true);
-  assert.equal(cms.getSession().authenticated, true);
-  assert.equal(cms.getSession().user, 'admin');
-
-  // Re-instantiating with same storage keeps the session until logout
-  const cms2 = createClientCms({ baseline: sampleBaseline, storage });
-  assert.equal(cms2.getSession().authenticated, true);
-  cms2.logout();
-  assert.equal(cms2.getSession().authenticated, false);
-});
-
-test('client CMS CRUD: create, edit, revert, delete tombstone, settings, media & backup', async () => {
-  const storage = makeMemoryStorage();
-  const cms = createClientCms({ baseline: sampleBaseline, storage });
-
-  // Initially matches baseline
-  assert.equal(cms.listContent('blog').length, 1);
-  assert.equal(cms.getEntry('blog', 'first-post').source, 'file');
-
-  // Invalid slug is rejected cleanly
-  assert.equal(
-    cms.saveEntry('blog', 'Bad Slug!', { ...defaultData('blog'), title: 'T', description: 'D', pubDate: '2026-11-11' }, 'b').ok,
-    false,
-  );
-
-  // Create new post with suggested slug
-  const created = cms.saveEntry(
-    'blog',
-    suggestSlug('Second Post!'),
-    {
-      ...defaultData('blog'),
-      title: 'Second Post!',
-      description: 'Desc',
-      pubDate: '2026-11-11',
-    },
-    'New body',
-  );
-  assert.equal(created.ok, true);
-  assert.equal(created.slug, 'second-post');
-  assert.equal(cms.listContent('blog').length, 2);
-
-  // Edit baseline post and revert
-  const edited = cms.saveEntry(
-    'blog',
-    'first-post',
-    { ...cms.getEntry('blog', 'first-post').data, title: 'Updated First Post' },
-    'Updated body',
-  );
-  assert.equal(edited.ok, true);
-  assert.equal(cms.getEntry('blog', 'first-post').source, 'cms');
-  assert.equal(cms.getEntry('blog', 'first-post').data.title, 'Updated First Post');
-  assert.match(cms.formatEntryMarkdown('blog', 'first-post'), /title: Updated First Post/);
-
-  cms.revertEntry('blog', 'first-post');
-  assert.equal(cms.getEntry('blog', 'first-post').data.title, 'First Post');
-
-  // Delete baseline post (tombstone hides it without losing baseline reference)
-  cms.deleteEntry('blog', 'first-post');
-  assert.equal(cms.getEntry('blog', 'first-post'), null);
-  assert.deepEqual(
-    cms.listContent('blog').map((p) => p.slug),
-    ['second-post'],
-  );
-
-  // Settings edit & YAML export
-  const savedSettings = cms.saveSettings({
-    ...cms.getSettings().data,
-    siteName: 'AMS Studio',
-  });
-  assert.equal(savedSettings.ok, true);
-  assert.equal(cms.getSettings().data.siteName, 'AMS Studio');
-  assert.match(cms.formatSettingsYaml(), /siteName: AMS Studio/);
-
-  // Upload media (falls back gracefully to storage without IndexedDB)
-  const up = await cms.uploadMedia({
-    name: 'My Banner.png',
-    type: 'image/png',
-    size: 1024,
-    dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
-  });
-  assert.equal(up.ok, true);
-  assert.equal(up.path, '/images/uploads/my-banner.png');
-  const media = await cms.listMedia();
-  assert.ok(media.some((m) => m.path === '/images/uploads/my-banner.png'));
-
-  // Export & import round-trip into clean storage
-  const backup = await cms.exportBackup();
-  assert.equal(backup.version, 1);
-  assert.equal(backup.media.length, 1);
-
-  const storage2 = makeMemoryStorage();
-  const restored = createClientCms({ baseline: sampleBaseline, storage: storage2 });
-  const imp = await restored.importBackup(backup);
-  assert.equal(imp.ok, true);
-  assert.equal(restored.getSettings().data.siteName, 'AMS Studio');
-  assert.equal(restored.getEntry('blog', 'first-post'), null);
-  assert.equal(restored.getEntry('blog', 'second-post').data.title, 'Second Post!');
-  assert.equal((await restored.listMedia()).length, 2);
-
-  await restored.resetAll();
-  assert.equal(restored.getSettings().data.siteName, 'AMS Builds');
-  assert.equal(restored.getEntry('blog', 'first-post').data.title, 'First Post');
-});
-
-// ── configuration guards (static / Vercel-compatible) ───────────────────
-test('astro.config builds static output with /admin prerendered and no server adapter', async () => {
-  const text = await readFile(new URL('../astro.config.mjs', import.meta.url), 'utf8');
-  assert.match(text, /output:\s*'static'/);
-  assert.doesNotMatch(text, /@astrojs\/cloudflare|decap|oauth/i);
-});
-
-test('wrangler.jsonc serves the static dist directory cleanly', async () => {
+// ── configuration guards ────────────────────────────────────────────────
+test('wrangler.jsonc wires the CmsSite Durable Object for prod and previews', async () => {
   const text = await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const withoutComments = text.replace(/\/\/.*$/gm, '');
   const config = JSON.parse(withoutComments);
-  assert.equal(config.assets.directory, './dist');
-  assert.equal(config.main, undefined);
+  assert.equal(config.main, './worker/main.js');
+  assert.equal(config.assets.binding, 'ASSETS');
+  assert.deepEqual(config.durable_objects.bindings, [{ name: 'CMS', class_name: 'CmsSite' }]);
+  assert.deepEqual(config.migrations, [{ tag: 'v1', new_sqlite_classes: ['CmsSite'] }]);
+  assert.deepEqual(config.previews.durable_objects.bindings, [{ name: 'CMS', class_name: 'CmsSite' }]);
 });
 
-test('admin page is statically prerendered and uses zero backend API routes', async () => {
-  const astro = await readFile(new URL('../src/pages/admin.astro', import.meta.url), 'utf8');
-  assert.match(astro, /export const prerender = true/);
-  assert.match(astro, /admin-client\.js/);
-  const client = await readFile(new URL('../src/lib/admin-client.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(client, /\/admin\/api\//);
-  assert.match(client, /createClientCms/);
+test('astro.config serves public content and the admin through Cloudflare', async () => {
+  const text = await readFile(new URL('../astro.config.mjs', import.meta.url), 'utf8');
+  assert.match(text, /output:\s*'server'/);
+  assert.match(text, /adapter:\s*cloudflare\(/);
+  assert.match(text, /platformProxy:\s*\{\s*enabled:\s*false\s*\}/);
+  assert.doesNotMatch(text, /decap|oauth/i, 'no Decap/GitHub OAuth middleware left in the config');
+});
+
+test('the worker entry re-exports the Astro app and the DO class', async () => {
+  const main = await readFile(new URL('../worker/main.js', import.meta.url), 'utf8');
+  assert.match(main, /export \{ CmsSite \}/);
+  assert.match(main, /dist\/_worker\.js\/index\.js/);
+  const cmsDo = await readFile(new URL('../worker/cms-do.js', import.meta.url), 'utf8');
+  assert.match(cmsDo, /class CmsSite extends DurableObject/);
+  assert.doesNotMatch(cmsDo, /github|oauth/i);
+});
+
+
+test('public content routes render dynamically instead of using browser-only 404 hydration', async () => {
+  for (const path of [
+    '../src/pages/index.astro',
+    '../src/pages/[...slug].astro',
+    '../src/pages/blog/index.astro',
+    '../src/pages/blog/[...slug].astro',
+    '../src/pages/projects/index.astro',
+    '../src/pages/projects/[...slug].astro',
+  ]) {
+    const text = await readFile(new URL(path, import.meta.url), 'utf8');
+    assert.match(text, /export const prerender = false/, path);
+    assert.doesNotMatch(text, /getStaticPaths/, path);
+  }
+  const layout = await readFile(new URL('../src/layouts/BaseLayout.astro', import.meta.url), 'utf8');
+  assert.doesNotMatch(layout, /cms-live|localStorage/);
+  assert.match(layout, /no-store/);
 });

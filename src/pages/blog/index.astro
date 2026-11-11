@@ -2,9 +2,9 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import BlogCard from '../../components/BlogCard.astro';
 import AdSlot from '../../components/AdSlot.astro';
-export const prerender = true;
+export const prerender = false;
 import { contentCollection } from '../../lib/content-source';
-const posts = (await contentCollection('blog', ({data}) => !data.draft)).sort((a,b) => +new Date(b.data.pubDate) - +new Date(a.data.pubDate));
+const posts = (await contentCollection('blog', ({data}) => !data.draft, Astro.locals)).sort((a,b) => +new Date(b.data.pubDate) - +new Date(a.data.pubDate));
 const tags = [...new Set(posts.flatMap(p => p.data.tags || []))];
 ---
 <BaseLayout title="Blog — Business Tips & Guides" description="Practical guides on website costs, Android apps, SEO and growing your business online in Pakistan.">

@@ -1,13 +1,24 @@
 {
-  // Static asset hosting for dist/ (works with `wrangler dev` and Cloudflare Workers Builds)
+  // Astro serves public pages and the admin from the Worker. CmsSite stores
+  // shared content, uploaded images, credentials and sessions.
   "name": "ams-builds-online",
+  "main": "./worker/main.js",
   "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page"
   },
-  "observability": {
-    "enabled": true
-  }
+  "durable_objects": {
+    "bindings": [{ "name": "CMS", "class_name": "CmsSite" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CmsSite"] }],
+  "previews": {
+    "durable_objects": {
+      "bindings": [{ "name": "CMS", "class_name": "CmsSite" }]
+    }
+  },
+  "observability": { "enabled": true }
 }

@@ -2,8 +2,8 @@
 import { contentCollection } from '../lib/content-source';
 import { getSite, telHref, orUndef } from '../utils/site';
 
-const site = await getSite();
-const allPages = await contentCollection('pages', ({ data }) => !data.draft && data.showInFooter);
+const site = await getSite(Astro.locals);
+const allPages = await contentCollection('pages', ({ data }) => !data.draft && data.showInFooter, Astro.locals);
 const footerPages = allPages.sort((a,b) => (a.data.navOrder ?? 99) - (b.data.navOrder ?? 99));
 const year = new Date().getFullYear();
 const addressLine = [orUndef(site.streetAddress), site.addressLocality, site.addressRegion].filter(Boolean).join(', ');

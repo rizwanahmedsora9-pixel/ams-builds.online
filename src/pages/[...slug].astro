@@ -1,13 +1,23 @@
 ---
-export const prerender = true;
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
 import PageLayout from '../layouts/PageLayout.astro';
+import NotFound from '../components/NotFound.astro';
 import { contentCollection } from '../lib/content-source';
 import { renderMarkdown } from '../lib/render-markdown.mjs';
-export async function getStaticPaths() {
-  const pages = await contentCollection('pages', ({data}) => !data.draft);
-  return pages.map(page => ({ params: { slug: page.slug }, props: { page } }));
-}
-const { page } = Astro.props;
-const html = await renderMarkdown(page.body);
+
+const slug = Array.isArray(Astro.params.slug) ? Astro.params.slug.join('/') : Astro.params.slug;
+const pages = await contentCollection('pages', ({ data }) => !data.draft, Astro.locals);
+const page = pages.find((entry) => entry.slug === slug);
+if (!page) Astro.response.status = 404;
+const html = page ? await renderMarkdown(page.body) : '';
 ---
-<PageLayout title={page.data.title} description={page.data.description} heroTitle={page.data.heroTitle} heroSubtitle={page.data.heroSubtitle} slug={page.slug} seoTitle={page.data.seoTitle} seoDescription={page.data.seoDescription} ogImage={page.data.ogImage} noindex={page.data.noindex}><Fragment set:html={html} /></PageLayout>
+{page ? (
+  <PageLayout title={page.data.title} description={page.data.description} heroTitle={page.data.heroTitle} heroSubtitle={page.data.heroSubtitle} slug={page.slug} featuredImage={page.data.featuredImage} seoTitle={page.data.seoTitle} seoDescription={page.data.seoDescription} ogImage={page.data.ogImage} noindex={page.data.noindex}>
+    <Fragment set:html={html} />
+  </PageLayout>
+) : (
+  <BaseLayout title="Page Not Found" description="The page you requested could not be found." noindex={true}>
+    <NotFound />
+  </BaseLayout>
+)}
