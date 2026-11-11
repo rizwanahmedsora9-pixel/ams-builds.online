@@ -244,6 +244,12 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   const editor = await get(reserved.location.split('?')[0]);
   assert.match(editor.text, /<title>Edit page/, 'edit URL opens the editor, not the list');
   assert.match(editor.text, /name="slug" value="blog-page"/, 'reserved slug is renamed');
+  assert.match(editor.text, /data-editor-mode="text"/);
+  assert.match(editor.text, /data-editor-mode="html"/);
+  assert.match(editor.text, /id="visual-editor"[^]*contenteditable="true"|contenteditable="true"[^]*id="visual-editor"/);
+  assert.match(editor.text, /id="add-html-block"/);
+  assert.match(editor.text, /id="add-youtube"/);
+  assert.match(editor.text, /id="youtube-dialog"/);
   assert.equal((await get(`${admin}/pages`)).text.includes('About Us'), true);
   assert.equal((await get(`${admin}/pages/999`)).status, 404);
   assert.equal((await get(`${admin}/pagesx`)).status, 404);
@@ -294,7 +300,19 @@ test('8. posts: categories, tags, featured image, archives and JSON API', async 
   assert.equal(JSON.parse((await anon('/api/posts/launch-day-more')).text).title, 'Launch Day & More');
   const editor = await get(`${admin}/posts/${state.postId}`);
   assert.equal((editor.text.match(/type="checkbox" name="cat" value="\d+" checked/g) || []).length, 2, 'categories stay ticked');
-  log(`post #${state.postId} on /blog, 2 category pages, tag page, home page and API`);
+
+  const video = await adminPost('/posts/save', {
+    title: 'Video Post', status: 'published',
+    body: '<div class="html-block"><p>First custom block</p></div><div class="html-block"><p>Second custom block</p></div><figure class="video-block youtube-video"><div class="video-responsive"><iframe src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ" title="Demo video" loading="lazy" allowfullscreen></iframe></div></figure>',
+  });
+  const videoId = idFrom(video.location);
+  const videoPage = await anon('/blog/video-post');
+  assert.equal(videoPage.status, 200);
+  assert.equal((videoPage.text.match(/class="html-block"/g) || []).length, 2, 'multiple HTML blocks are rendered');
+  assert.match(videoPage.text, /<iframe src="https:\/\/www\.youtube-nocookie\.com\/embed\/dQw4w9WgXcQ" title="Demo video"/);
+  assert.match(videoPage.text, /aspect-ratio:16\/9/, 'video embed is responsive');
+  await adminPost(`/posts/${videoId}/delete`, {});
+  log(`post #${state.postId} on /blog, 2 category pages, tag page, home page and API; HTML blocks and YouTube embed rendered`);
 });
 
 test('9. drafts and scheduled posts stay hidden; preview needs a login', async () => {

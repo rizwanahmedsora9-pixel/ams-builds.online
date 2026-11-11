@@ -73,6 +73,27 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
 .flash.err{border-color:var(--danger);color:var(--danger)}
 .toolbar{display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.4rem}
 .toolbar button{padding:.35rem .65rem;border:1px solid var(--line);border-radius:.4rem;background:var(--card);color:var(--fg);font:inherit;font-size:.85rem;cursor:pointer}
+.toolbar button:hover{border-color:var(--accent)}
+.toolbar-separator{width:1px;background:var(--line);margin:.15rem .25rem}
+.editor-heading{gap:1rem;margin-top:.9rem}
+.editor-heading>label{margin:0}
+.editor-modes{display:flex;border:1px solid var(--line);border-radius:.45rem;overflow:hidden}
+.editor-modes button{padding:.25rem .7rem;border:0;border-left:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-size:.82rem;cursor:pointer}
+.editor-modes button:first-child{border-left:0}
+.editor-modes button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
+.visual-editor{width:100%;min-height:20rem;padding:.75rem;border:1px solid var(--line);border-radius:.5rem;background:var(--bg);color:var(--fg);overflow-wrap:anywhere}
+.visual-editor:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.visual-editor:empty::before{content:attr(data-placeholder);color:var(--muted);pointer-events:none}
+.visual-editor img{max-width:100%;height:auto}
+.visual-editor .html-block{padding:.6rem;border:1px dashed var(--line);border-radius:.35rem}
+.visual-editor .video-responsive{position:relative;aspect-ratio:16/9;background:#000;overflow:hidden}
+.visual-editor .video-responsive iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+dialog{width:min(36rem,calc(100% - 2rem));max-height:calc(100vh - 2rem);padding:1.2rem;border:1px solid var(--line);border-radius:.7rem;background:var(--card);color:var(--fg)}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+dialog textarea{min-height:12rem}
+.dialog-actions{justify-content:flex-end;margin-top:1rem}
+.form-error{color:var(--danger);font-size:.85rem;margin:.5rem 0 0}
+[hidden]{display:none!important}
 .grid2{display:grid;gap:0 1rem}
 @media (min-width:640px){.grid2{grid-template-columns:1fr 1fr}}
 .media{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr));gap:.7rem}

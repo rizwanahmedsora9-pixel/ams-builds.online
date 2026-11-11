@@ -64,13 +64,99 @@ content.get('/:kind{(?:pages|posts)}', async (c) => {
 /* ------------------------------------------------------------------ editor */
 const EDITOR_JS = `<script>
 (function(){
-  var ta=document.getElementById('body');
-  document.querySelectorAll('[data-wrap]').forEach(function(b){b.addEventListener('click',function(){
-    var parts=b.getAttribute('data-wrap').split('|'),open=parts[0],close=parts[1]||'';
-    if(b.dataset.ask){var u=prompt(b.dataset.ask,b.dataset.def||'');if(!u)return;open=open.replace('$1',u.replace(/"/g,'&quot;'))}
-    var s=ta.selectionStart,e=ta.selectionEnd,v=ta.value;
-    ta.value=v.slice(0,s)+open+v.slice(s,e)+close+v.slice(e);ta.focus();ta.selectionStart=s+open.length;ta.selectionEnd=e+open.length;
+  var ta=document.getElementById('body'),visual=document.getElementById('visual-editor');
+  var mode='html',visualRange=null;
+  var htmlDialog=document.getElementById('html-block-dialog'),youtubeDialog=document.getElementById('youtube-dialog');
+  function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+  function rememberSelection(){
+    var sel=window.getSelection();
+    if(sel.rangeCount&&visual.contains(sel.anchorNode))visualRange=sel.getRangeAt(0).cloneRange();
+  }
+  function restoreSelection(){
+    visual.focus();
+    var sel=window.getSelection(),range=visualRange;
+    if(!range||!visual.contains(range.commonAncestorContainer)){range=document.createRange();range.selectNodeContents(visual);range.collapse(false)}
+    sel.removeAllRanges();sel.addRange(range);
+  }
+  function insertSnippet(snippet){
+    if(mode==='html'){
+      var s=ta.selectionStart,e=ta.selectionEnd,v=ta.value;
+      ta.value=v.slice(0,s)+snippet+v.slice(e);ta.focus();ta.selectionStart=ta.selectionEnd=s+snippet.length;
+    }else{
+      restoreSelection();document.execCommand('insertHTML',false,snippet);rememberSelection();
+    }
+  }
+  function setMode(next){
+    if(next===mode)return;
+    if(next==='html'){ta.value=visual.innerHTML;visual.hidden=true;ta.hidden=false;ta.focus()}
+    else{visual.innerHTML=ta.value;ta.hidden=true;visual.hidden=false;visual.focus();restoreSelection()}
+    mode=next;
+    document.querySelectorAll('[data-editor-mode]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.editorMode===next))});
+  }
+  document.querySelectorAll('[data-editor-mode]').forEach(function(b){b.addEventListener('click',function(){setMode(b.dataset.editorMode)})});
+  visual.addEventListener('keyup',rememberSelection);visual.addEventListener('mouseup',rememberSelection);
+  visual.addEventListener('paste',function(e){
+    e.preventDefault();var text=(e.clipboardData||window.clipboardData).getData('text/plain');
+    document.execCommand('insertText',false,text);
+  });
+  document.querySelectorAll('[data-wrap]').forEach(function(b){
+    b.addEventListener('mousedown',function(e){if(mode==='text')e.preventDefault()});
+    b.addEventListener('click',function(){
+      if(mode==='text')rememberSelection();
+      var parts=b.getAttribute('data-wrap').split('|'),open=parts[0],close=parts[1]||'';
+      if(b.dataset.ask){var u=prompt(b.dataset.ask,b.dataset.def||'');if(!u)return;open=open.replace('$1',escapeHtml(u))}
+      if(mode==='text'){
+        restoreSelection();
+        if(b.dataset.command){document.execCommand(b.dataset.command,false,b.dataset.value||null)}
+        else{
+          var sel=window.getSelection(),selected='';
+          if(sel.rangeCount){var holder=document.createElement('div');holder.appendChild(sel.getRangeAt(0).cloneContents());selected=holder.innerHTML}
+          document.execCommand('insertHTML',false,open+selected+close);
+        }
+        rememberSelection();
+      }else{
+        var s=ta.selectionStart,e=ta.selectionEnd,v=ta.value;
+        ta.value=v.slice(0,s)+open+v.slice(s,e)+close+v.slice(e);ta.focus();ta.selectionStart=s+open.length;ta.selectionEnd=e+open.length;
+      }
+    })
+  });
+  function openDialog(dialog,focus){
+    rememberSelection();dialog.showModal();setTimeout(function(){focus.focus()},0);
+  }
+  document.querySelectorAll('[data-close-dialog]').forEach(function(b){b.addEventListener('click',function(){b.closest('dialog').close()})});
+  document.getElementById('add-html-block').addEventListener('click',function(){openDialog(htmlDialog,document.getElementById('html-block-input'))});
+  document.getElementById('insert-html-block').addEventListener('click',function(){
+    var input=document.getElementById('html-block-input'),code=input.value.trim();if(!code){input.focus();return}
+    insertSnippet('<div class="html-block">\n'+code+'\n</div>');input.value='';htmlDialog.close();
+  });
+  function youtubeId(value){
+    try{
+      var url=new URL(value),host=url.hostname.toLowerCase().replace(/^(www|m)\./,''),id='';
+      if(url.protocol!=='https:'&&url.protocol!=='http:')return '';
+      if(host==='youtu.be')id=url.pathname.split('/')[1];
+      else if(host==='youtube.com'||host==='youtube-nocookie.com'){
+        if(url.pathname==='/watch')id=url.searchParams.get('v')||'';
+        else{var parts=url.pathname.split('/');if(['embed','shorts','live'].indexOf(parts[1])!==-1)id=parts[2]}
+      }else return '';
+      return /^[A-Za-z0-9_-]{11}$/.test(id||'')?id:'';
+    }catch(e){return ''}
+  }
+  document.getElementById('add-youtube').addEventListener('click',function(){
+    document.getElementById('youtube-error').hidden=true;openDialog(youtubeDialog,document.getElementById('youtube-url'));
+  });
+  document.getElementById('insert-youtube').addEventListener('click',function(){
+    var input=document.getElementById('youtube-url'),id=youtubeId(input.value.trim()),error=document.getElementById('youtube-error');
+    if(!id){error.hidden=false;input.focus();return}
+    var title=document.getElementById('youtube-title').value.trim()||'YouTube video player';
+    var embed='<figure class="video-block youtube-video"><div class="video-responsive"><iframe src="https://www.youtube-nocookie.com/embed/'+id+'" title="'+escapeHtml(title)+'" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div></figure>';
+    insertSnippet(embed);input.value='';document.getElementById('youtube-title').value='';youtubeDialog.close();
+  });
+  ['youtube-url','youtube-title','html-block-input'].forEach(function(id){document.getElementById(id).addEventListener('keydown',function(e){
+    if(e.key==='Enter'&&(id!=='html-block-input'||e.ctrlKey||e.metaKey)){e.preventDefault();document.getElementById(id==='html-block-input'?'insert-html-block':'insert-youtube').click()}
   })});
+  document.getElementById('edit').addEventListener('submit',function(){if(mode==='text')ta.value=visual.innerHTML});
+  // Text is the friendly visual editor; HTML mode always exposes the same underlying markup.
+  visual.innerHTML=ta.value;setMode('text');
   var title=document.getElementById('title'),slug=document.getElementById('slug');
   if(slug&&!slug.value){title.addEventListener('input',function(){if(slug.dataset.touched)return;
     slug.value=title.value.toLowerCase().normalize('NFKD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80)});
@@ -135,21 +221,32 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
     <input type="text" id="title" name="title" value="${row?.title ?? ''}" required maxlength="200">
     <label for="slug">Slug</label>
     <input type="text" id="slug" name="slug" value="${row?.slug ?? ''}" maxlength="80" autocapitalize="none" placeholder="generated from the title">
-    <label for="body">Content (HTML)</label>
-    <div class="toolbar">
-      <button type="button" data-wrap="<strong>|</strong>"><b>B</b></button>
-      <button type="button" data-wrap="<em>|</em>"><i>I</i></button>
-      <button type="button" data-wrap="<h2>|</h2>">H2</button>
-      <button type="button" data-wrap="<h3>|</h3>">H3</button>
-      <button type="button" data-wrap="<p>|</p>">&para;</button>
-      <button type="button" data-wrap="<ul>&#10;  <li>|</li>&#10;</ul>">List</button>
-      <button type="button" data-wrap="<blockquote>|</blockquote>">Quote</button>
+    <div class="editor-heading row between">
+      <label for="body" id="content-label">Content</label>
+      <div class="editor-modes" role="group" aria-label="Editor mode">
+        <button type="button" data-editor-mode="text" aria-pressed="false">Text</button>
+        <button type="button" data-editor-mode="html" aria-pressed="true">HTML</button>
+      </div>
+    </div>
+    <div class="toolbar" aria-label="Content formatting">
+      <button type="button" data-wrap="<strong>|</strong>" data-command="bold" title="Bold"><b>B</b></button>
+      <button type="button" data-wrap="<em>|</em>" data-command="italic" title="Italic"><i>I</i></button>
+      <button type="button" data-wrap="<h2>|</h2>" data-command="formatBlock" data-value="h2">H2</button>
+      <button type="button" data-wrap="<h3>|</h3>" data-command="formatBlock" data-value="h3">H3</button>
+      <button type="button" data-wrap="<p>|</p>" data-command="formatBlock" data-value="p" title="Paragraph">&para;</button>
+      <button type="button" data-wrap="<ul>&#10;  <li>|</li>&#10;</ul>" data-command="insertUnorderedList">List</button>
+      <button type="button" data-wrap="<blockquote>|</blockquote>" data-command="formatBlock" data-value="blockquote">Quote</button>
       <button type="button" data-wrap="<pre><code>|</code></pre>">Code</button>
       <button type="button" data-wrap='<a href="$1">|</a>' data-ask="Link URL" data-def="https://">Link</button>
       <button type="button" data-wrap='<img src="$1" alt="">|' data-ask="Image URL (copy it from Media)" data-def="/media/">Image</button>
+      <span class="toolbar-separator" aria-hidden="true"></span>
+      <button type="button" id="add-html-block" title="Insert a custom HTML block">&lt;/&gt; HTML block</button>
+      <button type="button" id="add-youtube" title="Embed a YouTube video">&#9654; YouTube</button>
     </div>
+    <div id="visual-editor" class="visual-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="content-label" data-placeholder="Write your content here…" hidden></div>
     <textarea id="body" name="body" class="code" spellcheck="true">${row?.body ?? ''}</textarea>
-    ${can(c.var.user, 'admin') ? html`<p class="hint">As an admin your HTML is saved exactly as written.</p>` : html`<p class="hint">Scripts, styles, iframes and unsafe attributes are removed when you save.</p>`}
+    <p class="hint">Use Text for visual editing or HTML to edit the source. You can add as many HTML and YouTube blocks as you need.</p>
+    ${can(c.var.user, 'admin') ? html`<p class="hint">Admin HTML is not sanitized when you save.</p>` : html`<p class="hint">Unsafe HTML is removed when you save. YouTube embeds added with the YouTube button are allowed.</p>`}
   </div>
   ${postFields}
   <div class="card">
@@ -175,6 +272,30 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
     <p class="row" style="margin:1.1rem 0 0"><button class="btn" type="submit">Save</button></p>
   </div>
 </form>
+<dialog id="html-block-dialog" aria-labelledby="html-block-title">
+  <h2 id="html-block-title">Add HTML block</h2>
+  <p class="hint">Paste a complete HTML snippet. It will be inserted at your cursor, and you can repeat this for more blocks.</p>
+  <label for="html-block-input">HTML code</label>
+  <textarea id="html-block-input" class="code" spellcheck="false" placeholder="<div>\n  Your HTML here\n</div>"></textarea>
+  <p class="hint">Press Ctrl+Enter (or Cmd+Enter) to insert.</p>
+  <div class="row dialog-actions">
+    <button type="button" class="btn ghost" data-close-dialog>Cancel</button>
+    <button type="button" class="btn" id="insert-html-block">Insert HTML block</button>
+  </div>
+</dialog>
+<dialog id="youtube-dialog" aria-labelledby="youtube-dialog-title">
+  <h2 id="youtube-dialog-title">Add YouTube video</h2>
+  <p class="hint">Paste a watch, share, Shorts, live, or embed URL.</p>
+  <label for="youtube-url">YouTube video URL</label>
+  <input type="url" id="youtube-url" inputmode="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+  <label for="youtube-title">Video title <span class="muted">(optional)</span></label>
+  <input type="text" id="youtube-title" maxlength="200" placeholder="Used for accessibility">
+  <p class="form-error" id="youtube-error" role="alert" hidden>Enter a valid YouTube video URL.</p>
+  <div class="row dialog-actions">
+    <button type="button" class="btn ghost" data-close-dialog>Cancel</button>
+    <button type="button" class="btn" id="insert-youtube">Embed video</button>
+  </div>
+</dialog>
 ${row ? html`<form method="post" action="${base}/${kind}/${row.id}/delete" id="delete">${csrfField(c)}<button class="btn danger" type="submit">Delete ${type}</button></form>` : ''}
 ${raw(EDITOR_JS)}`, '/' + kind);
 }
