@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import authHandler from '../api/auth.js';
 import callbackHandler from '../api/callback.js';
