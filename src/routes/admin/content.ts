@@ -5,6 +5,7 @@ import { RESERVED_SLUGS, bumpCache, getSettings } from '../../lib/config';
 import { mediaUrl, permalinkStyle, postUrl } from '../../lib/content';
 import { sanitizeHtml, slugify } from '../../lib/security';
 import { localToUtc, utcToLocal } from '../../lib/time';
+import { isInPrimaryMenu, removeUrlFromMenus, syncPageMenu } from '../../lib/menus';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 
 /** Pages and posts share one table and one editor; posts add terms, featured image and scheduling. */
@@ -119,6 +120,9 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
   }
 
   const status = row?.status ?? 'draft';
+  // Pages: one tick puts the page in the header menu (new pages and drafts start ticked).
+  const pageUrl = row ? (settings.home_page_id === String(row.id) ? '/' : '/' + row.slug) : null;
+  const inMenu = type === 'page' && (!row || row.status === 'draft' || (await isInPrimaryMenu(c.env, pageUrl!)));
   const opt = (v: string, label: string) => html`<option value="${v}"${status === v ? raw(' selected') : ''}>${label}</option>`;
   const title = row ? `Edit ${type}` : `New ${type}`;
   return layout(c, title, html`
@@ -166,6 +170,8 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
       <input type="datetime-local" id="publish_at" name="publish_at" value="${row?.published_at ? utcToLocal(row.published_at, tz) : ''}">
       <p class="hint">Scheduled posts go live automatically at this time. Leave empty to publish now.</p>
     </div>` : ''}
+    ${type === 'page' ? html`<label class="check" style="margin-top:.9rem"><input type="checkbox" name="in_menu" value="1"${inMenu ? raw(' checked') : ''}> Show in the main menu</label>
+    <p class="hint">Adds a link to this page in the site header once it is published. Reorder or rename links under <a href="${base}/menus">Menus</a>.</p>` : ''}
     <p class="row" style="margin:1.1rem 0 0"><button class="btn" type="submit">Save</button></p>
   </div>
 </form>
@@ -258,6 +264,16 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
     await db.batch(stmts);
   }
 
+  if (type === 'page') {
+    const isHome = settings.home_page_id === String(savedId);
+    await syncPageMenu(c.env, {
+      oldUrl: existing ? (isHome ? '/' : '/' + existing.slug) : null,
+      url: isHome ? '/' : '/' + slug,
+      label: title,
+      show: str('in_menu') === '1' && status === 'published',
+    });
+  }
+
   await bumpCache(c.env, c.var.cfg);
   return go(c, `/${kind}/${savedId}`, { ok: status === 'scheduled' ? 'Saved and scheduled.' : status === 'published' ? 'Saved and published.' : 'Draft saved.' });
 });
@@ -266,7 +282,7 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
 content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/delete', async (c) => {
   const kind = kindOf(c);
   const id = Number(c.req.param('id'));
-  const row = await c.env.DB.prepare('SELECT id, author_id FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<{ id: number; author_id: number | null }>();
+  const row = await c.env.DB.prepare('SELECT id, slug, author_id FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<{ id: number; slug: string; author_id: number | null }>();
   if (!row) return errorPage(c, 404, 'Not found.');
   if (!mayEdit(c, row)) return errorPage(c, 403, 'You can only delete your own posts.');
   await c.env.DB.batch([
@@ -274,6 +290,7 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/delete', async (c) => {
     c.env.DB.prepare('DELETE FROM content WHERE id=?').bind(id),
     c.env.DB.prepare("DELETE FROM settings WHERE site_id=1 AND key='home_page_id' AND value=?").bind(String(id)),
   ]);
+  if (kind === 'pages') await removeUrlFromMenus(c.env, '/' + row.slug);
   await bumpCache(c.env, c.var.cfg);
   return go(c, `/${kind}`, { ok: 'Deleted.' });
 });

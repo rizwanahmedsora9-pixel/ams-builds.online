@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
+import { crc32, deflateRawSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -110,6 +111,38 @@ async function csrf() {
 }
 const adminPost = async (path, fields) => request(admin + path, { method: 'POST', body: form({ _csrf: await csrf(), ...fields }) });
 const idFrom = (location) => Number(location.match(/\/(\d+)(\?|$)/)[1]);
+
+
+/** Builds a small zip in memory (first file stored, the rest deflated). */
+function makeZip(files) {
+  const locals = [], central = [];
+  let offset = 0;
+  Object.entries(files).forEach(([name, text], i) => {
+    const raw = Buffer.from(text), nameBuf = Buffer.from(name);
+    const method = i === 0 ? 0 : 8;
+    const data = method ? deflateRawSync(raw) : raw;
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0); head.writeUInt16LE(20, 4); head.writeUInt16LE(method, 8);
+    head.writeUInt32LE(crc32(raw), 14); head.writeUInt32LE(data.length, 18); head.writeUInt32LE(raw.length, 22); head.writeUInt16LE(nameBuf.length, 26);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(method, 10);
+    cd.writeUInt32LE(crc32(raw), 16); cd.writeUInt32LE(data.length, 20); cd.writeUInt32LE(raw.length, 24); cd.writeUInt16LE(nameBuf.length, 28); cd.writeUInt32LE(offset, 42);
+    locals.push(head, nameBuf, data); central.push(cd, nameBuf);
+    offset += 30 + nameBuf.length + data.length;
+  });
+  const cdBuf = Buffer.concat(central), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length / 2, 8); end.writeUInt16LE(central.length / 2, 10);
+  end.writeUInt32LE(cdBuf.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, cdBuf, end]);
+}
+async function uploadTheme(name, bytes) {
+  const body = new FormData();
+  body.set('_csrf', await csrf());
+  body.append('theme', new File([bytes], name));
+  return request(`${admin}/themes/upload`, { method: 'POST', body });
+}
+const themeId = async (name) => Number((await get(`${admin}/themes`)).text.match(new RegExp(`themes/(\\d+)/download">${name}<`))[1]);
+const nav = (htmlText) => [...htmlText.match(/<nav class="site-nav"[^]*?<\/nav>/)[0].matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
 
 /* ------------------------------------------------------------------- steps */
 const INSTALL = {
@@ -326,6 +359,109 @@ test('12. data survives a restart', async () => {
   assert.equal((await fetch(base + state.mediaUrl)).status, 200);
   assert.equal((await get(admin)).status, 200, 'still signed in');
   log('server restarted: still installed, content, media and session intact');
+});
+
+test('12a. menus: pages join the main menu with one tick; reorder, custom links, footer', async () => {
+  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog'], 'seeded menu');
+  const made = await adminPost('/pages/save', { title: 'Services', body: '<p>What we do</p>', status: 'published', in_menu: 1 });
+  const servicesId = idFrom(made.location);
+  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog', 'Services=/services'], 'ticked page appears in the header');
+  assert.match((await get(`${admin}/pages/${servicesId}`)).text, /name="in_menu" value="1" checked/);
+  assert.match((await get(`${admin}/pages/new`)).text, /name="in_menu" value="1" checked/, 'new pages start ticked');
+
+  await adminPost('/pages/save', { id: servicesId, title: 'Services', slug: 'what-we-do', body: '<p>x</p>', status: 'published', in_menu: 1 });
+  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog', 'Services=/what-we-do'], 'menu link follows a slug change');
+
+  const draft = await adminPost('/pages/save', { title: 'Hidden Draft', body: '', status: 'draft', in_menu: 1 });
+  assert.equal(nav((await anon('/')).text).length, 3, 'drafts are never linked');
+
+  // reorder + rename + custom link through the menu editor (row order = menu order)
+  const editor = await get(`${admin}/menus`);
+  assert.equal(editor.status, 200);
+  const menuId = Number(editor.text.match(/menus\/(\d+)\/save/)[1]);
+  const saved = await adminPost(`/menus/${menuId}/save`, {
+    name: 'Main', location: 'primary',
+    label: ['Our Services', 'Home', 'Docs', 'Bad', ''], url: ['/what-we-do', '/', 'https://example.org/docs', 'javascript:alert(1)', ''],
+  });
+  assert.match(saved.location, /1 link was skipped/);
+  assert.deepEqual(nav((await anon('/')).text), ['Our Services=/what-we-do', 'Home=/', 'Docs=https://example.org/docs']);
+
+  // a second menu in the footer
+  await adminPost('/menus/new', { name: 'Footer links' });
+  const footerId = Math.max(...[...(await get(`${admin}/menus`)).text.matchAll(/menus\/(\d+)\/save/g)].map((m) => Number(m[1])));
+  await adminPost(`/menus/${footerId}/save`, { name: 'Footer links', location: 'footer', label: ['Privacy'], url: ['/privacy'] });
+  assert.match((await anon('/')).text, /<nav class="footer-nav"[^]*<a href="\/privacy">Privacy<\/a>/);
+  await adminPost(`/menus/${footerId}/delete`, {});
+  assert.doesNotMatch((await anon('/')).text, /<nav class="footer-nav"/);
+
+  // unticking removes the link; deleting a page removes it too
+  await adminPost('/pages/save', { id: servicesId, title: 'Services', slug: 'what-we-do', body: '<p>x</p>', status: 'published' });
+  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Docs=https://example.org/docs']);
+  await adminPost('/pages/save', { id: servicesId, title: 'Services', slug: 'what-we-do', body: '<p>x</p>', status: 'published', in_menu: 1 });
+  await adminPost(`/pages/${servicesId}/delete`, {});
+  await adminPost(`/pages/${idFrom(draft.location)}/delete`, {});
+  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Docs=https://example.org/docs']);
+  log('tick adds page to header, link follows slug, reorder/rename/custom link saved, unsafe link dropped, footer menu works');
+});
+
+test('12b. themes: upload JSON and zip, activate, replace, download, delete', async () => {
+  const bad = [
+    ['not json', 'nope.json', 'not valid JSON'],
+    [JSON.stringify({ name: 'X', templates: { home: 'x' } }), 'x.json', '"base" template'],
+    [JSON.stringify({ name: 'X', templates: { base: '<html>no slot</html>' } }), 'x.json', 'must contain'],
+    [JSON.stringify({ templates: { base: '{{{content}}}' } }), 'x.json', 'needs a "name"'],
+    [makeZip({ 'readme.txt': 'hi' }), 'x.zip', 'does not contain a theme.json'],
+  ];
+  for (const [bytes, name, message] of bad) assert.ok((await uploadTheme(name, bytes)).location.includes(message), message);
+
+  const json = { name: 'Json Theme', version: '2.1.0', templates: { base: '<!doctype html><html><head>{{{head}}}<style>{{{theme_css}}}</style></head><body data-theme="json">{{#each menu.primary}}<a class="jn" href="{{url}}">{{label}}</a>{{/each}}<main>{{{content}}}</main></body></html>', page: '<h1 class="json-page">{{page.title}}</h1>{{{page.content}}}' }, css: 'body{color:#123456}' };
+  assert.match((await uploadTheme('json-theme.json', JSON.stringify(json))).location, /Json Theme" v2\.1\.0 saved/);
+  assert.doesNotMatch((await anon('/')).text, /data-theme="json"/, 'uploading does not activate');
+  const jsonId = await themeId('Json Theme');
+  await adminPost(`/themes/${jsonId}/activate`, {});
+  const home = await anon('/');
+  assert.match(home.text, /data-theme="json"/);
+  assert.match(home.text, /body\{color:#123456\}/);
+  assert.match(home.text, /class="jn" href="\/">Home/);
+  assert.match(home.text, /Welcome to E2E Test Site/, 'missing "home" template falls back to the default one');
+
+  // zip with a folder, theme.json naming files, deflated entries
+  const zip = makeZip({
+    'zip-theme/theme.json': JSON.stringify({ name: 'Zip Theme', version: '0.9', templates: { base: 'layout.html' }, css: 'main.css' }),
+    'zip-theme/layout.html': '<!doctype html><html><head>{{{head}}}<style>{{{theme_css}}}</style></head><body data-theme="zip">{{{content}}}</body></html>',
+    'zip-theme/404.html': '<p class="zip-404">Lost</p>',
+    'zip-theme/main.css': 'body{background:#abcdef}',
+  });
+  assert.match((await uploadTheme('zip-theme.zip', zip)).location, /Zip Theme" v0\.9 saved/);
+  const missing = makeZip({ 'theme.json': JSON.stringify({ name: 'Broken', templates: { base: 'gone.html' } }) });
+  assert.ok((await uploadTheme('broken.zip', missing)).location.includes('"gone.html" but that file is not in the zip'));
+  const zipId = await themeId('Zip Theme');
+  await adminPost(`/themes/${zipId}/activate`, {});
+  assert.match((await anon('/')).text, /data-theme="zip"[^]*<\/body>/);
+  assert.match((await anon('/')).text, /body\{background:#abcdef\}/);
+  const lost = await anon('/nowhere');
+  assert.equal(lost.status, 404);
+  assert.match(lost.text, /class="zip-404"/, 'template picked up by file name');
+
+  // replacing the active theme takes effect at once
+  json.name = 'Zip Theme'; json.version = '1.0';
+  json.templates.base = json.templates.base.replace('data-theme="json"', 'data-theme="zip-v1"');
+  await uploadTheme('again.json', JSON.stringify(json));
+  assert.match((await anon('/')).text, /data-theme="zip-v1"/);
+
+  const dl = await get(`${admin}/themes/${zipId}/download`);
+  assert.match(dl.headers.get('content-disposition'), /zip-theme-theme\.json/);
+  assert.equal(JSON.parse(dl.text).version, '1.0');
+
+  assert.match((await adminPost(`/themes/${zipId}/delete`, {})).location, /Activate another theme/);
+  const defaultId = await themeId('Default');
+  await adminPost(`/themes/${defaultId}/activate`, {});
+  assert.match((await anon('/')).text, /class="site-header"/);
+  assert.match((await adminPost(`/themes/${zipId}/delete`, {})).location, /Theme deleted/);
+  assert.match((await adminPost(`/themes/${jsonId}/delete`, {})).location, /Theme deleted/);
+  assert.match((await adminPost('/themes/restore-default', {})).location, /Default theme restored/);
+  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only the Default theme is left');
+  log('5 bad uploads rejected with reasons; JSON + zip themes installed, activated, replaced live, downloaded, deleted');
 });
 
 test('13. deleting content and media removes them from the site', async () => {

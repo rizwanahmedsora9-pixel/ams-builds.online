@@ -7,7 +7,8 @@ A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) ser
 | Phase | Scope | State |
 | --- | --- | --- |
 | 1 | Installer, login, dashboard, pages, posts (categories, tags, featured image, scheduling), media, settings, default theme, page cache | **done** |
-| 2 | Menus, theme upload, custom code UI, users and roles UI, redirects, sitemap.xml, robots.txt, RSS | next |
+| 2 | Menus and theme upload | **done** |
+| 2 | Custom code UI, users and roles UI, redirects, sitemap.xml, robots.txt, RSS | next |
 | 3 | Backups, plugin hooks, multi-site | later |
 
 The full database schema for all three phases is already created at install.
@@ -129,6 +130,42 @@ Each run starts a real server on an empty temporary data folder and drives it ov
 
 `GET /api/health` reports the runtime, whether the site is installed, and whether the database, key-value store and media storage answer. Use it for uptime monitoring.
 
+## Menus
+
+- Tick **Show in the main menu** when editing a page and it is linked in the site header once published. New pages start ticked.
+- **Menus** in the admin panel lets you reorder links (drag the handle or use the arrows), rename them, add custom links, and create a footer menu.
+
+## Themes
+
+**Themes** in the admin panel lists installed themes and lets an admin upload, activate, download and delete them. Download the Default theme to get a working file to edit.
+
+A theme is one JSON file:
+
+```json
+{
+  "name": "My Theme",
+  "version": "1.0.0",
+  "templates": { "base": "...{{{content}}}...", "home": "...", "page": "...", "post": "...", "archive": "...", "404": "..." },
+  "css": "body { ... }"
+}
+```
+
+Only `base` is required and it must contain `{{{content}}}`; missing templates fall back to the Default theme. A `.zip` also works: put `theme.json` next to `base.html`, `home.html`, `page.html`, `post.html`, `archive.html`, `404.html` and `style.css` (the layout of `src/themes/default/`).
+
+Template tags: `{{value}}` (escaped), `{{{value}}}` (raw HTML), `{{#if x}}…{{else}}…{{/if}}`, `{{#unless x}}…{{/unless}}`, `{{#each list}}…{{/each}}`.
+
+| Available in | Values |
+| --- | --- |
+| every template | `site.title`, `site.tagline`, `site.url`, `year`, `body_class`, `menu.primary` and `menu.footer` (lists of `label`, `url`, `active`) |
+| `base` only | `{{{head}}}` (title, SEO tags, custom code), `{{{theme_css}}}`, `{{{content}}}`, `{{{footer}}}` |
+| `home` | `page` (the chosen home page, may be empty), `posts` (latest five) |
+| `page` | `page.title`, `{{{page.content}}}` |
+| `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`) |
+| `archive` | `archive.title`, `posts`, `pagination.prev`, `pagination.next` |
+| each item of `posts` | `title`, `url`, `excerpt`, `date`, `date_iso`, `featured_image`, `featured_alt` |
+
+A theme can contain scripts, so only install themes you trust.
+
 ## How it works
 
 - **Install lock** – KV key `installed`. Without it every request redirects to `/install`; with it `/install` is a 404. The installer also checks D1 for an existing user, so it cannot run twice while KV is still propagating.
@@ -163,6 +200,8 @@ src/
       content.ts           pages and posts
       media.ts             media library
       settings.ts
+      menus.ts               menu editor
+      themes.ts              theme upload, activate, delete
   node/
     server.ts              Node.js entry point (PORT, DATA_DIR, TRUST_PROXY)
     storage.ts             SQLite + disk versions of D1, KV and file storage
@@ -174,6 +213,8 @@ src/
     auth.ts                passwords, sessions, CSRF, roles
     security.ts            escaping, sanitizer, rate limiting
     files.ts               uploaded files: KV on Cloudflare, disk on Node
+    themes.ts, zip.ts      theme bundle reader (JSON or zip)
+    menus.ts               page-to-menu sync
     render.ts              template engine, theme rendering
     content.ts             content queries, permalinks
     config.ts              KV config, settings

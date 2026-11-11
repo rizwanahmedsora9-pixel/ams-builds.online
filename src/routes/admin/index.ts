@@ -7,6 +7,8 @@ import { csrfField, errorPage, flash, go, html, layout, shell } from '../../lib/
 import content from './content';
 import media from './media';
 import settings from './settings';
+import menus from './menus';
+import themes from './themes';
 
 /**
  * Admin panel. Mounted by the root app under "/{admin-slug}" with that prefix
@@ -167,6 +169,8 @@ admin.post('/profile', async (c) => {
 admin.route('/', content);
 admin.route('/', media);
 admin.route('/', settings);
+admin.route('/', menus);
+admin.route('/', themes);
 
 admin.notFound((c) => errorPage(c, 404, 'That admin page does not exist.'));
 
