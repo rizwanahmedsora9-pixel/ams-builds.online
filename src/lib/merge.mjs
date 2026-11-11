@@ -1,6 +1,9 @@
-// Pure merge logic: CMS overrides (rows from the admin store / build export)
-// layered on top of the git-tracked files. Kept glob-free so tests can import
-// it straight from Node.
+// Pure merge logic: CMS overrides layered on top of the git-tracked files.
+// Kept glob-free so both browser CMS runtime and Node tests can import it.
+
+function entryKey(entry) {
+  return entry?.type ? `${entry.type}:${entry.slug}` : String(entry?.slug ?? '');
+}
 
 /**
  * Apply CMS overrides on top of the file entries. An override replaces the
@@ -8,25 +11,35 @@
  * not come back from git.
  */
 export function mergeEntries(base, overrides) {
-  const bySlug = new Map(base.map((entry) => [entry.slug, entry]));
+  const byKey = new Map();
+  for (const entry of base || []) {
+    if (!entry || typeof entry.slug !== 'string' || !entry.slug) continue;
+    byKey.set(entryKey(entry), entry);
+  }
   for (const row of overrides || []) {
     if (!row || typeof row.slug !== 'string' || !row.slug) continue;
+    const key = entryKey(row);
     if (row.deleted) {
-      bySlug.delete(row.slug);
+      byKey.delete(key);
       continue;
     }
-    bySlug.set(row.slug, {
+    const existing = byKey.get(key);
+    byKey.set(key, {
       slug: row.slug,
-      type: row.type || bySlug.get(row.slug)?.type,
-      data: row.frontmatter || {},
+      type: row.type || existing?.type || '',
+      data: row.frontmatter || row.data || {},
       body: typeof row.body === 'string' ? row.body : '',
+      source: 'cms',
+      updated_at: row.updated_at || null,
     });
   }
-  return [...bySlug.values()].sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+  return [...byKey.values()].sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
 }
 
 /** Settings override wins when the CMS has saved settings at least once. */
 export function mergeSettings(base, override) {
-  if (override && typeof override === 'object' && !Array.isArray(override)) return override;
-  return base;
+  if (override && typeof override === 'object' && !Array.isArray(override)) {
+    return { ...(base || {}), ...override };
+  }
+  return base || {};
 }

@@ -12,7 +12,8 @@ const fixedLinks = [
 ];
 const dynamicLinks = navPages.map(p => ({ href: `/${p.slug}/`, label: p.data.title }));
 const links = [...fixedLinks, ...dynamicLinks];
-const current = Astro.url.pathname;
+const current = Astro.url.pathname.endsWith('/') ? Astro.url.pathname : `${Astro.url.pathname}/`;
+const isActive = (href: string) => href === '/' ? current === '/' : current === href || current.startsWith(href);
 const logoText = site.logoText || site.siteName;
 const words = logoText.split(' ');
 const first = words.slice(0, 1).join(' ');
@@ -22,16 +23,16 @@ const rest = words.slice(1).join(' ');
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="flex items-center justify-between h-16 md:h-20">
       <a href="/" class="flex items-center gap-3 shrink-0" aria-label={`${site.siteName} — Home`}>
-        <span class="w-10 h-10 rounded-xl bg-amber-500 text-slate-900 grid place-items-center font-black text-xl">{site.logoInitial}</span>
+        <span data-cms-logo-initial class="w-10 h-10 rounded-xl bg-amber-500 text-slate-900 grid place-items-center font-black text-xl">{site.logoInitial}</span>
         <span class="leading-tight">
-          <span class="block text-white font-extrabold tracking-tight">{first}</span>
-          {rest && <span class="block text-[11px] tracking-widest uppercase text-amber-400 font-semibold">{rest}</span>}
+          <span data-cms-logo-first class="block text-white font-extrabold tracking-tight">{first}</span>
+          <span data-cms-logo-rest class:list={['block text-[11px] tracking-widest uppercase text-amber-400 font-semibold', !rest && 'hidden']}>{rest}</span>
         </span>
       </a>
 
-      <nav aria-label="Primary" class="hidden lg:flex items-center gap-1">
+      <nav aria-label="Primary" data-cms-nav-desktop class="hidden lg:flex items-center gap-1">
         {links.map(l => (
-          <a href={l.href} class:list={['px-4 py-2 rounded-full text-sm font-medium transition', current === l.href ? 'bg-white/10 text-white' : 'text-slate-300 hover:text-white hover:bg-white/10']}>{l.label}</a>
+          <a href={l.href} class:list={['px-4 py-2 rounded-full text-sm font-medium transition', isActive(l.href) ? 'bg-white/10 text-white' : 'text-slate-300 hover:text-white hover:bg-white/10']}>{l.label}</a>
         ))}
         <a href="/contact/" class="ml-3 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-5 py-2.5 rounded-full text-sm transition">Get a Quote →</a>
       </nav>
@@ -45,7 +46,7 @@ const rest = words.slice(1).join(' ');
   </div>
   <input type="checkbox" id="mobile-menu-toggle" class="hidden" />
   <nav id="mobile-menu" aria-label="Mobile" class="hidden lg:hidden border-t border-white/10 bg-slate-900 px-4 py-4 space-y-1">
-    {links.map(l => <a href={l.href} class="block px-4 py-3 rounded-lg text-slate-200 hover:bg-white/10 font-medium">{l.label}</a>)}
+    {links.map(l => <a href={l.href} class:list={['block px-4 py-3 rounded-lg font-medium', isActive(l.href) ? 'bg-white/10 text-white' : 'text-slate-200 hover:bg-white/10']}>{l.label}</a>)}
     <a href="/contact/" class="block mt-3 text-center bg-amber-500 text-slate-900 font-bold px-5 py-3 rounded-xl">Get a Quote →</a>
   </nav>
 </header>

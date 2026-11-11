@@ -22,19 +22,17 @@ const socials = [
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 grid gap-10 md:grid-cols-2 lg:grid-cols-4">
     <div>
       <div class="flex items-center gap-3 mb-4">
-        <span class="w-10 h-10 rounded-xl bg-amber-500 text-slate-900 grid place-items-center font-black text-xl">{site.logoInitial}</span>
-        <div><p class="text-white font-extrabold">{site.logoText || site.siteName}</p><p class="text-xs tracking-widest uppercase text-amber-400 font-semibold">{site.tagline}</p></div>
+        <span data-cms-footer-initial class="w-10 h-10 rounded-xl bg-amber-500 text-slate-900 grid place-items-center font-black text-xl">{site.logoInitial}</span>
+        <div><p data-cms-footer-name class="text-white font-extrabold">{site.logoText || site.siteName}</p><p data-cms-footer-tagline class="text-xs tracking-widest uppercase text-amber-400 font-semibold">{site.tagline}</p></div>
       </div>
-      <p class="text-sm leading-6 text-slate-400">{site.shortDescription}</p>
-      {socials.length > 0 && (
-        <div class="flex flex-wrap gap-3 mt-5">
-          {socials.map(s => <a href={s.url} aria-label={s.label} rel="noopener" target="_blank" class="w-9 h-9 rounded-full bg-white/10 grid place-items-center hover:bg-amber-500 hover:text-slate-900 transition text-sm font-bold">{s.short}</a>)}
-        </div>
-      )}
+      <p data-cms-footer-desc class="text-sm leading-6 text-slate-400">{site.shortDescription}</p>
+      <div data-cms-footer-socials class:list={['flex flex-wrap gap-3 mt-5', socials.length === 0 && 'hidden']}>
+        {socials.map(s => <a href={s.url} aria-label={s.label} rel="noopener" target="_blank" class="w-9 h-9 rounded-full bg-white/10 grid place-items-center hover:bg-amber-500 hover:text-slate-900 transition text-sm font-bold">{s.short}</a>)}
+      </div>
     </div>
     <nav aria-label="Footer">
       <h3 class="text-white font-bold mb-4">Quick Links</h3>
-      <ul class="space-y-2.5 text-sm">
+      <ul data-cms-footer-links class="space-y-2.5 text-sm">
         <li><a href="/" class="hover:text-amber-400">Home</a></li>
         <li><a href="/projects/" class="hover:text-amber-400">Projects</a></li>
         <li><a href="/blog/" class="hover:text-amber-400">Blog</a></li>
@@ -52,7 +50,7 @@ const socials = [
     </div>
     <div>
       <h3 class="text-white font-bold mb-4">Contact</h3>
-      <address class="not-italic text-sm space-y-3 leading-6">
+      <address data-cms-footer-address class="not-italic text-sm space-y-3 leading-6">
         <p>📍 {addressLine}<br/>{localityLine}</p>
         <p>📞 <a href={telHref(site.phone)} class="hover:text-amber-400">{site.phone}</a></p>
         <p>✉️ <a href={`mailto:${site.email}`} class="hover:text-amber-400">{site.email}</a></p>
@@ -62,7 +60,7 @@ const socials = [
   </div>
   <div class="border-t border-white/10">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row justify-between gap-3 text-xs text-slate-500">
-      <p>© {year} {site.siteName}. All rights reserved.</p>
+      <p data-cms-footer-copy>© {year} {site.siteName}. All rights reserved.</p>
       <p><a href="/privacy-policy/" class="hover:text-amber-400">Privacy Policy</a> · <a href="/terms/" class="hover:text-amber-400">Terms</a> · <a href="/sitemap-index.xml" class="hover:text-amber-400">Sitemap</a></p>
     </div>
   </div>

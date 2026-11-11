@@ -16,6 +16,6 @@ const projects = (await contentCollection('projects', ({data}) => !data.draft)).
   </section>
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
     <AdSlot format="leaderboard" slot="1010101010" />
-    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">{projects.map(p => <ProjectCard project={p} />)}</div>
+    <div data-cms-projects-list class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">{projects.map(p => <ProjectCard project={p} />)}</div>
   </div>
 </BaseLayout>

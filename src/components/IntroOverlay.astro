@@ -342,6 +342,11 @@ const BEATS_PER_SLIDE = 8;
     50% { transform: scaleY(1); }
   }
 
+  #ams-sound-toggle[aria-pressed='false'] .ams-sound-wave { display: none; }
+  #ams-sound-toggle[aria-pressed='false'] .ams-sound-mute { display: block; }
+  #ams-sound-toggle[aria-pressed='true'] .ams-sound-wave { display: block; }
+  #ams-sound-toggle[aria-pressed='true'] .ams-sound-mute { display: none; }
+
   @media (prefers-reduced-motion: reduce) {
     .ams-eq-bar, .ams-demo-halo, .ams-demo-ring { animation: none; }
     .ams-track { transition: none; }

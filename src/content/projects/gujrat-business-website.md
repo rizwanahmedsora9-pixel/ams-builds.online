@@ -3,7 +3,7 @@ title: "Gujrat Retail Business Website"
 description: "A fast, SEO-ready business website for a Gujrat retail shop with WhatsApp ordering, online catalog and Google Maps — built with Astro."
 client: "Local Retail Business, Gujrat"
 category: "web"
-technologies: ["Astro", "Tailwind CSS", "Decap CMS", "Cloudflare Pages"]
+technologies: ["Astro", "Tailwind CSS", "Built-in CMS", "Static Hosting"]
 coverImage: "/images/uploads/project-retail.jpg"
 featured: true
 date: "2026-08-15"
@@ -22,7 +22,7 @@ We built a **lightning-fast Astro website** with:
 - Clean, mobile-first design with product catalog and categories
 - One-tap **WhatsApp ordering** — customers browse and order in seconds
 - Google Maps, opening hours and contact details for local SEO
-- **Decap CMS** so the owner can update products and prices himself
+- **Built-in CMS** so the owner can update products and content himself
 - Full SEO: meta tags, sitemap, schema markup and semantic HTML
 
 ## The result
@@ -30,4 +30,4 @@ We built a **lightning-fast Astro website** with:
 Within 30 days of launch, WhatsApp enquiries tripled. The site scores **98/100 on PageSpeed** and ranks on page 1 for their main local keywords. The owner now updates the site himself via the CMS — no developer needed for routine changes.
 
 ## Technologies used
-Astro, Tailwind CSS, Decap CMS, Cloudflare Pages, Google Search Console.
+Astro, Tailwind CSS, Built-in CMS, Static Edge Hosting, Google Search Console.
