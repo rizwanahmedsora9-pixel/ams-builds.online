@@ -62,6 +62,11 @@ const tick = () => {
   worker.scheduled({ cron: '* * * * *', scheduledTime: Date.now() } as ScheduledController, env, ctx).catch((err) => console.error('cron failed:', err));
   try { purgeExpired(); } catch (err) { console.error('cache cleanup failed:', err); }
 };
+server.on('error', (err: NodeJS.ErrnoException) => {
+  console.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is already in use. Stop the other program or pick another port, e.g. PORT=8080 npm start` : err);
+  process.exit(1);
+});
+
 // Say what state the site is in, so the first run is obvious.
 (env.KV.get('config', 'json') as Promise<{ adminSlug?: string } | null>).then(async (cfg) => {
   const installed = !!(await env.KV.get('installed'));
