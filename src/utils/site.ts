@@ -6,8 +6,8 @@ import { getSettingsEntry } from '../lib/content-source';
  * read brand, contact, socials, hero and Google tags from here instead of
  * hardcoding strings.
  */
-export async function getSite() {
-  const entry = await getSettingsEntry();
+export async function getSite(locals?: unknown) {
+  const entry = await getSettingsEntry(locals);
   if (!entry) {
     throw new Error('Missing site settings — required for build.');
   }

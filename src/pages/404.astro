@@ -1,12 +1,8 @@
 ---
-export const prerender = true;
+export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
+import NotFound from '../components/NotFound.astro';
 ---
 <BaseLayout title="Page Not Found" description="The page you requested could not be found." noindex={true}>
-  <section data-cms-404 class="max-w-3xl mx-auto px-4 py-24 text-center">
-    <p class="text-7xl font-black text-slate-900">404</p>
-    <h1 class="text-2xl font-bold mt-4">Page not found</h1>
-    <p class="text-slate-600 mt-3">The page you are looking for may have moved. Try the homepage or contact us.</p>
-    <div class="flex gap-3 justify-center mt-8"><a href="/" class="bg-slate-900 text-white font-bold px-6 py-3 rounded-xl">Go Home</a><a href="/contact/" class="bg-amber-500 text-slate-900 font-bold px-6 py-3 rounded-xl">Contact Us</a></div>
-  </section>
+  <NotFound />
 </BaseLayout>

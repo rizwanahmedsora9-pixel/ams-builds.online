@@ -1,16 +1,25 @@
 ---
-export const prerender = true;
+export const prerender = false;
+import BaseLayout from '../../layouts/BaseLayout.astro';
 import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+import NotFound from '../../components/NotFound.astro';
 import { contentCollection } from '../../lib/content-source';
 import { renderMarkdown } from '../../lib/render-markdown.mjs';
-export async function getStaticPaths() {
-  const posts = await contentCollection('blog', ({data}) => !data.draft);
-  return posts.map(post => ({ params: { slug: post.slug }, props: { post } }));
-}
-const { post } = Astro.props;
-const all = await contentCollection('blog', ({data}) => !data.draft);
-const others = all.filter(p => p.slug !== post.slug);
-const related = others.filter(p => p.data.tags?.some(t => post.data.tags?.includes(t))).slice(0,3);
-const html = await renderMarkdown(post.body);
+
+const slug = Array.isArray(Astro.params.slug) ? Astro.params.slug.join('/') : Astro.params.slug;
+const all = await contentCollection('blog', ({ data }) => !data.draft, Astro.locals);
+const post = all.find((entry) => entry.slug === slug);
+if (!post) Astro.response.status = 404;
+const others = post ? all.filter((entry) => entry.slug !== post.slug) : [];
+const related = post ? others.filter((entry) => entry.data.tags?.some((tag) => post.data.tags?.includes(tag))).slice(0, 3) : [];
+const html = post ? await renderMarkdown(post.body) : '';
 ---
-<BlogPostLayout post={post} related={related.length ? related : others.slice(0,3)}><Fragment set:html={html} /></BlogPostLayout>
+{post ? (
+  <BlogPostLayout post={post} related={related.length ? related : others.slice(0, 3)}>
+    <Fragment set:html={html} />
+  </BlogPostLayout>
+) : (
+  <BaseLayout title="Article Not Found" description="The article you requested could not be found." noindex={true}>
+    <NotFound />
+  </BaseLayout>
+)}

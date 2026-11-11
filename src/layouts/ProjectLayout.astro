@@ -7,7 +7,7 @@ import type { CollectionEntry } from 'astro:content';
 
 export interface Props { project: CollectionEntry<'projects'> }
 const { project } = Astro.props;
-const site = await getSite();
+const site = await getSite(Astro.locals);
 const base = site.url.replace(/\/$/, '');
 const d = project.data;
 const catLabel = { web:'Website', android:'Android App', software:'Software', ecommerce:'E-commerce' }[d.category];

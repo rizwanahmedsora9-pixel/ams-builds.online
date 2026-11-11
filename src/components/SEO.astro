@@ -10,7 +10,7 @@ export interface Props {
   updatedTime?: string;
   noindex?: boolean;
 }
-const site = await getSite();
+const site = await getSite(Astro.locals);
 const {
   title = `${site.siteName} | ${site.tagline}`,
   description = site.shortDescription,

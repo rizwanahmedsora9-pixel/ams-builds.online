@@ -3,13 +3,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import AdSlot from '../components/AdSlot.astro';
 import BlogCard from '../components/BlogCard.astro';
 import ProjectCard from '../components/ProjectCard.astro';
-export const prerender = true;
+export const prerender = false;
 import { contentCollection } from '../lib/content-source';
 import { getSite } from '../utils/site';
 
-const site = await getSite();
-const featuredProjects = (await contentCollection('projects', ({data}) => !data.draft && data.featured)).slice(0,3);
-const latestPosts = (await contentCollection('blog', ({data}) => !data.draft)).sort((a,b) => +new Date(b.data.pubDate) - +new Date(a.data.pubDate)).slice(0,3);
+const site = await getSite(Astro.locals);
+const featuredProjects = (await contentCollection('projects', ({data}) => !data.draft && data.featured, Astro.locals)).slice(0,3);
+const latestPosts = (await contentCollection('blog', ({data}) => !data.draft, Astro.locals)).sort((a,b) => +new Date(b.data.pubDate) - +new Date(a.data.pubDate)).slice(0,3);
 const services = [
   { icon:'🌐', title:'Business Websites', desc:'Custom, lightning-fast websites for shops, clinics, schools & companies — SEO-ready, mobile-first and built to convert visitors into customers.', href:'/services/' },
   { icon:'📱', title:'Android App Development', desc:'Native & cross-platform Android apps — from idea and UI design to Play Store launch and ongoing maintenance.', href:'/services/' },

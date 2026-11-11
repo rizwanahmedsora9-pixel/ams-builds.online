@@ -1,9 +1,15 @@
 ---
-export const prerender = true;
+export const prerender = false;
 import '../styles/global.css';
-import { buildBaselineData } from './cms-data.json.js';
+import { getStore } from '../lib/store.mjs';
+import { requireSession } from '../lib/admin-http.mjs';
 
-const baselineJson = JSON.stringify(buildBaselineData()).replace(/</g, '\\u003c');
+Astro.response.headers.set('cache-control', 'no-store');
+
+const store = await getStore(Astro.locals);
+const session = await requireSession(Astro.request, store);
+const authed = session.ok;
+const user = authed ? session.user : '';
 ---
 <!doctype html>
 <html lang="en">
@@ -12,76 +18,79 @@ const baselineJson = JSON.stringify(buildBaselineData()).replace(/</g, '\\u003c'
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
     <meta name="theme-color" content="#020617" />
-    <title>Admin · AMS Builds CMS</title>
+    <title>{authed ? 'Admin' : 'Sign in'} · AMS Builds</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
   <body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
-    <!-- Login view (shown when unauthenticated) -->
-    <div id="login-screen" class="min-h-screen grid place-items-center px-4 py-10">
-      <div class="w-full max-w-sm">
-        <div class="text-center mb-6">
-          <div class="w-12 h-12 mx-auto rounded-xl bg-amber-500 text-slate-900 grid place-items-center font-black text-2xl">A</div>
-          <h1 class="mt-3 text-xl font-extrabold tracking-tight">AMS Builds CMS</h1>
-          <p class="mt-1 text-sm text-slate-400">Sign in to manage site content</p>
-        </div>
-        <form id="login-form" class="bg-slate-900 border border-white/10 rounded-2xl p-6 space-y-4" autocomplete="on">
-          <div>
-            <label for="login-user" class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Username</label>
-            <input id="login-user" name="username" type="text" autocomplete="username" required class="w-full rounded-lg bg-slate-950 border border-white/10 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500/60" placeholder="admin" />
-          </div>
-          <div>
-            <label for="login-pass" class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Password</label>
-            <input id="login-pass" name="password" type="password" autocomplete="current-password" required class="w-full rounded-lg bg-slate-950 border border-white/10 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500/60" placeholder="••••••••" />
-          </div>
-          <p id="login-error" class="hidden text-sm text-rose-400" role="alert"></p>
-          <p class="text-xs text-slate-500 leading-5">
-            Built-in client-side CMS — edits apply immediately in this browser and can be exported anytime.
-          </p>
-          <button type="submit" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-2.5 rounded-xl text-sm transition">
-            Sign in
-          </button>
-        </form>
-        <p class="text-center mt-5 text-xs text-slate-600">
-          <a href="/" class="hover:text-slate-400">← Back to the site</a>
-        </p>
-      </div>
-    </div>
-
-    <!-- Authenticated CMS app shell (toggled by admin-client.js) -->
-    <div id="app" class="hidden min-h-screen flex flex-col lg:flex-row">
-      <aside class="lg:w-60 shrink-0 border-b lg:border-b-0 lg:border-r border-white/10 bg-slate-900/60">
-        <div class="px-4 py-4 flex items-center gap-2.5 border-b border-white/10 lg:border-b-0">
-          <span class="w-8 h-8 rounded-lg bg-amber-500 text-slate-900 grid place-items-center font-black">A</span>
-          <div class="leading-tight">
-            <p class="text-sm font-extrabold">AMS Builds</p>
-            <p class="text-[10px] tracking-widest uppercase text-amber-400 font-semibold">Client CMS</p>
+    {
+      !authed && (
+        <div class="min-h-screen grid place-items-center px-4 py-10">
+          <div class="w-full max-w-sm">
+            <div class="text-center mb-6">
+              <div class="w-12 h-12 mx-auto rounded-xl bg-amber-500 text-slate-900 grid place-items-center font-black text-2xl">A</div>
+              <h1 class="mt-3 text-xl font-extrabold tracking-tight">AMS Builds Admin</h1>
+              <p class="mt-1 text-sm text-slate-400">Sign in to manage the live website</p>
+            </div>
+            <form id="login-form" class="bg-slate-900 border border-white/10 rounded-2xl p-6 space-y-4" autocomplete="on">
+              <div>
+                <label for="login-user" class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Username</label>
+                <input id="login-user" name="username" type="text" autocomplete="username" required class="w-full rounded-lg bg-slate-950 border border-white/10 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500/60" placeholder="admin" />
+              </div>
+              <div>
+                <label for="login-pass" class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Password</label>
+                <input id="login-pass" name="password" type="password" autocomplete="current-password" required class="w-full rounded-lg bg-slate-950 border border-white/10 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500/60" placeholder="••••••••" />
+              </div>
+              <p id="login-error" class="hidden text-sm text-rose-400" role="alert"></p>
+              <p id="login-hint" class="text-xs text-slate-500 leading-5">
+                New installation? Sign in with admin / admin12345, then change the password in Account. Saves go live immediately for all visitors.
+              </p>
+              <button type="submit" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-2.5 rounded-xl text-sm transition">
+                Sign in
+              </button>
+            </form>
+            <p class="text-center mt-5 text-xs text-slate-600">
+              <a href="/" class="hover:text-slate-400">← Back to the site</a>
+            </p>
           </div>
         </div>
-        <nav id="admin-nav" class="p-2 flex lg:flex-col gap-1 overflow-x-auto" aria-label="Admin">
-          <a href="#/dashboard" data-nav="dashboard" class="nav-link">Dashboard</a>
-          <a href="#/blog" data-nav="blog" class="nav-link">Blog</a>
-          <a href="#/pages" data-nav="pages" class="nav-link">Pages</a>
-          <a href="#/projects" data-nav="projects" class="nav-link">Projects</a>
-          <a href="#/settings" data-nav="settings" class="nav-link">Site settings</a>
-          <a href="#/media" data-nav="media" class="nav-link">Images</a>
-          <a href="#/export" data-nav="export" class="nav-link">Export &amp; Backup</a>
-          <a href="#/account" data-nav="account" class="nav-link">Account</a>
-        </nav>
-        <div class="px-3 pb-4 hidden lg:block">
-          <a href="/" target="_blank" rel="noopener" class="text-xs text-slate-500 hover:text-slate-300">View live site ↗</a>
+      )
+    }
+    {
+      authed && (
+        <div id="app" class="min-h-screen flex flex-col lg:flex-row" data-user={user}>
+          <aside class="lg:w-60 shrink-0 border-b lg:border-b-0 lg:border-r border-white/10 bg-slate-900/60">
+            <div class="px-4 py-4 flex items-center gap-2.5 border-b border-white/10 lg:border-b-0">
+              <span class="w-8 h-8 rounded-lg bg-amber-500 text-slate-900 grid place-items-center font-black">A</span>
+              <div class="leading-tight">
+                <p class="text-sm font-extrabold">AMS Builds</p>
+                <p class="text-[10px] tracking-widest uppercase text-amber-400 font-semibold">Shared CMS</p>
+              </div>
+            </div>
+            <nav id="admin-nav" class="p-2 flex lg:flex-col gap-1 overflow-x-auto" aria-label="Admin">
+              <a href="#/dashboard" data-nav="dashboard" class="nav-link">Dashboard</a>
+              <a href="#/blog" data-nav="blog" class="nav-link">Blog</a>
+              <a href="#/pages" data-nav="pages" class="nav-link">Pages</a>
+              <a href="#/projects" data-nav="projects" class="nav-link">Projects</a>
+              <a href="#/settings" data-nav="settings" class="nav-link">Site settings</a>
+              <a href="#/media" data-nav="media" class="nav-link">Images</a>
+              <a href="#/export" data-nav="export" class="nav-link">Export &amp; Backup</a>
+              <a href="#/account" data-nav="account" class="nav-link">Account</a>
+            </nav>
+            <div class="px-3 pb-4 hidden lg:block">
+              <a href="/" target="_blank" rel="noopener" class="text-xs text-slate-500 hover:text-slate-300">View live site ↗</a>
+            </div>
+          </aside>
+          <main id="main" class="flex-1 min-w-0 p-4 sm:p-6 lg:p-8">
+            <div id="view" class="max-w-5xl">
+              <p class="text-slate-500 text-sm">Loading…</p>
+            </div>
+          </main>
         </div>
-      </aside>
-      <main id="main" class="flex-1 min-w-0 p-4 sm:p-6 lg:p-8">
-        <div id="view" class="max-w-5xl">
-          <p class="text-slate-500 text-sm">Loading…</p>
-        </div>
-      </main>
-    </div>
+      )
+    }
 
     <div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 hidden px-4 py-2.5 rounded-xl text-sm font-semibold shadow-xl border"></div>
     <div id="modal" class="hidden fixed inset-0 z-40 bg-slate-950/80 backdrop-blur-sm p-4 sm:p-8 overflow-y-auto"></div>
-
-    <script id="cms-baseline" type="application/json" set:html={baselineJson}></script>
 
     <style is:global>
       .nav-link {

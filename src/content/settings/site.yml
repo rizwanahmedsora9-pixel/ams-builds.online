@@ -1,5 +1,5 @@
 # AMS Builds — Site Settings (defaults; overridden by the admin)
-# Change anything here from /admin → Site settings → Save → Publish.
+# Change anything here from /admin → Site settings → Save. Updates are live immediately.
 # The git file stays as the baseline — the admin store wins once saved.
 siteName: "AMS Builds"
 tagline: "Web & App Development"

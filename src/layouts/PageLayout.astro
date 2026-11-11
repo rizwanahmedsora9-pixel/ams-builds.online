@@ -4,13 +4,13 @@ import Breadcrumbs from '../components/Breadcrumbs.astro';
 import AdSlot from '../components/AdSlot.astro';
 export interface Props {
   title: string; description?: string; heroTitle?: string; heroSubtitle?: string; slug: string;
-  seoTitle?: string; seoDescription?: string; ogImage?: string; noindex?: boolean;
+  featuredImage?: string; seoTitle?: string; seoDescription?: string; ogImage?: string; noindex?: boolean;
 }
-const { title, description, heroTitle, heroSubtitle, slug, seoTitle, seoDescription, ogImage, noindex } = Astro.props;
+const { title, description, heroTitle, heroSubtitle, slug, featuredImage, seoTitle, seoDescription, ogImage, noindex } = Astro.props;
 const seoDesc = seoDescription || description;
 const pageTitle = seoTitle || title;
 ---
-<BaseLayout title={pageTitle} description={seoDesc} image={ogImage} noindex={noindex}>
+<BaseLayout title={pageTitle} description={seoDesc} image={ogImage || featuredImage} noindex={noindex}>
   <div data-cms-detail="pages" data-cms-slug={slug}>
     <section class="bg-slate-900 text-white">
       <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-14 md:py-20">
@@ -19,6 +19,11 @@ const pageTitle = seoTitle || title;
         {heroSubtitle && <p class="mt-4 text-lg text-slate-300 leading-8">{heroSubtitle}</p>}
       </div>
     </section>
+    {featuredImage && (
+      <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-10">
+        <img src={featuredImage} alt={title} class="w-full aspect-[16/9] object-cover rounded-2xl shadow-soft bg-slate-100" />
+      </div>
+    )}
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       <AdSlot format="leaderboard" slot="1111111111" />
       <div class="prose-ams"><slot /></div>

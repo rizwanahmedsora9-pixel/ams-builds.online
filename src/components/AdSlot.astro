@@ -15,7 +15,7 @@ export interface Props {
 }
 const { format = 'responsive', slot = '0000000000', class: cls = '', label = 'Advertisement' } = Astro.props;
 const sizeClass = format === 'rectangle' ? 'ad-slot--rectangle' : format === 'in-article' ? 'ad-slot--in-article' : 'ad-slot--leaderboard';
-const site = await getSite();
+const site = await getSite(Astro.locals);
 const enabled = site.adsenseEnabled && !!orUndef(site.adsenseClient);
 ---
 <aside class:list={['ad-slot', sizeClass, cls]} aria-label={label}>
