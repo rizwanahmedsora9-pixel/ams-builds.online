@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { getSettings } from '../lib/config';
+import { getFile } from '../lib/files';
 import { findContent, listPosts, toViews } from '../lib/content';
 
 /** Read-only public JSON API (published content only). */
@@ -18,7 +19,7 @@ api.get('/health', async (c) => {
   let installed = false;
   try { await c.env.DB.prepare('SELECT 1 AS x').first(); checks.database = true; } catch { /* reported below */ }
   try { installed = !!(await c.env.KV.get('installed')); checks.keyvalue = true; } catch { /* reported below */ }
-  try { await c.env.MEDIA.get('health-check/none'); checks.media = true; } catch { /* reported below */ }
+  try { await getFile(c.env, 'health-check/none'); checks.media = true; } catch { /* reported below */ }
   const ok = checks.database && checks.keyvalue && checks.media;
   const runtime = typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers' ? 'cloudflare-workers' : 'node';
   return c.json({ ok, runtime, installed, checks }, ok ? 200 : 503, { 'Cache-Control': 'no-store' });

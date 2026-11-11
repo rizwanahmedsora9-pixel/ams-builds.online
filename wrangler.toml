@@ -14,8 +14,9 @@ fallthrough = true
 crons = ["*/5 * * * *"]
 
 # --- Bindings -------------------------------------------------------------
-# No IDs needed: `wrangler deploy` creates the D1 database, KV namespace and
-# R2 bucket automatically on the first deploy and reuses them afterwards.
+# No IDs needed: `wrangler deploy` creates the D1 database and KV namespace
+# automatically on the first deploy and reuses them afterwards.
+# Uploaded media is stored in KV, so no R2 bucket (and no payment card) is needed.
 # To use resources you created yourself, add `database_id = "..."` / `id = "..."`.
 
 [[d1_databases]]
@@ -24,10 +25,6 @@ database_name = "edge_cms"
 
 [[kv_namespaces]]
 binding = "KV"
-
-[[r2_buckets]]
-binding = "MEDIA"
-bucket_name = "edge-cms-media"
 
 # Custom domain (optional). The CMS works on workers.dev without this.
 # [[routes]]

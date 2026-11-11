@@ -1,6 +1,6 @@
 # Edge CMS
 
-A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) serving the public site and the admin panel, with D1 for data, R2 for media and KV for the install lock, config and page cache. The same code also runs on plain Node.js with a SQLite file and a media folder, so it works on any VPS, in Docker or on your own computer.
+A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) serving the public site and the admin panel, with D1 for data and KV for uploaded media, the install lock, config and page cache. No R2 and no payment card are needed. The same code also runs on plain Node.js with a SQLite file and a media folder, so it works on any VPS, in Docker or on your own computer.
 
 ## Status
 
@@ -8,7 +8,7 @@ A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) ser
 | --- | --- | --- |
 | 1 | Installer, login, dashboard, pages, posts (categories, tags, featured image, scheduling), media, settings, default theme, page cache | **done** |
 | 2 | Menus, theme upload, custom code UI, users and roles UI, redirects, sitemap.xml, robots.txt, RSS | next |
-| 3 | Backups to R2, plugin hooks, multi-site | later |
+| 3 | Backups, plugin hooks, multi-site | later |
 
 The full database schema for all three phases is already created at install.
 
@@ -19,14 +19,14 @@ The same code runs in two ways. Pick whichever fits; the installer, admin panel 
 | | Cloudflare Workers | Node.js (VPS, Docker, PaaS, your PC) |
 | --- | --- | --- |
 | Database | D1 | SQLite file in `data/cms.sqlite` |
-| Media | R2 | files in `data/media/` |
+| Media | KV (max 20 MB per file) | files in `data/media/` |
 | Config and cache | KV | table in the same SQLite file |
 | Scheduled publishing | Cron Trigger (every 5 min) | built-in timer (every minute) |
 | Start | `npx wrangler deploy` | `npm start` |
 
 ## Option A: Cloudflare
 
-Needs a Cloudflare account. The free plan works; enable R2 once in the dashboard (it asks for a card but has a free tier).
+Needs a Cloudflare account. The free plan works and no payment card is needed.
 
 **No terminal (works from a phone):** make the GitHub repository public, then open
 
@@ -34,7 +34,7 @@ Needs a Cloudflare account. The free plan works; enable R2 once in the dashboard
 https://deploy.workers.cloudflare.com/?url=https://github.com/rizwanahmedsora9-pixel/ams-builds.online
 ```
 
-or go to **Workers & Pages → Create → Import a repository**. Cloudflare creates the database, KV namespace and bucket, deploys, and redeploys on every push.
+or go to **Workers & Pages → Create → Import a repository**. Cloudflare creates the database and KV namespace, deploys, and redeploys on every push.
 
 **From a PC** (Node.js 22+):
 
@@ -46,7 +46,7 @@ npx wrangler login
 npx wrangler deploy
 ```
 
-`wrangler.toml` has no resource IDs on purpose: the first deploy creates the D1 database, KV namespace and R2 bucket and later deploys reuse them. If your wrangler refuses to do that, create them yourself (`npx wrangler d1 create edge_cms`, `npx wrangler kv namespace create KV`, `npx wrangler r2 bucket create edge-cms-media`) and add `database_id = "..."` and `id = "..."` to the matching blocks.
+`wrangler.toml` has no resource IDs on purpose: the first deploy creates the D1 database and KV namespace and later deploys reuse them. If your wrangler refuses to do that, create them yourself (`npx wrangler d1 create edge_cms`, `npx wrangler kv namespace create KV`) and add `database_id = "..."` and `id = "..."` to the matching blocks.
 
 Open the `*.workers.dev` URL wrangler prints and finish the installer. To use your own domain, add it under **Workers & Pages → your worker → Settings → Domains & Routes**.
 
@@ -143,7 +143,7 @@ Each run starts a real server on an empty temporary data folder and drives it ov
 
 ## Free-plan limits worth knowing
 
-On Cloudflare, KV allows 1,000 writes a day on the free plan. Each first view of a page after an edit costs one write, as does each edit and each failed login. A small site stays well inside this; a busy one should move to the paid plan.
+On Cloudflare, KV allows 1,000 writes a day and 1 GB of storage on the free plan, and uploaded media counts towards both. Host videos elsewhere (for example YouTube) and embed them. Each first view of a page after an edit costs one write, as does each edit and each failed login. A small site stays well inside this; a busy one should move to the paid plan.
 
 ## File tree
 
@@ -161,11 +161,11 @@ src/
     admin/
       index.ts             CSRF, login, logout, dashboard, profile
       content.ts           pages and posts
-      media.ts             R2 media library
+      media.ts             media library
       settings.ts
   node/
     server.ts              Node.js entry point (PORT, DATA_DIR, TRUST_PROXY)
-    storage.ts             SQLite + disk versions of D1, KV and R2
+    storage.ts             SQLite + disk versions of D1, KV and file storage
   db/
     schema.sql
     index.ts               schema runner
@@ -173,6 +173,7 @@ src/
   lib/
     auth.ts                passwords, sessions, CSRF, roles
     security.ts            escaping, sanitizer, rate limiting
+    files.ts               uploaded files: KV on Cloudflare, disk on Node
     render.ts              template engine, theme rendering
     content.ts             content queries, permalinks
     config.ts              KV config, settings

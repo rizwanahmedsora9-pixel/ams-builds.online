@@ -2,8 +2,15 @@ import type { Context } from 'hono';
 
 export type Env = {
   DB: D1Database;
-  MEDIA: R2Bucket;
+  /** Optional file store. Absent on Cloudflare (uploads go to KV); the Node server supplies a disk-backed one. */
+  FILES?: FileStore;
   KV: KVNamespace;
+};
+
+export type FileStore = {
+  put(key: string, data: ArrayBuffer, contentType: string): Promise<void>;
+  get(key: string): Promise<{ body: ReadableStream | ArrayBuffer; contentType: string; etag: string } | null>;
+  delete(key: string): Promise<void>;
 };
 
 /** Stored in KV under "config". Read on every request, so keep it tiny. */
