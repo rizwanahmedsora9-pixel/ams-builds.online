@@ -7,14 +7,15 @@ import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-// Decap CMS does not write front matter the way a person would. Two habits matter here:
-//   • dates are saved without quotes (pubDate: 2026-11-10), which YAML reads as a Date
-//     object rather than text;
-//   • an optional field that the editor empties is saved as an empty string — even the
-//     "Nav Order" number box (navOrder: "").
-// If the schemas in src/content/config.ts reject either, the next deploy fails as soon as
-// someone presses "Publish" in the CMS. The entries below have exactly the shape Decap
-// 3.17 produced when it was driven against this site; the test builds the site with them.
+// The admin editor does not write front matter the way a person would. Two
+// habits matter here:
+//   • dates are saved without quotes (pubDate: 2026-11-10), which YAML reads
+//     as a Date object rather than text;
+//   • an optional field that the editor empties is saved as an empty string —
+//     even the "Nav Order" number box (navOrder: "").
+// If the schemas in src/content/schemas.mjs reject either, the next deploy
+// fails as soon as someone saves in the admin. The entries below have exactly
+// that shape; the test builds the site with them.
 const savedByCms = {
   'src/content/blog/cms-saved-post.md': `---
 title: "Launch Day: Our New Site!"
@@ -73,7 +74,7 @@ test('entries saved by the CMS build, and their dates come out right', { timeout
   try {
     await run(process.execPath, [join(root, 'node_modules', 'astro', 'astro.js'), 'build'], {
       cwd: site,
-      env: { ...process.env, ASTRO_TELEMETRY_DISABLED: '1' },
+      env: { ...process.env, ASTRO_TELEMETRY_DISABLED: '1', CMS_EXPORT_URL: 'http://127.0.0.1:1/offline' },
     });
   } catch (error) {
     const output = `${error.stdout ?? ''}${error.stderr ?? ''}`;
