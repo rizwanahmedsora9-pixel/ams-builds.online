@@ -42,7 +42,7 @@ export function sameOrigin(req: Request): boolean {
 
 const ALLOWED_TAGS = new Set(
   ('a abbr b blockquote br caption cite code col colgroup dd del details div dl dt em figcaption figure ' +
-    'h1 h2 h3 h4 h5 h6 hr i img ins kbd li mark ol p pre q s small span strong sub summary sup ' +
+    'h1 h2 h3 h4 h5 h6 hr i iframe img ins kbd li mark ol p pre q s small span strong sub summary sup ' +
     'table tbody td tfoot th thead tr u ul').split(' '),
 );
 const VOID_TAGS = new Set(['br', 'hr', 'img', 'col']);
@@ -50,6 +50,7 @@ const GLOBAL_ATTRS = ['class', 'id', 'title', 'lang', 'dir'];
 const TAG_ATTRS: Record<string, string[]> = {
   a: ['href', 'target', 'rel'],
   img: ['src', 'alt', 'width', 'height', 'loading'],
+  iframe: ['src', 'title', 'width', 'height', 'loading', 'allow', 'referrerpolicy', 'allowfullscreen'],
   td: ['colspan', 'rowspan'],
   th: ['colspan', 'rowspan', 'scope'],
   ol: ['start', 'type'],
@@ -57,7 +58,7 @@ const TAG_ATTRS: Record<string, string[]> = {
 };
 const URL_ATTRS = new Set(['href', 'src']);
 // Elements whose whole content is dropped, not just the tags.
-const DROP_BLOCKS = /<(script|style|iframe|object|embed|noscript|template|svg|math|form|textarea|select|button|title|xmp|plaintext|noembed|frameset)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
+const DROP_BLOCKS = /<(script|style|object|embed|noscript|template|svg|math|form|textarea|select|button|title|xmp|plaintext|noembed|frameset)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
 const TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^'">])*)>?/g;
 const ATTR = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
 
@@ -67,6 +68,18 @@ export function safeUrl(value: string): string {
   // relative path with no scheme and no entity tricks before the query string
   if (/^[\w\-.~%/]+([?#].*)?$/.test(v)) return value.trim();
   return '';
+}
+
+/** Only real YouTube embed endpoints are allowed in author-written iframes. */
+export function safeYouTubeEmbed(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.port &&
+      (url.hostname === 'www.youtube.com' || url.hostname === 'www.youtube-nocookie.com') &&
+      /^\/embed\/[A-Za-z0-9_-]{11}\/?$/.test(url.pathname);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -94,14 +107,15 @@ export function sanitizeHtml(input: string): string {
     for (const a of m[3].matchAll(ATTR)) {
       const name = a[1].toLowerCase();
       if (!allowed.includes(name) || seen.has(name)) continue;
-      seen.add(name);
       let value = (a[2] ?? a[3] ?? a[4] ?? '').replace(/&amp;/g, '&');
       if (URL_ATTRS.has(name)) {
         value = safeUrl(value);
-        if (!value) continue;
+        if (!value || (tag === 'iframe' && !safeYouTubeEmbed(value))) continue;
       }
+      seen.add(name);
       attrs += ` ${name}="${esc(value)}"`;
     }
+    if (tag === 'iframe' && !seen.has('src')) continue;
     if (tag === 'a' && /target=/.test(attrs)) attrs = attrs.replace(/ rel="[^"]*"/, '') + ' rel="noopener noreferrer"';
     out += `<${tag}${attrs}>`;
   }
