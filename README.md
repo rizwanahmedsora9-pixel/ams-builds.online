@@ -7,11 +7,14 @@ A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) ser
 | Phase | Scope | State |
 | --- | --- | --- |
 | 1 | Installer, login, dashboard, pages, posts (categories, tags, featured image, scheduling), media, settings, default theme, page cache | **done** |
-| 2 | Menus and theme upload | **done** |
-| 2 | Custom code UI, users and roles UI, redirects, sitemap.xml, robots.txt, RSS | next |
-| 3 | Backups, plugin hooks, multi-site | later |
+| 2 | Menus, themes and the theme store | **done** |
+| 2 | Comments and moderation, users and roles, custom code, redirects, sitemap.xml, robots.txt, RSS | **done** |
+| 3 | Backups, plugins and hooks, import/export, updates and site health | **done** |
+| 3 | Multi-site | later |
 
-The full database schema for all three phases is already created at install.
+The full database schema is created at install. Existing sites upgrade themselves:
+pending tables and columns are added by the cron trigger, by `npm start`, or from
+**Updates → Run updates now**.
 
 ## Where it runs
 
@@ -126,14 +129,86 @@ npm run test:cloudflare   # the same steps on the Cloudflare runtime (wrangler d
 npm run test:all
 ```
 
-Each run starts a real server on an empty temporary data folder and drives it over HTTP: health check, installer (bad input, success, lock), public site and cache, login and CSRF, pages, media, posts, drafts and scheduling, settings, password change, restart, deletion, logout and rate limiting. It prints one line per step and removes the folder afterwards.
+Each run starts a real server on an empty temporary data folder and drives it over HTTP: health check, installer (bad input, success, lock), public site and cache, login and CSRF, pages, media, posts, drafts and scheduling, settings, password change, restart, menus, themes, comments (public form, moderation, approval, replies, spam), users and role limits, plugins and custom code, redirects, import/export, backups, site health, updates, categories and tags, the whole sidebar, deletion, logout and rate limiting. It prints one line per step and removes the folder afterwards.
 
 `GET /api/health` reports the runtime, whether the site is installed, and whether the database, key-value store and media storage answer. Use it for uptime monitoring.
+
+
+## The admin panel
+
+The sidebar mirrors WordPress: Dashboard, Updates, Posts, Media, Pages, Comments,
+Appearance, Plugins, Users, Tools and Settings, with a **Collapse Menu** control at
+the bottom (remembered in the browser). Sub-menus appear for the section you are in,
+and the pending-comment count is shown as a badge.
+
+| Section | What it does |
+| --- | --- |
+| Dashboard | Counts, quick actions, recently edited content, latest comments, version and moderation status |
+| Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
+| Posts | All posts, add new, **Categories** and **Tags**; editor, excerpt, categories, tags, featured image, SEO, draft/published/scheduled |
+| Media | Upload images, PDF, audio, video and fonts to KV (Cloudflare) or `data/media/` (Node), copy URLs, delete |
+| Pages | All pages and add new; a tick adds the page to the header menu |
+| Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
+| Appearance | **Customize** (additional CSS, header code, footer code, JavaScript), **Themes**, **Menus**, **Widgets** (three footer areas) |
+| Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
+| Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
+| Tools | Redirects (301/302), JSON import/export, server-stored backups, site health, page-cache reset |
+| Settings | Site identity and favicon, reading (home page, posts per page, permalinks), discussion (comments and moderation), domains and the admin URL |
+
+Roles: **admin** has everything, **editor** manages all content, media, menus and
+comments, **author** only writes and edits their own posts and uploads. You cannot
+delete your own account, demote yourself, or remove the last admin.
 
 ## Menus
 
 - Tick **Show in the main menu** when editing a page and it is linked in the site header once published. New pages start ticked.
 - **Menus** in the admin panel lets you reorder links (drag the handle or use the arrows), rename them, add custom links, and create a footer menu.
+
+
+## Comments
+
+Visitors can comment on posts without JavaScript and without an account: a name,
+an email (never published) and the comment. Each form carries a signed token, a
+honeypot field and a per-IP rate limit (five comments per ten minutes); pages stay
+cacheable because the token is valid for two days.
+
+New comments wait for moderation by default. Turn that off, or close comments
+entirely, in **Settings → Discussion**. Moderators can reply as themselves (the
+reply is labelled *staff*), mark spam or move a comment to the trash. Approved
+comments are part of the cached page, so moderating bumps the cache.
+
+Themes get `{{{comments_html}}}` on posts (the bundled themes already include it).
+A theme without that tag still shows comments: they are appended after the post
+content. Comment bodies are stored as plain text and escaped on output.
+
+## Plugins and custom code
+
+**Plugins** has two halves:
+
+- **Built-in**: XML sitemap (`/sitemap.xml`), robots.txt (`/robots.txt`) and RSS
+  (`/feed.xml`). Each can be deactivated and comes back instantly.
+- **Your plugins**: snippets of HTML injected into `<head>` or before `</body>` on
+  every public page — analytics, verification tags, chat widgets. They run after
+  the active theme.
+
+**Appearance → Customize** holds site-wide additional CSS, header code, footer code
+and JavaScript. Both screens are admin-only because the code is saved raw, exactly
+like theme code. Everything they save bumps the page cache.
+
+## Tools, backups and updates
+
+- **Redirects** — a path is redirected before the page cache, so changes apply at
+  once. 301 or 302, relative or absolute targets.
+- **Import / Export** — one JSON file with content, terms, menus, comments,
+  redirects, settings and the user list (never password hashes). Import merges by
+  type and slug, so running it twice is safe.
+- **Backups** — the same JSON stored on the server (KV on Cloudflare, `data/media/backups/`
+  on Node) and downloadable from the panel. The public `/media/` route never serves them.
+- **Site Health** — database, key-value store and media checks, versions, schema,
+  cache generation and content counts.
+- **Updates** — the CMS version, the database schema and pending migrations, theme
+  updates from the store, plugin states, and buttons to run migrations or install a
+  theme update.
 
 ## Themes
 
@@ -167,10 +242,10 @@ Template tags: `{{value}}` (escaped), `{{{value}}}` (raw HTML), `{{#if x}}…{{e
 | Available in | Values |
 | --- | --- |
 | every template | `site.title`, `site.tagline`, `site.url`, `year`, `body_class`, `menu.primary` and `menu.footer` (lists of `label`, `url`, `active`) |
-| `base` only | `{{{head}}}` (title, SEO tags, custom code), `{{{theme_css}}}`, `{{{content}}}`, `{{{footer}}}` |
+| `base` only | `{{{head}}}` (title, SEO tags, custom code), `{{{theme_css}}}`, `{{{content}}}`, `{{{footer}}}` (footer code and widgets) |
 | `home` | `page` (the chosen home page, may be empty), `posts` (latest five) |
 | `page` | `page.title`, `{{{page.content}}}` |
-| `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`) |
+| `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`), `{{{comments_html}}}`, `comments_count`, `comments_open`, `comments` (list of `name`, `body`, `date`) |
 | `archive` | `archive.title`, `posts`, `pagination.prev`, `pagination.next` |
 | each item of `posts` | `title`, `url`, `excerpt`, `date`, `date_iso`, `featured_image`, `featured_alt` |
 
@@ -212,6 +287,13 @@ src/
       settings.ts
       menus.ts               menu editor
       themes.ts              theme upload, activate, delete
+      comments.ts            comment moderation and replies
+      users.ts               accounts and roles
+      plugins.ts             built-in plugins and code snippets
+      tools.ts               redirects, import/export, backups, health
+      updates.ts             versions, migrations, theme updates
+      appearance.ts          customize (CSS/code) and footer widgets
+      terms.ts               categories and tags
   node/
     server.ts              Node.js entry point (PORT, DATA_DIR, TRUST_PROXY)
     storage.ts             SQLite + disk versions of D1, KV and file storage
@@ -227,6 +309,9 @@ src/
     menus.ts               page-to-menu sync
     render.ts              template engine, theme rendering
     content.ts             content queries, permalinks
+    comments.ts            comment storage, tokens, public rendering
+    plugins.ts             built-in plugin list and hook points
+    version.ts             app version shown in Updates
     config.ts              KV config, settings
     time.ts                timezone helpers
     ui.ts                  admin HTML helpers and CSS

@@ -11,5 +11,6 @@
   {{#if post.featured_image}}<img class="featured" src="{{post.featured_image}}" alt="{{post.featured_alt}}">{{/if}}
   <article class="content">{{{post.content}}}</article>
   {{#if post.tags}}<p class="tags">{{#each post.tags}}<a href="{{url}}">#{{name}}</a>{{/each}}</p>{{/if}}
+  {{{comments_html}}}
   <p class="back"><a href="/blog">&larr; All posts</a></p>
 </div>

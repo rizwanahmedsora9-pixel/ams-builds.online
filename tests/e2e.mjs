@@ -111,6 +111,21 @@ async function csrf() {
 }
 const adminPost = async (path, fields) => request(admin + path, { method: 'POST', body: form({ _csrf: await csrf(), ...fields }) });
 const idFrom = (location) => Number(location.match(/\/(\d+)(\?|$)/)[1]);
+const anonPost = (path, fields) => request(path, { method: 'POST', body: form(fields), cookies: false });
+const fieldValue = (html, name) => {
+  const m = html.match(new RegExp(`name="${name}" value="([^"]*)"`));
+  assert.ok(m, `${name} field is present`);
+  return m[1];
+};
+const currentPostUrl = () => {
+  const y = new Date().getUTCFullYear(), m = String(new Date().getUTCMonth() + 1).padStart(2, '0');
+  return `/${y}/${m}/launch-day-more`;
+};
+const SITE_SETTINGS = {
+  site_title: 'Renamed Site', tagline: 'Now with a tagline', timezone: 'Asia/Karachi', primary_domain: 'example.com',
+  domains: 'www.example.com', admin_slug: 'control-room', permalink_style: 'dated', posts_per_page: 5,
+  home_page_id: 1, favicon: '',
+};
 
 
 /** Builds a small zip in memory (first file stored, the rest deflated). */
@@ -515,6 +530,226 @@ test('12c. theme store: AMS Base, AMS Pro and AMS Premium install and switch wit
   assert.match((await adminPost('/themes/store/default/install', { activate: 1 })).location, /AMS Base is now your active theme/);
   assert.match((await anon('/')).text, /class="site-header"/);
   log('store lists 3 themes; Pro and Premium render home, blog, post, page and 404 with tabs + footer; switched back to Base');
+});
+
+test('12d. comments: public form, moderation, approval, replies, spam and delete', async () => {
+  const saved = await adminPost('/settings', { ...SITE_SETTINGS, comments_enabled: 1, comments_require_approval: 1 });
+  assert.match(saved.location, /Settings saved/);
+
+  const url = currentPostUrl();
+  const page = await anon(url);
+  assert.match(page.text, /class="comment-form"/, 'the form is on the post');
+  assert.match(page.text, /id="comments"/);
+  const token = fieldValue(page.text, 'token');
+  const contentId = fieldValue(page.text, 'content_id');
+
+  // A wrong token is refused and stores nothing.
+  const forged = await anonPost('/comments', { content_id: contentId, token: '1.bad', name: 'Bot', email: 'bot@example.com', body: 'spam' });
+  assert.match(forged.location, /comment=failed/);
+  // The honeypot is refused too.
+  const honey = await anonPost('/comments', { content_id: contentId, token, name: 'Bot', email: 'bot@example.com', body: 'spam', website: 'http://spam.example' });
+  assert.match(honey.location, /comment=failed/);
+
+  const sent = await anonPost('/comments', {
+    content_id: contentId, token, name: 'Visitor One', email: 'visitor@example.com',
+    body: 'Great post! <b>not html</b>', website: '',
+  });
+  assert.match(sent.location, /comment=pending/, 'comments wait for moderation');
+  assert.doesNotMatch((await anon(url)).text, /Great post!/, 'a pending comment is not public');
+
+  const dash = await get(admin);
+  assert.match(dash.text, /class="bubble" title="1 pending"/, 'sidebar shows the pending count');
+
+  const panel = await get(`${admin}/comments?status=pending`);
+  assert.match(panel.text, /Visitor One/);
+  assert.match(panel.text, /Great post!/);
+  const commentId = Number(panel.text.match(/comments\/(\d+)\/status/)[1]);
+
+  const approved = await adminPost(`/comments/${commentId}/status`, { status: 'approved', from: 'pending' });
+  assert.match(approved.location, /ok=Comment[+ ]Approved/);
+  const live = await anon(url);
+  assert.match(live.text, /Great post!/, 'approved comments are public');
+  assert.match(live.text, /&lt;b&gt;not html&lt;\/b&gt;/, 'comment text is escaped');
+  assert.doesNotMatch(live.text, /<b>not html<\/b>/);
+
+  const reply = await adminPost(`/comments/${commentId}/reply`, { body: 'Thanks for reading!', from: 'all' });
+  assert.match(reply.location, /ok=Reply/);
+  const withReply = await anon(url);
+  assert.match(withReply.text, /Thanks for reading!/);
+  assert.match(withReply.text, /comment-staff/);
+  assert.match(withReply.text, /<ol class="children">/);
+
+  await adminPost(`/comments/${commentId}/status`, { status: 'spam', from: 'all' });
+  assert.doesNotMatch((await anon(url)).text, /Great post!/, 'spam is hidden');
+  await adminPost(`/comments/${commentId}/status`, { status: 'approved', from: 'spam' });
+  assert.match((await anon(url)).text, /Great post!/);
+
+  assert.equal((await adminPost(`/comments/${commentId}/delete`, {})).status, 303);
+  assert.doesNotMatch((await anon(url)).text, /Great post!/, 'deleted comments disappear');
+  log(`comment #${commentId} submitted anonymously, held for review, approved, replied to, marked spam and deleted`);
+});
+
+test('12e. users: create an author, role limits, switch roles and delete', async () => {
+  const made = await adminPost('/users/save', {
+    username: 'author-e2e', email: 'author-e2e@example.com', role: 'author', password: 'author password',
+  });
+  assert.match(made.location, /can.now.sign.in/);
+  const usersPage = await get(`${admin}/users`);
+  assert.match(usersPage.text, /author-e2e/);
+  const authorId = Number(usersPage.text.match(new RegExp(`${admin}/users/(\\d+)"><b>author-e2e<`))[1]);
+
+  const dup = await adminPost('/users/save', { username: 'author-e2e', email: 'other@example.com', role: 'author', password: 'another password' });
+  assert.equal(dup.status, 200, 'a duplicate username re-renders the form');
+  assert.match(dup.text, /already taken/);
+
+  await adminPost('/login', { login: 'author-e2e', password: 'author password' });
+  assert.equal((await get(`${admin}/posts`)).status, 200, 'authors keep their posts');
+  assert.equal((await get(`${admin}/pages`)).status, 403, 'authors cannot manage pages');
+  assert.equal((await get(`${admin}/settings`)).status, 403, 'authors cannot open settings');
+  assert.equal((await get(`${admin}/users`)).status, 403, 'authors cannot open users');
+  assert.equal((await get(`${admin}/updates`)).status, 403, 'authors cannot open updates');
+  assert.doesNotMatch((await get(admin)).text, /\/plugins">/, 'the sidebar hides admin sections for authors');
+
+  await adminPost('/login', { login: ADMIN.username, password: ADMIN.password });
+  assert.equal((await get(admin)).status, 200, 'back as admin');
+  assert.match((await adminPost(`/users/${authorId}/delete`, {})).location, /deleted/);
+  assert.doesNotMatch((await get(`${admin}/users`)).text, /author-e2e/);
+  log('author created, could not reach pages/settings/users/updates, signed back in as admin and deleted');
+});
+
+test('12f. plugins and appearance: snippets, built-ins, custom CSS and widgets', async () => {
+  assert.match((await adminPost('/plugins/save', {
+    name: 'E2E Meta', hook: 'head', code: '<meta name="e2e-plugin" content="1">', enabled: 1,
+  })).location, /saved/);
+  assert.match((await anon('/')).text, /name="e2e-plugin"/, 'head snippet is injected');
+  const pluginId = Number((await get(`${admin}/plugins`)).text.match(/plugins\/(\d+)\/toggle/)[1]);
+  await adminPost(`/plugins/${pluginId}/toggle`, {});
+  assert.doesNotMatch((await anon('/')).text, /name="e2e-plugin"/, 'inactive snippets disappear');
+  await adminPost(`/plugins/${pluginId}/toggle`, {});
+  assert.match((await anon('/')).text, /name="e2e-plugin"/, 'reactivating brings it back');
+
+  assert.equal((await anon('/sitemap.xml')).status, 200);
+  assert.match((await anon('/sitemap.xml')).text, /<urlset/);
+  assert.match((await anon('/robots.txt')).text, /Sitemap: .*\/sitemap\.xml/);
+  assert.match((await anon('/feed.xml')).text, /<rss version="2.0">/);
+  await adminPost('/plugins/toggle', { key: 'sitemap' });
+  assert.equal((await anon('/sitemap.xml')).status, 404, 'a deactivated built-in stops answering');
+  assert.doesNotMatch((await anon('/robots.txt')).text, /Sitemap:/, 'robots drops the sitemap line');
+  await adminPost('/plugins/toggle', { key: 'sitemap' });
+  assert.equal((await anon('/sitemap.xml')).status, 200);
+
+  assert.match((await adminPost('/appearance', {
+    custom_css: '.e2e-custom{color:red}', custom_head: '<meta name="e2e-head" content="1">',
+    custom_footer: '<div class="e2e-footer"></div>', custom_js: '',
+  })).location, /Appearance.saved/);
+  const styled = await anon('/');
+  assert.match(styled.text, /\.e2e-custom\{color:red\}/);
+  assert.match(styled.text, /name="e2e-head"/);
+  assert.match(styled.text, /class="e2e-footer"/);
+
+  assert.match((await adminPost('/widgets', {
+    widget_footer_1_title: 'E2E Widget', widget_footer_1_body: '<p class="e2e-widget">Hello from a widget</p>',
+  })).location, /Widgets.saved/);
+  const widgetPage = await anon('/');
+  assert.match(widgetPage.text, /class="site-widgets"/);
+  assert.match(widgetPage.text, /E2E Widget/);
+  assert.match(widgetPage.text, /e2e-widget/);
+
+  await adminPost(`/plugins/${pluginId}/delete`, {});
+  assert.doesNotMatch((await anon('/')).text, /name="e2e-plugin"/);
+  log('snippets inject/toggle/delete, sitemap+robots+RSS switch off and on, custom CSS/head/footer and footer widgets render');
+});
+
+test('12g. tools: redirects, export/import, backups, health and cache', async () => {
+  assert.match((await adminPost('/tools/redirects', { from_path: '/old-e2e', to_url: '/blog', status: '301' })).location, /saved/);
+  const moved = await anon('/old-e2e');
+  assert.equal(moved.status, 301);
+  assert.equal(moved.location, '/blog');
+  assert.match((await adminPost('/tools/redirects', { from_path: 'bad path', to_url: '/blog' })).location, /err=/);
+
+  const exported = await get(`${admin}/tools/export/download`);
+  const bundle = JSON.parse(exported.text);
+  assert.equal(bundle.format, 'edge-cms-backup');
+  assert.ok(bundle.content.length >= 2, 'pages and posts are in the export');
+  assert.ok(bundle.users.every((u) => !('password_hash' in u)), 'passwords never leave the database');
+
+  const body = new FormData();
+  body.set('_csrf', await csrf());
+  body.set('file', new File([exported.text], 'export.json', { type: 'application/json' }));
+  const imported = await request(`${admin}/tools/import`, { method: 'POST', body });
+  assert.match(imported.location, /ok=Imported/);
+  const postText = (await anon(currentPostUrl())).text;
+  assert.equal((postText.match(/Thanks for reading!/g) || []).length, 1, 'importing twice does not duplicate comments');
+
+  assert.match((await adminPost('/tools/backups/create', {})).location, /ok=Backup/);
+  const backupsPage = await get(`${admin}/tools/backups`);
+  const backupId = Number(backupsPage.text.match(/backups\/(\d+)\/download/)[1]);
+  const backup = await get(`${admin}/tools/backups/${backupId}/download`);
+  assert.equal(JSON.parse(backup.text).format, 'edge-cms-backup');
+  assert.match((await adminPost(`/tools/backups/${backupId}/delete`, {})).location, /deleted/);
+
+  const health = await get(`${admin}/tools/health`);
+  assert.match(health.text, /Site Health/);
+  assert.match(health.text, /Database/);
+  assert.match(health.text, /OK/);
+  assert.match((await adminPost('/tools/cache', {})).location, /cache.cleared/);
+  log('redirect served 301, export downloaded without hashes, re-import idempotent, backup created/downloaded/deleted, health green');
+});
+
+test('12h. updates and taxonomy management: version page, run updates, categories and tags', async () => {
+  const page = await get(`${admin}/updates`);
+  assert.equal(page.status, 200);
+  assert.match(page.text, /0\.2\.0/);
+  assert.match(page.text, /Database schema/);
+  assert.match((await adminPost('/updates/run', {})).location, /\/updates\?ok=/);
+
+  assert.match((await adminPost('/terms/new', { name: 'E2E Guides', taxonomy: 'category' })).location, /added/);
+  const terms = await get(`${admin}/terms?taxonomy=category`);
+  assert.match(terms.text, /E2E Guides/);
+  const termId = Number(terms.text.match(/terms\/(\d+)\/rename/)[1]);
+  assert.match((await adminPost(`/terms/${termId}/rename`, { name: 'E2E Handbook', taxonomy: 'category' })).location, /Renamed/);
+  assert.match((await get(`${admin}/terms?taxonomy=category`)).text, /E2E Handbook/);
+  assert.match((await adminPost(`/terms/${termId}/delete`, { taxonomy: 'category' })).location, /deleted/);
+  assert.doesNotMatch((await get(`${admin}/terms?taxonomy=category`)).text, /E2E Handbook/);
+
+  assert.match((await adminPost('/terms/new', { name: 'e2e-tag', taxonomy: 'tag' })).location, /added/);
+  assert.match((await get(`${admin}/terms?taxonomy=tag`)).text, /e2e-tag/);
+  log('updates page reports version and runs migrations; categories create/rename/delete and tags add work');
+});
+
+test('12i. the sidebar has every admin section, its sub-menus and the collapse control', async () => {
+  const dash = await get(admin);
+  for (const path of ['/updates', '/posts', '/media', '/pages', '/comments', '/appearance', '/plugins', '/users', '/tools', '/settings', '/profile']) {
+    assert.ok(dash.text.includes(`href="${admin}${path}"`), `sidebar links to ${path}`);
+  }
+  assert.match(dash.text, /Collapse Menu/);
+  assert.match(dash.text, /class="nav-item on" href="\/control-room" aria-current="page"/, 'Dashboard is highlighted');
+  assert.match(dash.text, /id="side-c"/);
+  assert.match(dash.text, /href="\/control-room\/profile" title="Profile"/);
+
+  // A section shows its sub-menu while it is open, like the WordPress admin.
+  const posts = await get(`${admin}/posts`);
+  for (const path of ['/posts/new', '/terms?taxonomy=category', '/terms?taxonomy=tag']) {
+    assert.ok(posts.text.includes(`href="${admin}${path}"`), `Posts sub-menu links to ${path}`);
+  }
+  const appearance = await get(`${admin}/appearance`);
+  for (const path of ['/themes', '/menus', '/widgets']) {
+    assert.ok(appearance.text.includes(`href="${admin}${path}"`), `Appearance sub-menu links to ${path}`);
+  }
+  const tools = await get(`${admin}/tools`);
+  for (const path of ['/tools/redirects', '/tools/export', '/tools/backups', '/tools/health']) {
+    assert.ok(tools.text.includes(`href="${admin}${path}"`), `Tools sub-menu links to ${path}`);
+  }
+  const settingsPage = await get(`${admin}/settings`);
+  for (const hash of ['#reading', '#discussion', '#domains']) {
+    assert.ok(settingsPage.text.includes(`href="${admin}/settings${hash}"`), `Settings sub-menu links to ${hash}`);
+  }
+  assert.match((await get(`${admin}/media`)).text, /id="upload"/);
+
+  for (const path of ['/updates', '/comments', '/appearance', '/plugins', '/users', '/tools', '/settings', '/widgets', '/terms?taxonomy=tag']) {
+    assert.equal((await get(`${admin}${path}`)).status, 200, path);
+  }
+  log('11 sections and Profile are linked, sub-menus appear for the open section, every page opens');
 });
 
 test('13. deleting content and media removes them from the site', async () => {
