@@ -123,3 +123,8 @@ img { max-width: 100%; height: auto; display: block; }
 .prose a>img{border-radius:inherit}
 .prose .video-block iframe,.prose .video-responsive{width:100%;max-width:100%}
 .prose figure.image-block[style*="width:100%"]{clear:both}
+
+/* Figure margins must not override the selected float alignment. */
+.prose figure.image-block.align-left{margin:.3em 1.2em 1em 0}
+.prose figure.image-block.align-right{margin:.3em 0 1em 1.2em}
+@media(max-width:640px){.prose figure.image-block.align-left,.prose figure.image-block.align-right{float:none;margin:1.5em auto}}

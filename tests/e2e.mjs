@@ -244,7 +244,7 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   assert.match(editor.text, /id="slug-preview"/, 'the slug is previewed under its field');
   assert.match(editor.text, /id="link-dialog"/, 'links are made in a dialog, not a prompt');
   assert.match(editor.text, /id="add-page-break"/, 'a print page break can be inserted');
-  assert.match(editor.text, /if\(mode==='html'&&!hasRawBlock\(ta\.value\)\)toText\(\)/, 'inserting an image switches HTML mode to Text so its anchors show');
+  assert.match(editor.text, /function insertImageAtCaret[\s\S]*?toText\(\)/, 'inserting an image switches HTML mode to Text so its anchors show');
   assert.match(editor.text, /visual\.addEventListener\('input',positionOverlay\)/, 'anchors follow the image while typing');
   assert.match(editor.text, /window\.addEventListener\('pointermove',move\)/, 'anchor drags are tracked on the window, not just the handle');
 

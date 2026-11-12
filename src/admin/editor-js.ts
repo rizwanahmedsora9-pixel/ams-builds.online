@@ -122,45 +122,15 @@ export const EDITOR_JS = `<script>
   }
 
   function paragraphs(html){
-    var BLOCK=new RegExp('<(?:p|h[1-6]|ul|ol|li|blockquote|pre|figure|table|hr|iframe|section|article)','i');
-    var WRAPPER=new RegExp('(?:^|\\s)(?:html-block|video-block|widget|align-|embed|callout|note|image-block)');
-    // The closing tag is found by scanning forward from each open tag rather
-    // than with a lookahead inside the pattern: a backslash in this template
-    // string is doubled by the bundler, and a lookahead would quietly become a
-    // different expression. Scanning is also easier to read.
-    var open=/<div([^>]*)>/gi;
-    var out=String(html||'');
-    for(var guard=0;guard<40;guard++){
-      open.lastIndex=0;
-      var match=open.exec(out);
-      if(!match)break;
-      var attrs=match[1];
-      if(WRAPPER.test(attrs))continue;
-      var startTag=match[0],innerStart=match.index+startTag.length;
-      var endIndex=out.indexOf('</div>',innerStart);
-      if(endIndex<0)continue;
-      // Not the innermost div here? A later pass handles the inner one first.
-      if(/<div/i.test(out.slice(innerStart,endIndex)))continue;
-      var inner=out.slice(innerStart,endIndex);
-      // A single paragraph inside the div: keep the paragraph, drop the wrapper.
-      // Matched without backslash classes, for the bundling reason above: a
-      // paragraph whose content holds no tag is the only paragraph in the div.
-      var whole=inner.replace(/^ +| +$/g,'').match(/^<p(?: [^>]*)?>([^<]*)<[/]p>$/i);
-      if(whole){
-        out=out.slice(0,match.index)+'<p'+attrs+'>'+whole[1]+'</p>'+out.slice(endIndex+6);
-        continue;
-      }
-      // A div around exactly one block element is a wrapper the browser adds
-      // and the theme does not need: keep the block, drop the div.
-      var single=inner.replace(/^ +| +$/g,'');
-      if(BLOCK.test(single)&&single===singleEl(single)){
-        out=out.slice(0,match.index)+single+out.slice(endIndex+6);
-        continue;
-      }
-      if(BLOCK.test(inner))continue;
-      out=out.slice(0,match.index)+'<p'+attrs+'>'+inner+'</p>'+out.slice(endIndex+6);
-    }
-    return out;
+    // Only convert attribute-free, innermost browser-generated divs. Custom
+    // wrappers and divs with formatting or multiple blocks must remain intact.
+    var BLOCK=/<(?:div|p|h[1-6]|ul|ol|li|blockquote|pre|figure|table|hr|iframe|section|article)(?:[ >])/i;
+    return String(html||'').replace(/<div>([^]*?)<\\/div>/gi,function(match,inner){
+      if(/^<p(?: [^>]*)?>[^<]*<\\/p>$/i.test(inner))return inner;
+      if(/^<h[1-6](?: [^>]*)?>[^<]*<\\/h[1-6]>$/i.test(inner))return inner;
+      if(BLOCK.test(inner))return match;
+      return '<p>'+inner+'</p>';
+    });
   }
 
   function tidyHtml(html){
@@ -300,7 +270,7 @@ export const EDITOR_JS = `<script>
     // which is what a writer pasting a screenshot link expects.
     var onlyUrl=text.trim();
     if(!html&&/^https?:\\/\\/[^\\s]+$/.test(onlyUrl)&&/\\.(png|jpe?g|gif|webp|avif|svg)(\\?|#|$)/i.test(onlyUrl)&&U.imageFigure){
-      document.execCommand('insertHTML',false,U.imageFigure({url:onlyUrl,alt:'',width:50})+ '<p></p>');
+      insertImageAtCaret(U.imageFigure({url:onlyUrl,alt:'',width:50}));
     }else{
       document.execCommand('insertText',false,text.replace(/\\r\\n/g,'\\n'));
     }
@@ -559,6 +529,52 @@ export const EDITOR_JS = `<script>
     if(error)error.hidden=true;
     openDialog(imageDialog,alt);
   }
+  function insertImageAtCaret(html){
+    if(!html)return;
+    if(mode==='html'){
+      if(hasRawBlock(ta.value)){insertSnippet(html+'<p></p>');return}
+      // Map the source cursor to the visual text before changing panes.
+      var at=ta.selectionStart==null?ta.value.length:ta.selectionStart;
+      var atEnd=at===ta.value.length;
+      var prefix=document.createElement('div');prefix.innerHTML=ta.value.slice(0,at);
+      var offset=(prefix.textContent||'').length;
+      toText();
+      if(atEnd){
+        var end=document.createRange();end.selectNodeContents(visual);end.collapse(false);
+        var selection=window.getSelection();selection.removeAllRanges();selection.addRange(end);savedRange=end.cloneRange();
+      }else placeCaretAt(offset);
+    }
+    visual.focus();restoreSelection();
+    var sel=window.getSelection(),range=sel.getRangeAt(0);
+    range.deleteContents();range.collapse(true);
+
+    // Split the current top-level block at the caret. The figure must be a
+    // sibling of paragraphs/headings, never their parent: browsers otherwise
+    // sometimes pull existing text into the figure's centred, narrow box.
+    var node=range.startContainer,top=node;
+    while(top!==visual&&top.parentNode!==visual)top=top.parentNode;
+    if(top!==visual&&top.nodeType===1){
+      if(top.tagName==='FIGURE'){
+        range.setStartAfter(top);range.collapse(true);
+      }else{
+        var tail=range.cloneRange();tail.setEndAfter(top);
+        var after=tail.extractContents();
+        range.setStartAfter(top);range.collapse(true);
+        range.insertNode(after);
+        range.setStartAfter(top);range.collapse(true);
+      }
+    }
+    var holder=document.createElement('div');holder.innerHTML=html;
+    var figure=holder.firstElementChild;
+    if(!figure)return;
+    var paragraph=document.createElement('p');paragraph.appendChild(document.createElement('br'));
+    var fragment=document.createDocumentFragment();fragment.appendChild(figure);fragment.appendChild(paragraph);
+    range.insertNode(fragment);
+    range.setStart(paragraph,0);range.collapse(true);
+    sel.removeAllRanges();sel.addRange(range);savedRange=range.cloneRange();
+    if(typeof markDirty==='function')markDirty();
+    syncStats();
+  }
   function insertPickedImage(item,opts){
     var o=opts||{};
     var width=U.clampWidth?U.clampWidth(o.width):50;
@@ -566,11 +582,7 @@ export const EDITOR_JS = `<script>
       ?U.imageFigure({url:item.url,alt:o.alt!=null?o.alt:(item.alt||''),caption:o.caption,width:width,align:'center',link:o.link,linkNewTab:true})
       :'<figure class="image-block align-center" style="width:'+width+'%"><img src="'+esc(item.url)+'" alt="'+esc(o.alt!=null?o.alt:(item.alt||''))+'" loading="lazy">'+(o.caption?'<figcaption>'+esc(o.caption)+'</figcaption>':'')+'</figure>';
     if(!html)return;
-    insertSnippet(html+'<p></p>');
-    // Anchors only exist in the visual (Text) pane: a new post starts in
-    // HTML mode, so switch over or the just-inserted image can never be
-    // selected or resized. Raw <style>/<script> content stays in HTML.
-    if(mode==='html'&&!hasRawBlock(ta.value))toText();
+    insertImageAtCaret(html);
     // Select the image just inserted so its size/align anchors are right there.
     setTimeout(function(){
       var figs=visual.querySelectorAll('figure.image-block img');
@@ -588,14 +600,15 @@ export const EDITOR_JS = `<script>
         error.textContent='The image link must be a web address (https://…), mailto: or a path on this site (/about).';
         error.hidden=false;linkField.focus();return;
       }
-      insertPickedImage(pendingImage,{
+      var item=pendingImage;
+      imageDialog.close();
+      insertPickedImage(item,{
         alt:document.getElementById('image-block-alt').value,
         caption:document.getElementById('image-block-caption').value.trim(),
         link:link,
         width:Number(widthField.value)||50,
       });
       pendingImage=null;
-      imageDialog.close();
     });
     imageDialog.addEventListener('close',function(){pendingImage=null});
   }
@@ -790,6 +803,7 @@ export const EDITOR_JS = `<script>
   // A featured image typed into the source (or pasted) still shows its picture.
   var imageButton=document.querySelector('[data-picker-image]');
   if(imageButton){
+    imageButton.addEventListener('mousedown',function(){if(mode==='text')rememberSelection()});
     imageButton.addEventListener('click',function(){
       if(!picker)return;
       picker.open({onPick:imageBlockDialog});
