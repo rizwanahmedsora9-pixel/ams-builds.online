@@ -14,13 +14,27 @@ import { go, html, layout } from '../../lib/ui';
  */
 const shell = new Hono<AppEnv>();
 
+/**
+ * Bounce the browser back inside the panel after a one-click state change
+ * (rail collapse, colour scheme). `next` may arrive bare (`/posts`) or already
+ * prefixed with the admin slug (`/admin-panel/posts`); anything else falls
+ * back to the dashboard, so an off-site URL can never be used as an open
+ * redirect.
+ */
+const redirectBack = (c: Ctx, next: string): string => {
+  const clean = next.startsWith(c.var.base) ? next.slice(c.var.base.length) : next;
+  return clean.startsWith('/') && !clean.startsWith('//') ? c.var.base + clean : c.var.base;
+};
+
 /** Rail state is a cookie, so the server renders the right width on the first byte. */
 shell.get('/rail/:state', (c) => {
   const collapsed = c.req.param('state') === 'collapsed';
   const next = c.req.query('next') || '';
   c.header('Set-Cookie', `ams_rail=${collapsed ? '1' : '0'}; Path=/; Max-Age=31536000; SameSite=Lax`);
-  // Only same-panel paths are accepted as a return address.
-  return c.redirect(next.startsWith('/') && !next.startsWith('//') ? next : c.var.base, 303);
+  // Only same-panel paths are accepted as a return address. `next` may arrive
+  // bare (/posts) or already prefixed (/admin-panel/posts); normalise it so
+  // the bounce-back stays inside the admin prefix either way.
+  return c.redirect(redirectBack(c, next), 303);
 });
 
 /** Colour scheme from the account menu: one click, works without JavaScript. */
@@ -28,7 +42,7 @@ shell.get('/scheme/:scheme', (c) => {
   const scheme = ['auto', 'light', 'dark'].includes(c.req.param('scheme')) ? c.req.param('scheme') : 'auto';
   const next = c.req.query('next') || '';
   c.header('Set-Cookie', `ams_scheme=${scheme}; Path=/; Max-Age=31536000; SameSite=Lax`);
-  return c.redirect(next.startsWith('/') && !next.startsWith('//') ? next : c.var.base, 303);
+  return c.redirect(redirectBack(c, next), 303);
 });
 
 /** One-click density toggle from the account menu. */
