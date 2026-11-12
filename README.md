@@ -16,6 +16,7 @@ A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) ser
 | 6 | Appearance hub and live Customizer: design tokens, signed-cookie preview, per-theme settings, widget areas, per-page templates, Identity (Phase 4 of the roadmap) | **done (0.7.0)** |
 | 7 | Theme store & lifecycle: screenshots, live preview, in-panel file editor, zip export, rollback, two new bundled themes (Phase 5 of the roadmap) | **done (0.8.0)** |
 | 8 | Governance and performance: audit log, capabilities instead of hard-coded roles, enforced performance budgets, panel strings in one catalogue, export v2 (Phase 6 of the roadmap) | **done (0.8.0)** |
+| 9 | The writer's editor: a full formatting bar with shortcuts, a link dialog, image blocks with caption/alt/link, drag anchors and paste-or-drop upload, paste-as-text, page breaks, live word count and slug preview, mark-up tidying on save | **done (0.9.0)** |
 
 The full database schema is created at install. Existing sites upgrade themselves:
 pending tables and columns are added by the cron trigger, by `npm start`, or from
@@ -224,17 +225,80 @@ it is remembered on that device; change the site-wide default under
 `Classic editor`). You can switch instantly from the **Classic / Modern** buttons
 inside the editor at any time — the content is the same either way.
 
-Inserted images start at **50% width, centred** — never stretched across the whole
-post. In the Text editor, click any image to select it: corner **anchors** appear
-that you can drag to resize, plus a bar with **S / M / L / Full** presets, a width
-slider and **Left / Center / Right** alignment. The size and alignment are saved
-with the post, so the published page shows the image exactly as placed.
+### The formatting bar
 
-The **Text** and **HTML** tabs show the same content: Text is the visual editor and
-HTML is the underlying markup. Switching back and forth keeps everything, and both
-tabs support the formatting buttons, HTML blocks and YouTube embeds. Content that
-starts with a `<style>` or `<script>` block always opens in HTML so it is never
-mistaken for page markup. Without JavaScript the HTML textarea still saves normally.
+One bar, the same tools in both skins:
+
+| Group | Buttons |
+| --- | --- |
+| Type | **B** bold, *I* italic, U underline, ~~S~~ strikethrough |
+| Structure | H2, H3, H4, paragraph, bulleted list, numbered list, quote, code block, divider |
+| Insert | **Link**, **Media**, **Page break**, **Featured image** (posts), **HTML block**, **YouTube** |
+
+All of it works from the keyboard: **Ctrl/Cmd+S** saves, **Ctrl/Cmd+B / I / U** format,
+**Ctrl/Cmd+Shift+K** makes a link from the selection, **Enter** confirms a dialog and
+**Esc** closes it. (Ctrl/Cmd+K is the panel's command palette, so links use Shift.)
+
+**Paste keeps the words, not the styling.** Anything from Word, Google Docs, a chat
+window or another website arrives as plain text — the fonts, colours and table
+layouts the sanitizer would drop anyway never reach the post. The exception is a
+clipboard that is *only* an image URL: that becomes an image block. Shift+paste is
+the deliberate escape hatch for markup.
+
+### Placing an image
+
+**Media** in the toolbar opens the picker, and the picture you choose opens **Place
+this image** — a preview beside alt text, an optional caption, an optional link and
+a width slider. Insert places it at **50% width, centred**, never full-bleed.
+
+Pasting or dropping an image file straight onto the writing surface also works: it
+is compressed in the browser, uploaded, and placed at the caret — one motion, no
+dialog, several files at once.
+
+In the Text tab, click any image to select it:
+
+- four **corner anchors** to drag, and a bar with **S 25% / M 50% / L 75% / Full 100%**
+  presets and a width slider;
+- **Left / Center / Right** alignment (a floated image is cleared on narrow screens by
+  every bundled theme);
+- **Alt** — the description a screen reader reads, editable here rather than only in
+  the media library;
+- **Caption** — the words under the picture, add/edit/remove in place;
+- **Link** — wrap the image in a link (empty removes it), checked against the same
+  address rules as a text link;
+- **Remove**.
+
+Width is stored as a percentage and alignment as a class, so the published page
+shows the image exactly as placed. The sanitizer keeps exactly those two things and
+refuses a width it cannot honour (250%) instead of shipping a broken layout.
+
+### Everything else in the editor
+
+- **Links** are a dialog, not a `prompt`: address, the words to show, *open in a new
+  tab*. Picking a link and pressing Link again **edits** it, including its words;
+  Remove unwraps it. A `javascript:` address is refused before anything is saved.
+- **Page break** inserts a `<hr class="page-break">`. It shows as a labelled dashed
+  rule while you write and forces a page break when the post is printed — usable for
+  invoices, scripts and handouts. Every bundled theme styles it.
+- **Divider** inserts a plain `<hr>`, which every theme draws as a rule.
+- **HTML block** and **YouTube** open a dialog with a live error. YouTube accepts
+  watch, share (`youtu.be`), Shorts, live and embed URLs, and embeds the
+  privacy-friendly `youtube-nocookie.com` player responsively.
+- **Word count** in the editor bar shows the words a *reader* sees (markup and CSS are
+  not counted), the reading time at 220 words a minute, and the character count. It
+  updates as you type, in both tabs.
+- **Slug** is previewed under its field and generated with the same function the
+  server stores it with, so what you see is the URL you get.
+- **Tidying on save.** The browser writes a `<div>` per Enter; the editor converts
+  those line containers to real `<p>` paragraphs, unwraps redundant divs and removes
+  empty leftovers, so a post saved from the visual editor is clean markup — never
+  touching a custom block, a figure or a nested layout.
+- **Nothing is lost.** Autosave every 30 seconds, a snapshot of every save, a warning
+  before leaving with unsaved changes, and a lock while you work (see *Writing: safe,
+  fast, and never a surprise* below).
+- **Without JavaScript** the HTML textarea still saves normally, and content that
+  starts with a `<style>` or `<script>` block always opens in the HTML tab so it is
+  never mistaken for page markup.
 
 **Media** in the toolbar (and **Choose image** for the featured image) opens one
 dialog with two tabs. **Library** lists what is already uploaded, searchable by
@@ -453,6 +517,9 @@ src/
       attention.ts         "needs attention" checks for the dashboard
       revisions.ts         save snapshots, line diff, autosave retention, edit locks
       editor-views.ts      revision list, diff and editor banners (server-rendered)
+      editor-js.ts         the editor's client script (bar, links, images, autosave, stats)
+      editor-utils.ts      its pure helpers, tested on their own (slugify, link and
+                           image-figure rules, word count) - one small script
       media-picker.ts      the picker dialog and its client script (library + upload tabs)
       media-compress.ts    browser-side resize/WebP compression shared by every upload form
       assets/screens/editor.css   editor-only styles (History, banners, picker)

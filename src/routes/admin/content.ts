@@ -20,6 +20,8 @@ import { activeThemeTemplates } from '../../lib/theme-store';
 import { audit } from '../../lib/audit';
 import { lockBanner, restoreBanner, revisionDiff, revisionList } from '../../admin/editor-views';
 import { csrfField, errorPage, go, html, layout, raw, type Raw } from '../../lib/ui';
+import { EDITOR_JS } from '../../admin/editor-js';
+import { EDITOR_UTILS_JS } from '../../admin/editor-utils';
 
 /** Pages and posts share one table and one editor; posts add terms, featured image and scheduling. */
 const content = new Hono<AppEnv>();
@@ -694,7 +696,7 @@ content.post('/posts/bulk', async (c) => {
  * Editor styles live here rather than in the shared ADMIN_CSS so the
  * classic/modern choice and the Text/HTML toggle look right on both skins.
  */
-const EDITOR_CSS = `<style>
+export const EDITOR_CSS = `<style>
 .ams-editor{margin-bottom:.4rem}
 .ams-editor-bar{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-bottom:.45rem}
 .ams-editor-switch{display:inline-flex;border:1px solid var(--line);border-radius:.45rem;overflow:hidden;background:var(--card)}
@@ -703,14 +705,22 @@ const EDITOR_CSS = `<style>
 .ams-editor-switch button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
 .ams-editor-bar .hint{margin:0;flex:1 1 12rem}
 .ams-editor-pane[hidden]{display:none!important}
-.ams-editor .toolbar{margin-bottom:.4rem}
-.ams-editor textarea.code,.ams-editor .visual-editor{min-height:22rem;margin:0}
+.ams-editor .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem;margin-bottom:.4rem}
+.ams-editor .toolbar button{padding:.25rem .55rem;border:1px solid var(--line);border-radius:.3rem;background:var(--card);color:var(--fg);font:inherit;font-size:.82rem;line-height:1.5;cursor:pointer}
+.ams-editor .toolbar button:hover{border-color:var(--accent);color:var(--accent)}
+.ams-editor .toolbar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.ams-editor .toolbar button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
+.toolbar-separator{width:1px;height:1.25rem;margin:0 .2rem;background:var(--line);align-self:center}
+.ams-editor textarea.code,.ams-editor .visual-editor{min-height:22rem;margin:0;width:100%}
 .ams-editor-status{margin:.35rem 0 0;color:var(--muted);font-size:.78rem;min-height:1.1em}
+.ams-editor-stats{margin:0 0 0 auto;color:var(--muted);font-size:.78rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.slug-preview{margin:.15rem 0 .9rem;font-family:var(--mono-font,ui-monospace,monospace)}
 /* Classic: compact WP-style chrome — small square buttons over a plain box.
    The bar stays visible: it holds the Classic/Modern switch itself, so hiding
    it (the old rule) stranded the user in Classic with no way back. */
 .ams-editor.is-classic .ams-editor-bar{display:flex;margin-bottom:.3rem}
 .ams-editor.is-classic .ams-editor-bar .hint{display:none}
+.ams-editor.is-classic .ams-editor-stats{margin-left:auto}
 .ams-editor.is-classic .ams-editor-switch button{padding:.2rem .55rem;font-size:.78rem}
 .ams-editor.is-classic .toolbar{gap:.15rem;margin:0;padding:.35rem;border:1px solid var(--line);border-bottom:0;border-radius:.35rem .35rem 0 0;background:var(--bg)}
 .ams-editor.is-classic .toolbar button{padding:.2rem .45rem;font-size:.8rem;border-radius:.2rem;background:var(--card)}
@@ -738,6 +748,16 @@ const EDITOR_CSS = `<style>
 .visual-editor .align-right{float:right;margin:.3em 0 1em 1em}
 .visual-editor .align-center{margin-left:auto;margin-right:auto}
 .visual-editor img.is-selected,.visual-editor figure.image-block.is-selected{outline:2px solid var(--accent);outline-offset:2px}
+/* Page break: a marker the editor shows as a labelled rule. It carries no
+   style attribute (the sanitizer only keeps width/align declarations), so the
+   rule is drawn from the tag itself and the public page prints the break. */
+.visual-editor hr.page-break{border:0;border-top:2px dashed var(--line-strong);margin:1.4rem 0;position:relative}
+.visual-editor hr.page-break::after{content:'Page break';position:absolute;right:0;top:-.75em;padding:0 .4rem;background:var(--bg);color:var(--muted);font-size:.72rem;letter-spacing:.04em;text-transform:uppercase}
+.visual-editor .html-block{border-color:var(--line-strong)}
+.visual-editor:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.visual-editor.is-dropping{outline:2px dashed var(--accent);outline-offset:-2px;background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.ams-editor-drop{margin:.3rem 0 0;padding:.4rem .6rem;border:1px dashed var(--accent);border-radius:.35rem;color:var(--accent);font-size:.8rem}
+.ams-editor-drop[hidden]{display:none!important}
 .image-tools{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.4rem 0;padding:.4rem .5rem;border:1px solid var(--accent);border-radius:.45rem;background:var(--bg);font-size:.82rem}
 .image-tools[hidden]{display:none!important}
 .image-tools b{margin-right:.15rem}
@@ -752,589 +772,36 @@ const EDITOR_CSS = `<style>
 .img-overlay span[data-handle=ne]{left:100%;top:0;cursor:nesw-resize}
 .img-overlay span[data-handle=sw]{left:0;top:100%;cursor:nesw-resize}
 .img-overlay span[data-handle=se]{left:100%;top:100%;cursor:nwse-resize}
+/* Link and image-block dialogs: the form beside the picture, so the writer
+   sees what will be placed before it goes in. */
+.image-block-form{display:grid;grid-template-columns:minmax(8rem,12rem) minmax(0,1fr);gap:1rem;align-items:start;margin:.5rem 0}
+.image-block-form__preview{display:grid;place-items:center;min-height:6rem;border:1px dashed var(--line-strong);border-radius:.45rem;background:var(--surface-2);overflow:hidden}
+.image-block-form__preview img{display:block;max-width:100%;max-height:10rem;height:auto}
+.image-block-form__fields{display:grid;gap:.15rem}
+.image-block-form__fields label{margin-top:.5rem}
+.image-block-form__fields label:first-child{margin-top:0}
+.image-block-form__width{margin:.2rem 0 0;gap:.5rem}
+.image-block-form__width input[type=range]{flex:1;accent-color:var(--accent)}
+.image-block-form__width output{min-width:3ch;font-variant-numeric:tabular-nums}
+.dialog-grow{flex:1 1 auto}
+dialog[open]{max-height:90vh}
+#link-dialog,#image-block-dialog{width:min(34rem,94vw)}
+@media(max-width:640px){
+  .image-block-form{grid-template-columns:1fr}
+  .image-block-form__preview{min-height:5rem;max-height:8rem}
+  .ams-editor-bar{position:sticky;top:0;z-index:5;background:var(--bg);padding:.25rem 0}
+  .ams-editor .toolbar{overflow-x:auto;flex-wrap:nowrap;padding-bottom:.3rem}
+  .ams-editor.is-modern .toolbar{flex-wrap:wrap}
+}
 </style>`;
 
 /**
- * One editor for pages and posts with two skins (classic / modern) and a
- * Text <-> HTML switch that keeps content, caret and scroll position.
- * The markup stays a plain form: without JavaScript the HTML textarea still
- * submits, so nothing can be lost.
+ * The client script for the editor: two skins (classic / modern), a
+ * Text <-> HTML switch that keeps content, caret and scroll position, the
+ * formatting bar, links, image blocks with size/alignment handles, the media
+ * picker, autosave and the word counter. It lives in
+ * src/admin/editor-js.ts so the tests can run exactly what ships.
  */
-const EDITOR_JS = `<script>
-(function(){
-  var form=document.getElementById('edit');
-  if(!form)return;
-  var ta=document.getElementById('body'),visual=document.getElementById('visual-editor');
-  var box=document.getElementById('content-editor');
-  var toolbar=document.getElementById('editor-toolbar'),status=document.getElementById('editor-status');
-  var modeSwitch=document.getElementById('editor-mode-switch');
-  var modeDialog=document.getElementById('editor-mode-dialog');
-  var SKIN_KEY='cms-editor-skin';
-  var isNew=form.dataset.isNew==='1';
-  var initial=form.dataset.initialSkin==='classic'?'classic':'modern';
-  var preferred=(form.dataset.preferredSkin==='classic'||form.dataset.preferredSkin==='modern')?form.dataset.preferredSkin:'';
-  var skin=initial,mode='html',savedRange=null;
-
-  function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
-
-  // Content that starts with a <style>/<script> block is source, not markup:
-  // loading it into a contenteditable would run or hide it, so it stays in HTML.
-  function hasRawBlock(src){return /^\\s*(?:<!--[\\s\\S]*?-->\\s*)*(?:<style[\\s>]|<script[\\s>])/i.test(src||'')}
-
-  /* ------------------------------------------------------- selection */
-  function rememberSelection(){
-    var sel=window.getSelection();
-    if(sel&&sel.rangeCount&&visual.contains(sel.anchorNode))savedRange=sel.getRangeAt(0).cloneRange();
-  }
-  function restoreSelection(){
-    var sel=window.getSelection(),range=savedRange;
-    if(!range||!visual.contains(range.commonAncestorContainer)){
-      range=document.createRange();range.selectNodeContents(visual);range.collapse(false);
-    }
-    sel.removeAllRanges();sel.addRange(range);
-  }
-  function caretOffset(){
-    var sel=window.getSelection();
-    if(!sel||!sel.rangeCount)return 0;
-    var range=sel.getRangeAt(0),probe=range.cloneRange();
-    if(!visual.contains(range.commonAncestorContainer))return 0;
-    probe.selectNodeContents(visual);
-    probe.setEnd(range.startContainer,range.startOffset);
-    return probe.toString().length;
-  }
-  function placeCaretAt(offset){
-    var walker=document.createTreeWalker(visual,NodeFilter.SHOW_TEXT,null,false);
-    var node,seen=0,last=null;
-    while((node=walker.nextNode())){
-      var len=node.nodeValue.length;
-      if(seen+len>=offset){
-        var range=document.createRange();
-        range.setStart(node,Math.max(0,Math.min(len,offset-seen)));
-        range.collapse(true);
-        var sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);
-        savedRange=range.cloneRange();
-        return;
-      }
-      seen+=len;last=node;
-    }
-    var end=document.createRange();
-    if(last)end.setStart(last,last.nodeValue.length);else end.selectNodeContents(visual);
-    end.collapse(false);
-    var s=window.getSelection();s.removeAllRanges();s.addRange(end);
-    savedRange=end.cloneRange();
-  }
-
-  /* ------------------------------------------------------------ modes */
-  function syncMode(){
-    if(box)box.classList.toggle('is-html',mode==='html');
-    if(status&&!status.dataset.locked){
-      status.textContent=mode==='html'
-        ?'Editing HTML source. The Text tab shows the same content visually.'
-        :'Editing text. The HTML tab shows the same content as source.';
-    }
-    if(modeSwitch){
-      modeSwitch.querySelectorAll('[data-editor-mode]').forEach(function(btn){
-        btn.setAttribute('aria-pressed',String(btn.dataset.editorMode===mode));
-      });
-    }
-    if(visual)visual.setAttribute('aria-hidden',mode==='html'?'true':'false');
-    if(ta)ta.setAttribute('aria-hidden',mode==='text'?'true':'false');
-  }
-  function note(text){
-    if(!status)return;
-    status.dataset.locked='1';
-    status.textContent=text;
-    setTimeout(function(){delete status.dataset.locked;syncMode()},4000);
-  }
-
-  // Editor-only state (the selected-image outline) must never be saved.
-  function serializeVisual(){
-    var clone=visual.cloneNode(true);
-    clone.querySelectorAll('.is-selected').forEach(function(el){el.classList.remove('is-selected')});
-    clone.querySelectorAll('img[draggable]').forEach(function(el){el.removeAttribute('draggable')});
-    return clone.innerHTML;
-  }
-
-  // Both panes hold the same document at all times: the textarea is the
-  // source of truth for HTML, the contenteditable mirrors it when visible.
-  function toText(){
-    var caret=caretOffset();
-    visual.innerHTML=ta.value;
-    mode='text';
-    ta.hidden=true;visual.hidden=false;
-    syncMode();
-    visual.focus();
-    placeCaretAt(caret);
-    visual.scrollTop=ta.scrollTop;
-  }
-  function toHtml(){
-    ta.value=serializeVisual();
-    clearImageSelection();
-    mode='html';
-    visual.hidden=true;ta.hidden=false;
-    syncMode();
-    ta.focus();
-    var end=ta.value.length;
-    ta.setSelectionRange(end,end);
-  }
-  function setMode(next,focusIt){
-    if(next!=='text'&&next!=='html')return;
-    if(next===mode){
-      syncMode();
-      if(focusIt){if(mode==='text')visual.focus();else ta.focus()}
-      return;
-    }
-    if(next==='text'&&hasRawBlock(ta.value)){
-      toHtml();
-      note('This content starts with a <style> or <script> block, so it stays in HTML mode.');
-      return;
-    }
-    if(next==='text')toText();else toHtml();
-  }
-
-  if(modeSwitch){
-    modeSwitch.querySelectorAll('[data-editor-mode]').forEach(function(btn){
-      btn.addEventListener('click',function(){setMode(btn.dataset.editorMode,true)});
-    });
-  }
-
-  /* ---------------------------------------------------------- toolbar */
-  function insertSnippet(snippet){
-    if(mode==='html'){
-      var start=ta.selectionStart==null?ta.value.length:ta.selectionStart;
-      var end=ta.selectionEnd==null?start:ta.selectionEnd;
-      ta.value=ta.value.slice(0,start)+snippet+ta.value.slice(end);
-      ta.focus();
-      var at=start+snippet.length;
-      ta.setSelectionRange(at,at);
-    }else{
-      // The toolbar button (or the media dialog) took focus; put it back on the
-      // writing surface first, otherwise execCommand has no editable element.
-      visual.focus();
-      restoreSelection();
-      document.execCommand('insertHTML',false,snippet);
-      rememberSelection();
-    }
-  }
-  if(toolbar){
-    toolbar.querySelectorAll('[data-wrap]').forEach(function(btn){
-      btn.addEventListener('mousedown',function(e){if(mode==='text')e.preventDefault()});
-      btn.addEventListener('click',function(){
-        if(mode==='text')rememberSelection();
-        var parts=btn.getAttribute('data-wrap').split('|'),open=parts[0],close=parts[1]||'';
-        if(btn.dataset.ask){
-          var value=prompt(btn.dataset.ask,btn.dataset.def||'');
-          if(!value)return;
-          open=open.replace('$1',escapeHtml(value));
-        }
-        if(mode==='text'){
-          restoreSelection();
-          if(btn.dataset.command){document.execCommand(btn.dataset.command,false,btn.dataset.value||null)}
-          else{
-            var sel=window.getSelection(),selected='';
-            if(sel&&sel.rangeCount){var holder=document.createElement('div');holder.appendChild(sel.getRangeAt(0).cloneContents());selected=holder.innerHTML}
-            document.execCommand('insertHTML',false,open+selected+close);
-          }
-          rememberSelection();
-        }else{
-          var start=ta.selectionStart==null?ta.value.length:ta.selectionStart;
-          var end=ta.selectionEnd==null?start:ta.selectionEnd;
-          ta.value=ta.value.slice(0,start)+open+ta.value.slice(start,end)+close+ta.value.slice(end);
-          ta.focus();
-          ta.setSelectionRange(start+open.length,end+open.length);
-        }
-      });
-    });
-  }
-  visual.addEventListener('keyup',rememberSelection);
-  visual.addEventListener('mouseup',rememberSelection);
-  visual.addEventListener('paste',function(e){
-    if(mode!=='text')return;
-    e.preventDefault();
-    var text=((e.clipboardData||window.clipboardData).getData('text/plain')||'');
-    document.execCommand('insertText',false,text);
-  });
-
-  /* ---------------------------------------------------------- dialogs */
-  var htmlDialog=document.getElementById('html-block-dialog'),youtubeDialog=document.getElementById('youtube-dialog');
-  function openDialog(dialog,focus){
-    rememberSelection();
-    if(!dialog)return;
-    dialog.showModal();
-    setTimeout(function(){focus.focus()},0);
-  }
-  document.querySelectorAll('[data-close-dialog]').forEach(function(btn){
-    btn.addEventListener('click',function(){var d=btn.closest('dialog');if(d)d.close()});
-  });
-  if(htmlDialog){
-    document.getElementById('add-html-block').addEventListener('click',function(){openDialog(htmlDialog,document.getElementById('html-block-input'))});
-    document.getElementById('insert-html-block').addEventListener('click',function(){
-      var input=document.getElementById('html-block-input'),code=input.value.trim();
-      if(!code){input.focus();return}
-      insertSnippet('<div class="html-block">\\n'+code+'\\n</div>');
-      input.value='';htmlDialog.close();
-    });
-  }
-  function youtubeId(value){
-    try{
-      var url=new URL(value),host=url.hostname.toLowerCase().replace(/^(www|m)\\./,''),id='';
-      if(url.protocol!=='https:'&&url.protocol!=='http:')return '';
-      if(host==='youtu.be')id=url.pathname.split('/')[1];
-      else if(host==='youtube.com'||host==='youtube-nocookie.com'){
-        if(url.pathname==='/watch')id=url.searchParams.get('v')||'';
-        else{var parts=url.pathname.split('/');if(['embed','shorts','live'].indexOf(parts[1])!==-1)id=parts[2]}
-      }else return '';
-      return /^[A-Za-z0-9_-]{11}$/.test(id||'')?id:'';
-    }catch(e){return ''}
-  }
-  if(youtubeDialog){
-    document.getElementById('add-youtube').addEventListener('click',function(){
-      document.getElementById('youtube-error').hidden=true;
-      openDialog(youtubeDialog,document.getElementById('youtube-url'));
-    });
-    document.getElementById('insert-youtube').addEventListener('click',function(){
-      var input=document.getElementById('youtube-url'),id=youtubeId(input.value.trim()),error=document.getElementById('youtube-error');
-      if(!id){error.hidden=false;input.focus();return}
-      var title=document.getElementById('youtube-title').value.trim()||'YouTube video player';
-      var embed='<figure class="video-block youtube-video"><div class="video-responsive"><iframe src="https://www.youtube-nocookie.com/embed/'+id+'" title="'+escapeHtml(title)+'" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div></figure>';
-      insertSnippet(embed);
-      input.value='';document.getElementById('youtube-title').value='';youtubeDialog.close();
-    });
-  }
-  ['youtube-url','youtube-title','html-block-input'].forEach(function(id){
-    var el=document.getElementById(id);
-    if(!el)return;
-    el.addEventListener('keydown',function(e){
-      if(e.key==='Enter'&&(id!=='html-block-input'||e.ctrlKey||e.metaKey)){
-        e.preventDefault();
-        document.getElementById(id==='html-block-input'?'insert-html-block':'insert-youtube').click();
-      }
-    });
-  });
-
-  /* ------------------------------------------------------------ skins */
-  function applySkin(next){
-    skin=next==='classic'?'classic':'modern';
-    if(box){
-      box.dataset.skin=skin;
-      box.classList.toggle('is-classic',skin==='classic');
-      box.classList.toggle('is-modern',skin==='modern');
-    }
-    document.querySelectorAll('[data-editor-skin-set]').forEach(function(btn){
-      btn.setAttribute('aria-pressed',String(btn.dataset.editorSkinSet===skin));
-    });
-  }
-
-  function useSkin(next){
-    applySkin(next);
-    try{localStorage.setItem(SKIN_KEY,skin)}catch(e){}
-  }
-  document.querySelectorAll('[data-editor-skin-set]').forEach(function(btn){
-    btn.addEventListener('click',function(){
-      useSkin(btn.dataset.editorSkinSet);
-      note((skin==='classic'?'Classic':'Modern')+' editor. Remembered on this device.');
-    });
-  });
-
-  /* ---------------------------------------- classic/modern chooser */
-  // "Add New" asks which editor to use unless a preference is remembered.
-  function startWriting(){if(mode==='text')visual.focus();else ta.focus()}
-  if(modeDialog){
-    modeDialog.querySelectorAll('[data-skin-choice]').forEach(function(btn){
-      btn.addEventListener('click',function(){
-        useSkin(btn.dataset.skinChoice);
-        modeDialog.close();
-        startWriting();
-      });
-    });
-    modeDialog.addEventListener('cancel',function(){applySkin(initial)});
-    var remembered=preferred;
-    try{remembered=remembered||localStorage.getItem(SKIN_KEY)||''}catch(e){}
-    if(remembered==='classic'||remembered==='modern')applySkin(remembered);
-    else if(isNew)modeDialog.showModal();
-  }
-
-  /* ----------------------------------------------------------- submit */
-  form.addEventListener('submit',function(){
-    if(mode==='text')ta.value=serializeVisual();
-    // A real save supersedes any autosave: stop nagging on the way out.
-    dirty=false;
-    clearInterval(timer);
-  });
-
-  /* --------------------------------------------------------- autosave */
-  // Autosave writes to the revision table, never to the live row: a crash or a
-  // closed tab leaves a recoverable snapshot and the published page is untouched.
-  var autosaveUrl=form.dataset.autosaveUrl||'',lockUrl=form.dataset.lockUrl||'';
-  var csrf=form.dataset.csrf||'';
-  var autosaveStatus=document.querySelector('[data-autosave-status]');
-  var dirty=false,inflight=false,lastSaved=null,timer=null,unloadArmed=false;
-
-  function currentBody(){return mode==='text'?serializeVisual():ta.value}
-  function markDirty(){
-    dirty=true;
-    if(!unloadArmed){
-      unloadArmed=true;
-      window.addEventListener('beforeunload',function(event){
-        if(!dirty)return;
-        event.preventDefault();
-        event.returnValue='';
-        return '';
-      });
-    }
-  }
-  function ago(date){
-    var secs=Math.max(0,Math.round((Date.now()-date.getTime())/1000));
-    if(secs<5)return 'just now';
-    if(secs<60)return secs+' s ago';
-    var mins=Math.round(secs/60);
-    return mins+(mins===1?' minute ago':' minutes ago');
-  }
-  function say(text){
-    if(!autosaveStatus)return;
-    autosaveStatus.textContent=text;
-  }
-  function autosave(){
-    if(!autosaveUrl||!dirty||inflight)return;
-    inflight=true;
-    var body=new URLSearchParams();
-    body.set('_csrf',csrf);
-    body.set('title',(document.getElementById('title')||{}).value||'');
-    var excerptEl=document.getElementById('excerpt');
-    if(excerptEl)body.set('excerpt',excerptEl.value);
-    body.set('body',currentBody());
-    fetch(autosaveUrl,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()})
-      .then(function(res){return res.json().then(function(data){return {ok:res.ok,data:data}})})
-      .then(function(result){
-        if(result.ok&&result.data.ok){
-          dirty=false;lastSaved=new Date(result.data.at||Date.now());
-          say(result.data.unchanged?'No new changes to save.':'Autosaved '+ago(lastSaved)+'.');
-        }else if(result.data&&result.data.error==='needs-migration'){
-          say('Autosave needs a database update: open Updates and run it.');
-        }else{
-          say('Autosave could not save this time. Your Save button still works.');
-        }
-      })
-      .catch(function(){say('Autosave is offline. Your Save button still works.')})
-      .then(function(){inflight=false});
-  }
-  if(autosaveUrl){
-    timer=setInterval(autosave,30000);
-    // Keep the "12 s ago" line honest between saves.
-    setInterval(function(){if(lastSaved&&!dirty)say('Autosaved '+ago(lastSaved)+'.')},10000);
-    ['input','keyup'].forEach(function(type){
-      document.getElementById('edit').addEventListener(type,function(event){
-        if(event.target.closest('#editor-toolbar'))return;
-        markDirty();
-      });
-    });
-    if(ta)ta.addEventListener('input',markDirty);
-    if(visual)visual.addEventListener('input',markDirty);
-  }
-
-  /* ------------------------------------------------------- edit lock */
-  if(lockUrl){
-    // A heartbeat every 45 s keeps the row locked while this tab is open, and
-    // tells us if somebody took it over in the meantime.
-    setInterval(function(){
-      var body=new URLSearchParams();body.set('_csrf',csrf);
-      fetch(lockUrl,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()})
-        .then(function(res){return res.json()})
-        .then(function(data){
-          if(data&&data.holder&&!document.querySelector('[data-lock-banner]')){
-            var box=document.getElementById('lock-slot');
-            if(!box)return;
-            box.innerHTML='<div class="notice warn lock-banner" role="status" data-lock-banner><div><b>'+escapeHtml(data.holder)+' is editing this content now.</b> Saving may overwrite their changes.</div></div>';
-          }
-        })
-        .catch(function(){});
-    },45000);
-  }
-
-  /* ------------------------------------------------------- media picker */
-  // The Image button and the featured-image control open the same dialog, so
-  // finding, uploading and describing an image is one flow.
-  var pickerUrl=form.dataset.pickerEndpoint||'',pickerUpload=form.dataset.pickerUpload||'';
-  var picker=(window.amsMediaPicker&&pickerUrl)?window.amsMediaPicker({uploadUrl:pickerUpload}):null;
-  var featuredPreview=document.querySelector('[data-featured-preview]');
-  function setFeatured(item){
-    var input=document.getElementById('featured-id');
-    if(input)input.value=item?String(item.id):'';
-    if(featuredPreview){
-      featuredPreview.innerHTML=item
-        ?'<img src="'+escapeHtml(item.url)+'" alt="'+escapeHtml(item.alt||'')+'">'
-        :'<span class="muted">No image chosen</span>';
-    }
-  }
-  document.querySelectorAll('[data-open-picker]').forEach(function(button){
-    button.addEventListener('click',function(){
-      if(!picker)return;
-      picker.open({onPick:function(item){
-        if(button.dataset.openPicker==='featured')setFeatured(item);
-      }});
-    });
-  });
-  var clearFeatured=document.querySelector('[data-clear-featured]');
-  if(clearFeatured)clearFeatured.addEventListener('click',function(){setFeatured(null)});
-  var imageButton=document.querySelector('[data-picker-image]');
-  if(imageButton){
-    imageButton.addEventListener('click',function(){
-      if(!picker)return;
-      picker.open({onPick:function(item){
-        var alt=escapeHtml(item.alt||'');
-        insertSnippet('<figure class="image-block align-center" style="width:50%"><img src="'+escapeHtml(item.url)+'" alt="'+alt+'" loading="lazy">'+
-          (alt?'<figcaption>'+alt+'</figcaption>':'')+'</figure>\\n<p></p>');
-        // Anchors only exist in the visual (Text) pane: a new post starts in
-        // HTML mode, so switch over or the just-inserted image can never be
-        // selected or resized. Raw <style>/<script> content stays in HTML.
-        if(mode==='html'&&!hasRawBlock(ta.value))toText();
-        // Select the image just inserted so its size/align anchors are right there.
-        setTimeout(function(){
-          var figs=visual.querySelectorAll('figure.image-block img');
-          for(var i=figs.length-1;i>=0;i--){if(figs[i].getAttribute('src')===item.url){selectImage(figs[i]);break}}
-        },0);
-      }});
-    });
-  }
-
-  /* ------------------------------------------- image size & anchors */
-  // Click an image in Text mode: it gets an outline, four corner anchors you
-  // can drag, and a size/align bar. Width is stored as width:% on the figure
-  // (or the bare <img>), alignment as align-left/center/right — both survive
-  // saving (the sanitizer keeps exactly those) so the page matches the editor.
-  var imageTools=document.getElementById('image-tools');
-  var imgOverlay=document.getElementById('img-overlay');
-  var imgWidth=document.getElementById('img-width'),imgWidthOut=document.getElementById('img-width-out');
-  var selectedImg=null,selectedBlock=null;
-
-  function imageBlockOf(img){var f=img.closest?img.closest('figure'):null;return f||img}
-  function imageWidthPct(){
-    if(!selectedBlock)return 50;
-    var inline=parseFloat((selectedBlock.style&&selectedBlock.style.width)||'');
-    if(inline)return Math.round(inline);
-    var w=selectedImg.getBoundingClientRect().width,host=visual.clientWidth||1;
-    return Math.max(10,Math.min(100,Math.round(w/host*100)));
-  }
-  function syncImageTools(){
-    if(!imageTools||!selectedImg)return;
-    var pct=imageWidthPct();
-    if(imgWidth)imgWidth.value=String(pct);
-    if(imgWidthOut)imgWidthOut.textContent=pct+'%';
-    imageTools.querySelectorAll('[data-img-size]').forEach(function(b){b.setAttribute('aria-pressed',String(Number(b.dataset.imgSize)===pct))});
-    var align=selectedBlock.classList.contains('align-left')?'left':selectedBlock.classList.contains('align-right')?'right':'center';
-    imageTools.querySelectorAll('[data-img-align]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.imgAlign===align))});
-  }
-  function positionOverlay(){
-    if(!imgOverlay||!selectedImg||mode!=='text'){if(imgOverlay)imgOverlay.hidden=true;return}
-    var r=selectedImg.getBoundingClientRect(),b=box.getBoundingClientRect();
-    imgOverlay.hidden=false;
-    imgOverlay.style.left=(r.left-b.left)+'px';
-    imgOverlay.style.top=(r.top-b.top)+'px';
-    imgOverlay.style.width=r.width+'px';
-    imgOverlay.style.height=r.height+'px';
-  }
-  function selectImage(img){
-    clearImageSelection();
-    selectedImg=img;selectedBlock=imageBlockOf(img);
-    selectedBlock.classList.add('is-selected');
-    if(selectedBlock===img)img.classList.add('is-selected');
-    img.setAttribute('draggable','false');
-    if(imageTools)imageTools.hidden=false;
-    syncImageTools();positionOverlay();
-  }
-  function clearImageSelection(){
-    if(selectedBlock)selectedBlock.classList.remove('is-selected');
-    if(selectedImg)selectedImg.classList.remove('is-selected');
-    selectedImg=null;selectedBlock=null;
-    if(imageTools)imageTools.hidden=true;
-    if(imgOverlay)imgOverlay.hidden=true;
-  }
-  function applyImageWidth(pct){
-    if(!selectedBlock)return;
-    pct=Math.max(10,Math.min(100,Math.round(pct)||50));
-    selectedBlock.style.width=pct+'%';
-    if(selectedBlock!==selectedImg)selectedImg.style.width='100%';
-    if(typeof markDirty==='function')markDirty();
-    syncImageTools();positionOverlay();
-  }
-  function applyImageAlign(align){
-    if(!selectedBlock)return;
-    selectedBlock.classList.remove('align-left','align-center','align-right');
-    selectedBlock.classList.add('align-'+align);
-    if(selectedBlock.tagName==='FIGURE'||selectedBlock===selectedImg){/* width keeps the float honest */}
-    if(typeof markDirty==='function')markDirty();
-    syncImageTools();positionOverlay();
-  }
-  if(visual){
-    visual.addEventListener('click',function(e){
-      var img=e.target&&e.target.closest?e.target.closest('img'):null;
-      if(img&&visual.contains(img)){selectImage(img)}
-      else if(e.target===visual||(e.target.closest&&!e.target.closest('figure.image-block')))clearImageSelection();
-    });
-    visual.addEventListener('scroll',positionOverlay);
-    // Typing above the image, or the image finishing loading, moves it: keep
-    // the corner anchors glued to it instead of leaving them floating stale.
-    visual.addEventListener('input',positionOverlay);
-    visual.addEventListener('load',function(e){if(e.target&&e.target.tagName==='IMG')positionOverlay()},true);
-    window.addEventListener('resize',positionOverlay);
-  }
-  if(imageTools){
-    // Keep the editor selection alive when a button is pressed, but let the
-    // width slider receive its own pointer events so it can actually drag.
-    imageTools.addEventListener('mousedown',function(e){if(e.target.closest&&e.target.closest('button'))e.preventDefault()});
-    imageTools.querySelectorAll('[data-img-size]').forEach(function(b){b.addEventListener('click',function(){applyImageWidth(Number(b.dataset.imgSize))})});
-    imageTools.querySelectorAll('[data-img-align]').forEach(function(b){b.addEventListener('click',function(){applyImageAlign(b.dataset.imgAlign)})});
-    var removeBtn=imageTools.querySelector('[data-img-remove]');
-    if(removeBtn)removeBtn.addEventListener('click',function(){
-      if(!selectedBlock)return;
-      var block=selectedBlock;clearImageSelection();block.remove();
-      if(typeof markDirty==='function')markDirty();
-      visual.focus();
-    });
-  }
-  if(imgWidth)imgWidth.addEventListener('input',function(){applyImageWidth(Number(imgWidth.value))});
-  // Drag any corner anchor: horizontal distance becomes the new width.
-  if(imgOverlay)imgOverlay.querySelectorAll('[data-handle]').forEach(function(handle){
-    handle.addEventListener('pointerdown',function(e){
-      if(!selectedImg)return;
-      e.preventDefault();e.stopPropagation();
-      var west=handle.dataset.handle.indexOf('w')!==-1;
-      var startX=e.clientX,startW=selectedImg.getBoundingClientRect().width,host=visual.clientWidth||1;
-      try{handle.setPointerCapture(e.pointerId)}catch(err){/* capture is a nicety; window-level drag still works without it */}
-      function move(ev){applyImageWidth((startW+(west?startX-ev.clientX:ev.clientX-startX))/host*100)}
-      function up(){window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',up)}
-      // On window, not just the 12px handle: a fast drag leaves the handle.
-      window.addEventListener('pointermove',move);
-      window.addEventListener('pointerup',up);
-      window.addEventListener('pointercancel',up);
-    });
-  });
-
-  /* ------------------------------------------------------------- boot */
-  visual.innerHTML=ta.value;
-  mode='html';
-  // Existing content opens in the visual editor; a new post has nothing to
-  // preview yet, so it starts on the HTML tab with the cursor in the source.
-  if(!isNew&&!hasRawBlock(ta.value))toText();else syncMode();
-  // The skin variable already holds the remembered/dialog choice from the
-  // chooser above; re-applying initial here used to undo it before display.
-  applySkin(skin);
-
-  /* -------------------------------------------- title, slug, publish */
-  var title=document.getElementById('title'),slug=document.getElementById('slug');
-  if(slug&&!slug.value){
-    title.addEventListener('input',function(){
-      if(slug.dataset.touched)return;
-      slug.value=title.value.toLowerCase().normalize('NFKD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80);
-    });
-    slug.addEventListener('input',function(){slug.dataset.touched=1});
-  }
-  var st=document.getElementById('status'),when=document.getElementById('when');
-  if(st&&when){var sync=function(){when.hidden=st.value==='draft'};st.addEventListener('change',sync);sync()}
-  var del=document.getElementById('delete');
-  if(del)del.addEventListener('submit',function(e){if(!confirm('Delete this permanently?'))e.preventDefault()});
-})();
-</script>`;
 
 async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Response> {
   const type = typeOf(kind);
@@ -1372,7 +839,7 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
     </span>
     <span class="row">
       <button class="btn ghost small" type="button" data-open-picker="featured">Choose image</button>
-      <button class="btn ghost small" type="button" data-clear-featured>Remove</button>
+      <button class="btn ghost small" type="button" data-clear-featured${featured ? '' : raw(' hidden')}>Remove</button>
     </span>
   </div>
   <p class="hint">Picking from the library also lets you set alt text. Upload new images right in the dialog.</p>
@@ -1406,12 +873,22 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
   const inMenu = type === 'page' && (!row || row.status === 'draft' || (await isInPrimaryMenu(c.env, pageUrl!)));
   const opt = (v: string, label: string) => html`<option value="${v}"${status === v ? raw(' selected') : ''}>${label}</option>`;
   const title = row ? `Edit ${type}` : `New ${type}`;
+  // A post's address depends on the permalink style the site uses, so the
+  // Preview link follows it instead of assuming /blog/.
+  const rowUrl = row ? (type === 'post' ? postUrl(row, permalinkStyle(settings)) : settings.home_page_id === String(row.id) ? '/' : '/' + row.slug) : '';
+  const rowPreview = row ? rowUrl + (row.status === 'published' ? '' : '?preview=1') : '';
   // Which editor opens: the site default, else the classic/modern chooser on Add New.
   const preferred = settings.default_editor === 'classic' || settings.default_editor === 'modern' ? settings.default_editor : '';
   const initialSkin = preferred || 'modern';
   return layout(c, title, html`
 ${raw(EDITOR_CSS)}
-<div class="row between" style="margin-bottom:1rem"><h1 style="margin:0">${title}</h1><a href="${base}/${kind}">&larr; All ${kind}</a></div>
+<div class="row between editor-top" style="margin-bottom:1rem">
+  <h1 style="margin:0">${title}</h1>
+  <span class="row">
+    ${row ? html`<a class="btn ghost small" href="${rowPreview}" target="_blank" rel="noopener">Preview</a>` : ''}
+    <a class="btn ghost small" href="${base}/${kind}">&larr; All ${kind}</a>
+  </span>
+</div>
 <div id="lock-slot">${lockHolder ? lockBanner(lockHolder, base, kind, row!.id, can(c.var.user, 'edit_others_posts')) : ''}</div>
 ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
 <form method="post" action="${base}/${kind}/save" id="edit"
@@ -1420,19 +897,20 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
       data-lock-url="${row ? `${base}/${kind}/${row.id}/lock` : ''}"
       data-picker-endpoint="${base}/media/picker"
       data-picker-upload="${base}/media/picker/upload"
-      data-lock-mine="1"${row ? raw(` data-rowid="${row.id}" data-csrf="${c.var.csrf}"`) : ''}>
+      data-lock-mine="1" data-csrf="${c.var.csrf}"${row ? raw(` data-rowid="${row.id}"`) : ''}>
   ${csrfField(c)}
   <input type="hidden" name="id" value="${row?.id ?? ''}">
   <div class="card">
     <label for="title" style="margin-top:0">Title</label>
     <input type="text" id="title" name="title" value="${row?.title ?? ''}" required maxlength="200">
     <label for="slug">Slug</label>
-    <input type="text" id="slug" name="slug" value="${row?.slug ?? ''}" maxlength="80" autocapitalize="none" placeholder="generated from the title">
+    <input type="text" id="slug" name="slug" value="${row?.slug ?? ''}" maxlength="80" autocapitalize="none" placeholder="generated from the title" aria-describedby="slug-preview">
+    <p class="hint slug-preview" id="slug-preview" aria-live="polite">${row?.slug || '…'}</p>
     <div class="editor-heading row between">
       <label for="body" id="content-label">Content</label>
       <div class="ams-editor-switch" id="editor-mode-switch" role="group" aria-label="Editor mode">
-        <button type="button" data-editor-mode="text" aria-pressed="false">Text</button>
-        <button type="button" data-editor-mode="html" aria-pressed="true">HTML</button>
+        <button type="button" data-editor-mode="text" aria-pressed="false" title="Visual editing">Text</button>
+        <button type="button" data-editor-mode="html" aria-pressed="true" title="HTML source">HTML</button>
       </div>
     </div>
     <div class="ams-editor is-${initialSkin}" id="content-editor" data-skin="${initialSkin}">
@@ -1442,18 +920,29 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
           <button type="button" data-editor-skin-set="modern" aria-pressed="${initialSkin === 'modern' ? 'true' : 'false'}">Modern</button>
         </div>
         <p class="hint">Classic shows the original toolbar; Modern keeps the same tools in a wider bar.</p>
+        <p class="ams-editor-stats" id="editor-stats" aria-live="off"></p>
       </div>
-      <div class="toolbar" id="editor-toolbar" aria-label="Content formatting">
-        <button type="button" data-wrap="<strong>|</strong>" data-command="bold" title="Bold"><b>B</b></button>
-        <button type="button" data-wrap="<em>|</em>" data-command="italic" title="Italic"><i>I</i></button>
-        <button type="button" data-wrap="<h2>|</h2>" data-command="formatBlock" data-value="h2">H2</button>
-        <button type="button" data-wrap="<h3>|</h3>" data-command="formatBlock" data-value="h3">H3</button>
-        <button type="button" data-wrap="<p>|</p>" data-command="formatBlock" data-value="p" title="Paragraph">&para;</button>
-        <button type="button" data-wrap="<ul>&#10;  <li>|</li>&#10;</ul>" data-command="insertUnorderedList">List</button>
-        <button type="button" data-wrap="<blockquote>|</blockquote>" data-command="formatBlock" data-value="blockquote">Quote</button>
-        <button type="button" data-wrap="<pre><code>|</code></pre>">Code</button>
-        <button type="button" data-wrap='<a href="$1">|</a>' data-ask="Link URL" data-def="https://">Link</button>
-        <button type="button" id="insert-image" data-picker-image title="Insert an image from the media library or upload one now">${icon('image', { cls: 'ico--sm' })} Media</button>
+      <div class="toolbar" id="editor-toolbar" role="toolbar" aria-label="Content formatting" aria-controls="visual-editor">
+        <button type="button" data-wrap="<strong>|</strong>" data-command="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button>
+        <button type="button" data-wrap="<em>|</em>" data-command="italic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button>
+        <button type="button" data-wrap="<u>|</u>" data-command="underline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button>
+        <button type="button" data-wrap="<s>|</s>" data-command="strikeThrough" title="Strikethrough" aria-label="Strikethrough"><s>S</s></button>
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button type="button" data-wrap="<h2>|</h2>" data-command="formatBlock" data-value="h2" title="Heading 2">H2</button>
+        <button type="button" data-wrap="<h3>|</h3>" data-command="formatBlock" data-value="h3" title="Heading 3">H3</button>
+        <button type="button" data-wrap="<h4>|</h4>" data-command="formatBlock" data-value="h4" title="Heading 4">H4</button>
+        <button type="button" data-wrap="<p>|</p>" data-command="formatBlock" data-value="p" title="Paragraph" aria-label="Paragraph">&para;</button>
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button type="button" data-wrap="<ul>&#10;  <li>|</li>&#10;</ul>" data-command="insertUnorderedList" title="Bulleted list">List</button>
+        <button type="button" data-wrap="<ol>&#10;  <li>|</li>&#10;</ol>" data-command="insertOrderedList" title="Numbered list">1. List</button>
+        <button type="button" data-wrap="<blockquote>|</blockquote>" data-command="formatBlock" data-value="blockquote" title="Quote">Quote</button>
+        <button type="button" data-wrap="<pre><code>|</code></pre>" title="Code block">Code</button>
+        <button type="button" data-wrap="<hr>|" data-command="insertHorizontalRule" title="Divider line" aria-label="Divider">&mdash;</button>
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button type="button" data-link-open title="Add or edit a link (Ctrl+L)">Link</button>
+        <button type="button" data-picker-image id="insert-image" title="Insert an image from the media library or upload one now">${icon('image', { cls: 'ico--sm' })} Media</button>
+        <button type="button" id="add-page-break" title="Mark where a printed page ends (Print only)">Page break</button>
+        ${type === 'post' ? html`<button type="button" data-open-picker="featured" title="Choose the post's featured image">Featured image</button>` : ''}
         <span class="toolbar-separator" aria-hidden="true"></span>
         <button type="button" id="add-html-block" title="Insert a custom HTML block">&lt;/&gt; HTML block</button>
         <button type="button" id="add-youtube" title="Embed a YouTube video">&#9654; YouTube</button>
@@ -1468,14 +957,19 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
         <button type="button" data-img-align="left">Left</button>
         <button type="button" data-img-align="center" aria-pressed="true">Center</button>
         <button type="button" data-img-align="right">Right</button>
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button type="button" data-img-alt title="Describe the image for screen readers">Alt</button>
+        <button type="button" data-img-caption title="Add or edit the caption under the image">Caption</button>
+        <button type="button" data-img-link title="Link the image to a URL">Link</button>
         <button type="button" data-img-remove>Remove</button>
       </div>
+      <p class="ams-editor-drop" id="image-drop-hint" hidden>Drop an image to upload and place it here.</p>
       <div id="img-overlay" class="img-overlay" hidden aria-hidden="true"><span data-handle="nw"></span><span data-handle="ne"></span><span data-handle="sw"></span><span data-handle="se"></span></div>
       <div id="visual-editor" class="visual-editor ams-editor-pane" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="content-label" data-placeholder="Write your content here…" hidden></div>
-      <textarea id="body" name="body" class="code ams-editor-pane" spellcheck="true">${row?.body ?? ''}</textarea>
+      <textarea id="body" name="body" class="code ams-editor-pane" spellcheck="true" aria-label="Content (HTML source)">${row?.body ?? ''}</textarea>
       <p class="ams-editor-status" id="editor-status" role="status" aria-live="polite"></p>
     </div>
-    <p class="hint">Text and HTML always show the same content: switch freely, nothing is lost. Add as many HTML and YouTube blocks as you need.</p>
+    <p class="hint">Text and HTML always show the same content: switch freely, nothing is lost. Paste keeps the words and drops foreign styling. Ctrl/Cmd+S saves, Ctrl/Cmd+B/I/U format, Ctrl/Cmd+Shift+K makes a link. Add as many HTML and YouTube blocks as you need.</p>
     ${can(c.var.user, 'manage_settings') ? html`<p class="hint">Admin HTML is not sanitized when you save.</p>` : html`<p class="hint">Unsafe HTML is removed when you save. YouTube embeds added with the YouTube button are allowed.</p>`}
   </div>
   ${postFields}
@@ -1526,6 +1020,43 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
     <button type="button" class="btn ghost small" data-close-dialog>Not now</button>
   </div>
 </dialog>
+<dialog id="link-dialog" aria-labelledby="link-dialog-title">
+  <h2 id="link-dialog-title">Add link</h2>
+  <p class="hint">A web address, a mailto:, a phone number, or a path on this site such as <code>/contact</code>. Anything else is refused rather than saved as a dead link.</p>
+  <label for="link-url">Link address</label>
+  <input type="text" id="link-url" inputmode="url" autocomplete="off" placeholder="https://example.com/page">
+  <label for="link-text">Words to show <span class="muted">(leave empty to use the address)</span></label>
+  <input type="text" id="link-text" maxlength="200" autocomplete="off">
+  <label class="check"><input type="checkbox" id="link-newtab"> Open in a new tab</label>
+  <p class="form-error" id="link-error" role="alert" hidden></p>
+  <div class="row dialog-actions">
+    <button type="button" class="btn ghost small" id="link-remove" hidden>Remove link</button>
+    <span class="dialog-grow"></span>
+    <button type="button" class="btn ghost" data-close-dialog>Cancel</button>
+    <button type="button" class="btn" id="insert-link">Save link</button>
+  </div>
+</dialog>
+<dialog id="image-block-dialog" aria-labelledby="image-block-dialog-title">
+  <h2 id="image-block-dialog-title">Place this image</h2>
+  <div class="image-block-form">
+    <div class="image-block-form__preview" id="image-block-preview"></div>
+    <div class="image-block-form__fields">
+      <label for="image-block-alt">Alt text</label>
+      <input type="text" id="image-block-alt" maxlength="200" placeholder="Describe the image for screen readers">
+      <label for="image-block-caption">Caption <span class="muted">(optional)</span></label>
+      <input type="text" id="image-block-caption" maxlength="300" placeholder="Shown under the image">
+      <label for="image-block-link">Image link <span class="muted">(optional)</span></label>
+      <input type="text" id="image-block-link" autocomplete="off" placeholder="https://…">
+      <label for="image-block-width">Width</label>
+      <p class="row image-block-form__width"><input type="range" id="image-block-width" min="10" max="100" step="5" value="50"> <output id="image-block-width-out" for="image-block-width">50%</output></p>
+    </div>
+  </div>
+  <p class="form-error" id="image-block-error" role="alert" hidden></p>
+  <div class="row dialog-actions">
+    <button type="button" class="btn ghost" data-close-dialog>Cancel</button>
+    <button type="button" class="btn" id="insert-image-block">Insert image</button>
+  </div>
+</dialog>
 <dialog id="html-block-dialog" aria-labelledby="html-block-title">
   <h2 id="html-block-title">Add HTML block</h2>
   <p class="hint">Paste a complete HTML snippet. It will be inserted at your cursor, and you can repeat this for more blocks.</p>
@@ -1559,6 +1090,7 @@ ${row ? card({
 }) : ''}
 ${row ? html`<form method="post" action="${base}/${kind}/${row.id}/delete" id="delete">${csrfField(c)}<button class="btn danger" type="submit">Delete ${type}</button></form>` : ''}
 ${raw(PICKER_JS)}
+${raw(EDITOR_UTILS_JS)}
 ${raw(EDITOR_JS)}`, '/' + kind);
 }
 

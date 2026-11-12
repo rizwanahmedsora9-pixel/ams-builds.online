@@ -52,6 +52,43 @@ behave the same and a change lands everywhere at once.
   check fails quietly if the data is not there yet. Below it: site totals, recently edited
   content, latest comments and version/schema/theme at a glance.
 
+## The editor: writing, formatting and placing images
+
+Every post and page has one editor with two skins — **Classic** (compact, WordPress-like)
+and **Modern** (wider, framed toolbar) — and two tabs, **Text** (visual) and **HTML**
+(source). Both tabs edit the same document and switching keeps the caret.
+
+**The bar.** Bold, italic, underline, strikethrough · H2/H3/H4, paragraph, bulleted and
+numbered lists, quote, code, divider · Link, Media, Page break, Featured image, HTML
+block, YouTube. Shortcuts work in the writing surface: `Ctrl/Cmd+S` saves,
+`Ctrl/Cmd+B/I/U` formats, `Ctrl/Cmd+Shift+K` links the selection. (`Ctrl/Cmd+K` is the
+command palette, so the link shortcut adds Shift.)
+
+**Paste** brings the words and drops foreign styling — a paste from Word or a browser
+arrives as plain text, and a clipboard that is only an image URL becomes an image block.
+Add Shift to keep the clipboard's markup.
+
+**Placing an image.** The Media button opens the library/upload picker; the picture you
+pick opens *Place this image*: preview, alt text, caption, optional link and width.
+Inserted at 50%, centred. A picture can also be pasted or dropped straight onto the
+writing surface — it uploads itself and lands at the caret. Click the image in the Text
+tab and a bar appears with size presets (25/50/75/100%), a width slider, plus **Alt**,
+**Caption**, **Link** and **Remove**, and four corner anchors you can drag. Width and
+alignment are saved with the post, so the published page matches the editor.
+
+**Links** are a dialog — address, words, new tab — and pressing Link with the cursor in a
+link edits it, words included. Anything that is not `http(s)`, `mailto`, `tel`, `#` or a
+path on the site is refused before it is saved.
+
+**Page break** inserts a labelled rule that becomes a real page break when the post is
+printed; **divider** inserts a plain rule. **HTML block** and **YouTube** open a dialog
+with a live error (YouTube takes watch, `youtu.be`, Shorts, live and embed URLs).
+
+**While you write**, the bar shows the word count, reading time and characters for what a
+reader will see, the slug is previewed under its field, and autosave runs every 30
+seconds. On save the editor turns the browser's line `<div>`s into paragraphs and drops
+empty leftovers, so the stored markup is as clean as the writing.
+
 ## Writing: safe, fast, and never a surprise
 
 - **Nothing is lost.** Every save keeps a snapshot of the previous version, and while you type the
@@ -86,7 +123,7 @@ blank 500.
 | --- | --- |
 | Dashboard | Greeting, **Needs attention** checklist (each item links to the fix), site totals, recently edited content, latest comments, version, schema and theme |
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
-| Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
+| Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; the full editor (formatting bar, links, images with caption/alt/link, page breaks, word count), excerpt, featured image, SEO, draft/published/scheduled |
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). Images are compressed to WebP in the browser before upload, in every common format (JPG/JFIF, PNG/APNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, JXL, ICO, SVG). The editor's media picker uses the same library and has two tabs: **Library** and **Upload from device** |
 | Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |

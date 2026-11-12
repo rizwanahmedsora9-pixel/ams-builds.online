@@ -236,7 +236,14 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   assert.match(editor.text, /data-img-align="left"/, 'image alignment controls are present');
   assert.match(editor.text, /id="img-overlay"/, 'image resize anchors overlay is present');
   assert.match(editor.text, /data-handle="se"/, 'image corner drag anchor is present');
-  assert.match(editor.text, /image-block align-center" style="width:50%"/, 'inserted images start at 50%, centred');
+  assert.match(editor.text, /clampWidth\(o\.width\)|width:'\+width\+'%/, 'a picked image is placed at the width the dialog says');
+  assert.match(editor.text, /align:'center'/, 'inserted images are centred');
+  assert.match(editor.text, /id="image-tools"[\s\S]*data-img-caption/, 'the image bar edits the caption in place');
+  assert.match(editor.text, /id="image-tools"[\s\S]*data-img-alt/, 'alt text is editable from the image bar');
+  assert.match(editor.text, /id="editor-stats"/, 'the word count is shown while writing');
+  assert.match(editor.text, /id="slug-preview"/, 'the slug is previewed under its field');
+  assert.match(editor.text, /id="link-dialog"/, 'links are made in a dialog, not a prompt');
+  assert.match(editor.text, /id="add-page-break"/, 'a print page break can be inserted');
   assert.match(editor.text, /if\(mode==='html'&&!hasRawBlock\(ta\.value\)\)toText\(\)/, 'inserting an image switches HTML mode to Text so its anchors show');
   assert.match(editor.text, /visual\.addEventListener\('input',positionOverlay\)/, 'anchors follow the image while typing');
   assert.match(editor.text, /window\.addEventListener\('pointermove',move\)/, 'anchor drags are tracked on the window, not just the handle');
@@ -841,7 +848,9 @@ test('12g. tools: redirects, export/import, backups, health and cache', async ()
 test('12h. updates and taxonomy management: version page, run updates, categories and tags', async () => {
   const page = await get(`${admin}/updates`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /8\.0\.0|0\.8\.0/, 'the updates page states the running version');
+  const { APP_NAME } = await import('../src/lib/version.ts');
+  assert.ok(page.text.includes(APP_NAME), 'the updates page names the app');
+  assert.match(page.text, /Installed version<\/dt><dd>\d+\.\d+\.\d+/, 'the updates page states the running version');
   assert.match(page.text, /Database schema/);
   assert.match((await adminPost('/updates/run', {})).location, /\/updates\?ok=/);
 
@@ -1134,6 +1143,93 @@ test('13b. appearance: live preview, manifest settings, per-page template and wi
   assert.match(identity.text, /<meta property="og:image" content="[^"]*\/media\/share.png">/);
   assert.match(identity.text, /<meta name="color-scheme" content="dark">/);
   log('preview shows unsaved tokens + theme settings (never saved), the Customizer save persists both, a page renders its own template, widget areas from theme.json render, Identity reaches every page');
+});
+
+/* ==========================================================================
+   The editor's writing surface, over the wire: what the toolbar, the image
+   block and the paste path send is what the public page renders. The client
+   side of the same features is proven in tests/editor.test.mjs; here the
+   question is whether a saved body survives the server and reaches a theme.
+   ========================================================================== */
+test('17. the editor markup for images, links, blocks and breaks survives the save', async () => {
+  const created = await adminPost('/posts/save', {
+    title: 'Placed Image Post', status: 'published',
+    body: [
+      '<h2>A heading</h2>',
+      '<p>Text with a <a href="https://example.com/report" target="_blank" rel="noopener noreferrer">link</a> and an <a href="mailto:hi@example.com">email</a>.</p>',
+      '<figure class="image-block align-left" style="width:35%"><img src="/media/example/pic.webp" alt="A placed image" loading="lazy"><figcaption>Caption under it</figcaption></figure>',
+      '<p>Text after a floated image.</p>',
+      '<figure class="image-block align-center" style="width:50%"><a href="https://example.com/gallery"><img src="/media/example/pic.webp" alt="Linked image" loading="lazy"></a></figure>',
+      '<hr class="page-break">',
+      '<div class="html-block"><p>Custom block</p></div>',
+      '<figure class="video-block youtube-video"><div class="video-responsive"><iframe src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ" title="Clip" loading="lazy" allowfullscreen></iframe></div></figure>',
+    ].join('\n'),
+  });
+  assert.equal(created.status, 303);
+  const id = idFrom(created.location);
+  const slug = ((await get(`${admin}/posts/${id}`)).text.match(/name="slug" value="([^"]*)"/) || [])[1];
+  assert.ok(slug, 'the post has a slug');
+  // The permalink style and the active theme are whatever earlier tests left
+  // behind, so ask the site rather than assuming /blog/ and the bundled theme.
+  const url = JSON.parse((await anon(`/api/posts/${slug}`)).text).url;
+  // Render with a known theme: earlier tests leave a fixture theme active, and
+  // this test is about the saved markup, not about which theme is current.
+  const page = await get(`${url}?preview=1&theme=default`);
+  assert.equal(page.status, 200, `${url} renders in the bundled theme`);
+
+  // Alignment + width are the two things the editor's bar writes.
+  assert.match(page.text, /<figure class="image-block align-left" style="width:35%">/);
+  assert.match(page.text, /<figcaption>Caption under it<\/figcaption>/);
+  assert.match(page.text, /<figure class="image-block align-center" style="width:50%">/);
+  // The new-tab link keeps its rel (and never gains a second one).
+  assert.match(page.text, /<a href="https:\/\/example.com\/report" target="_blank" rel="noopener noreferrer">link<\/a>/);
+  assert.equal((page.text.match(/rel="noopener noreferrer"/g) || []).length,
+    (page.text.match(/target="_blank"/g) || []).length, 'exactly one rel per new-tab link');
+  // An in-page/mail link is left alone.
+  assert.match(page.text, /<a href="mailto:hi@example.com">email<\/a>/);
+  // A linked image keeps its anchor.
+  assert.match(page.text, /<a href="https:\/\/example.com\/gallery"><img src="\/media\/example\/pic.webp" alt="Linked image"/);
+  // The print break and the custom/video blocks are kept as written.
+  assert.match(page.text, /<hr class="page-break">/);
+  assert.match(page.text, /<div class="html-block"><p>Custom block<\/p><\/div>/);
+  assert.match(page.text, /youtube-nocookie.com\/embed\/dQw4w9WgXcQ/);
+  // The bundled themes style the break and the figure placement (the store
+  // themes that earlier tests activate are CSS-only and render the markup
+  // as-is, so the figure rules are checked in the stylesheet itself).
+  const defaultCss = (await anon('/theme-assets/default/style.css')).text || '';
+  assert.match(defaultCss, /hr\.page-break\{border-top-style:dashed/);
+  assert.match(defaultCss, /figure\.image-block\{margin:1\.5em auto/);
+
+  // An admin saves raw HTML by design; an author or editor goes through the
+  // sanitizer, which keeps exactly the declarations the editor writes and
+  // drops a width it cannot produce (250%) rather than shipping a broken
+  // layout. The figure styles are checked against that same sanitizer.
+  const { sanitizeHtml } = await import('../src/lib/security.ts');
+  assert.equal(
+    sanitizeHtml('<figure class="image-block align-center" style="width:250%"><img src="/a.png" alt=""></figure>'),
+    '<figure class="image-block align-center"><img src="/a.png" alt=""></figure>',
+  );
+  assert.equal(
+    sanitizeHtml('<figure class="image-block align-center" style="width:35%"><img src="/a.png" alt=""></figure>'),
+    '<figure class="image-block align-center" style="width:35%"><img src="/a.png" alt=""></figure>',
+    'the width the editor writes survives the sanitizer',
+  );
+  assert.equal(
+    sanitizeHtml('<p><a href="https://x.test" target="_blank">t</a></p>'),
+    '<p><a href="https://x.test" target="_blank" rel="noopener noreferrer">t</a></p>',
+    'a new-tab link gains exactly one rel',
+  );
+
+  // The editor page ships everything the toolbar promises.
+  const editor = await get(`${admin}/posts/${id}`);
+  for (const needle of [
+    'id="link-dialog"', 'id="image-block-dialog"', 'id="insert-image-block"',
+    'data-link-open', 'data-img-caption', 'data-img-alt', 'data-img-link',
+    'id="add-page-break"', 'id="editor-stats"', 'id="slug-preview"',
+    'window.amsEditorUtils', 'tidyHtml',
+  ]) assert.ok(editor.text.includes(needle), `the editor ships ${needle}`);
+  assert.match(editor.text, /Ctrl\/Cmd\+S saves|saveNow\(\)/, 'the save shortcut is wired');
+  log('image placement, links, page breaks, HTML and video blocks save and render as placed');
 });
 
 test('14. logout ends the session and repeated bad logins are rate limited', async () => {
