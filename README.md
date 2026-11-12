@@ -133,7 +133,15 @@ npm run check:assets  # panel CSS/token budgets only (fast)
 `tests/e2e.mjs` boots a real server on an empty data folder and walks the whole
 product over HTTP. `tests/helpers.mjs` holds the shared harness (server lifecycle,
 cookie jar, CSRF, install-and-login helper), so a new test starts from a working
-panel in three lines - see `tests/panel.test.mjs` for the style.
+panel in three lines.
+
+`tests/panel.test.mjs` (14 cases) covers the panel itself: the shell renders once,
+every screen loads, the palette markup and its live region, global search end to end
+(full page, `partial=1` fragment, session guard, escaped query), the rail / scheme /
+density cookies, the shared list pattern and its empty states, the dashboard's
+priority order, and the accessibility floor - including a rule that every
+`outline: none` in the panel CSS must be paired with a wrapper that draws its own
+focus ring.
 
 ## The admin panel
 
@@ -162,16 +170,36 @@ behave the same and a change lands everywhere at once.
   cases. `npm run check:assets` fails the build if a screen hard-codes a colour or
   a bundle grows past its budget.
 
-The account menu (top right) holds Profile, Preferences and Log out. A screen that
-fails to render shows a styled error page naming the route, instead of a blank 500.
+- **Command palette** - `Ctrl`/`⌘`+`K` (or `/` when not typing) opens a search-and-command
+  launcher from anywhere in the panel: type to search every post, page, file, comment,
+  category, tag and user you are allowed to see, or pick a command (`Add post`, `Settings`,
+  `Media`…). Results are fetched as a fragment from `GET /{admin}/search?q=`; with JavaScript
+  off, the same box submits to the full search page. The same query is available as a plain
+  link, so search results can be bookmarked.
+- **Lists** - posts and pages share one pattern: status tabs with counts, a search and filter
+  toolbar, sortable columns (`aria-sort`), one bulk-action bar that activates on selection, and
+  an empty state that offers the next step. Below 700 px each row becomes a card with its
+  column labels, so the panel is usable on a phone without sideways scrolling.
+- **Dashboard** - opens with a greeting, the site name and a **Needs attention** list: comments
+  waiting, spam to check, scheduled posts that are overdue, posts untouched for 60 days, images
+  without alt text, media records with no file, pending database updates and idle author
+  accounts. Items are ordered by severity, each one links to the screen that fixes it, and each
+  check fails quietly if the data is not there yet. Below it: site totals, recently edited
+  content, latest comments and version/schema/theme at a glance.
+
+The account menu (top right) holds Profile, Preferences, colour scheme shortcuts
+(light / dark / match system) and Log out. Rail state, scheme and density are also
+one-click links (`/rail/collapsed`, `/scheme/dark`), so they work with JavaScript off.
+A screen that fails to render shows a styled error page naming the route, instead of a
+blank 500.
 
 | Section | What it does |
 | --- | --- |
-| Dashboard | Counts, quick actions, recently edited content, latest comments, version and moderation status |
+| Dashboard | Greeting, **Needs attention** checklist (each item links to the fix), site totals, recently edited content, latest comments, version, schema and theme |
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
-| Posts | Searchable post table with status, date and category filters, sortable columns and bulk publish/draft/delete; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
+| Posts | Shared list pattern: status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs and upload images, PDF, audio, video and fonts to KV (Cloudflare) or `data/media/` (Node) |
-| Pages | Searchable, sortable page table with status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
+| Pages | Same list pattern as Posts with status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (additional CSS, header code, footer code, JavaScript), **Themes**, **Menus**, **Widgets** (three footer areas) |
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
@@ -325,14 +353,19 @@ src/
     api.ts                 read-only JSON API
     admin/
       index.ts             CSRF, login, logout, dashboard, profile, error boundary
-      assets/bundles.ts    CSS bundle registry (tokens, app, screens) + ETags
       assets/tokens.css    design tokens: colour, space, radius, type, schemes
-      assets/app.css       shell (top bar, rail) and component kit
+      assets/app.css       shell (top bar, rail, palette) and component kit
       assets/screens/      one file per screen family as it is rebuilt
+                           (dashboard.css, lists.css, legacy.css)
       components.ts        pageHead, card, table, tabs, emptyState, notice, ...
       icons.ts             inline SVG sprite
       preferences.ts       colour scheme, density, rail state (per browser)
+      shell.ts             route: palette search, rail/scheme/density links
+      search.ts            site-wide search across content, media, comments, users
+      palette.ts           command palette script and its endpoint config
+      attention.ts         "needs attention" checks for the dashboard
       assets.ts            route: GET /{admin}/assets/*.css (immutable, ETagged)
+      bundles.ts           CSS bundle registry: tokens, app, screens + ETags
       content.ts           pages and posts
       media.ts             media library
       settings.ts

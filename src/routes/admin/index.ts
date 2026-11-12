@@ -5,9 +5,11 @@ import { cfgFor, getConfig, getSettings } from '../../lib/config';
 import { clientIp, rateCount, rateHit, rateReset, sameOrigin, timingSafeEqual } from '../../lib/security';
 import { csrfField, errorPage, flash, go, guardPage, html, layout, shell } from '../../lib/ui';
 import { SCHEMA_VERSION, installedSchemaVersion, pendingMigrations } from '../../db/migrations';
+import { greeting, needsAttention, type AttentionItem } from '../../admin/attention';
 import { APP_VERSION } from '../../lib/version';
 import { readPrefs } from '../../lib/prefs';
 import { icon } from '../../admin/icons';
+import { card, emptyState, notice } from '../../admin/components';
 import content from './content';
 import media from './media';
 import settings from './settings';
@@ -22,6 +24,7 @@ import appearance from './appearance';
 import terms from './terms';
 import preferences from './preferences';
 import assets from './assets';
+import shellRoutes from './shell';
 
 /**
  * Admin panel. Mounted by the root app under "/{admin-slug}" with that prefix
@@ -158,11 +161,15 @@ async function dashboardStats(c: Ctx): Promise<Stats> {
 
 admin.get('/', async (c) => {
   const base = c.var.base;
-  const [counts, recent, recentComments, settingsMap, theme, schema] = await Promise.all([
+  const user = c.var.user;
+  const [counts, recent, recentComments, settingsMap, theme, schema, attention] = await Promise.all([
     dashboardStats(c),
-    c.env.DB.prepare('SELECT id, type, title, status, updated_at FROM content WHERE site_id=1 ORDER BY updated_at DESC LIMIT 6')
-      .all<{ id: number; type: string; title: string; status: string; updated_at: string }>(),
-    can(c.var.user, 'editor')
+    c.env.DB.prepare(
+      `SELECT c.id, c.type, c.title, c.status, c.updated_at, u.username AS author
+       FROM content c LEFT JOIN users u ON u.id=c.author_id WHERE c.site_id=1
+       ORDER BY c.updated_at DESC, c.id DESC LIMIT 6`,
+    ).all<{ id: number; type: string; title: string; status: string; updated_at: string; author: string | null }>(),
+    can(user, 'editor')
       ? c.env.DB.prepare(
         `SELECT cm.id, cm.author_name, cm.body, cm.status, cm.created_at, c.title AS post
          FROM comments cm JOIN content c ON c.id=cm.content_id WHERE cm.site_id=1
@@ -173,53 +180,113 @@ admin.get('/', async (c) => {
     getSettings(c.env),
     c.env.DB.prepare('SELECT name, version FROM themes WHERE active=1 LIMIT 1').first<{ name: string; version: string }>().catch(() => null),
     installedSchemaVersion(c.env).catch(() => 1),
+    needsAttention(c, base).catch(() => ({ items: [] as AttentionItem[], checked: 0 })),
   ]);
   const pendingUpdates = pendingMigrations(schema).length;
   const moderated = settingsMap.comments_enabled !== '0' && settingsMap.comments_require_approval !== '0';
+  const urgent = attention.items.filter((item) => item.tone === 'danger');
+  const siteName = settingsMap.site_title || 'your site';
 
-  return layout(c, settingsMap.site_title || 'Dashboard', html`
-<h1>Dashboard</h1>
-<div class="stats">
-  ${can(c.var.user, 'editor') ? html`<a class="stat" href="${base}/pages"><b>${counts.pages}</b><span>Pages</span></a>` : ''}
-  <a class="stat" href="${base}/posts"><b>${counts.posts}</b><span>Posts</span></a>
-  <a class="stat" href="${base}/media"><b>${counts.media}</b><span>Media</span></a>
-  ${can(c.var.user, 'editor') ? html`<a class="stat" href="${base}/comments?status=pending"><b>${counts.pending}</b><span>Comments to review</span></a>` : ''}
-  ${can(c.var.user, 'admin') ? html`<a class="stat" href="${base}/users"><b>${counts.users}</b><span>Users</span></a>` : ''}
-</div>
-<div class="row" style="margin-bottom:1rem">
-  <a class="btn" href="${base}/posts/new">New post</a>
-  ${can(c.var.user, 'editor') ? html`<a class="btn ghost" href="${base}/pages/new">New page</a>` : ''}
-  <a class="btn ghost" href="${base}/media#upload">Upload media</a>
-  ${can(c.var.user, 'editor') ? html`<a class="btn ghost" href="${base}/comments">Moderate comments</a>` : ''}
-</div>
-<div class="grid2">
-  <div class="card">
-    <h2>Recently edited</h2>
-    <ul class="list">
-      ${recent.results.map((r) => html`<li><div class="t"><a href="${base}/${r.type}s/${r.id}">${r.title}</a><small>${r.type} · ${r.updated_at.slice(0, 10)}</small></div><span class="badge ${r.status}">${r.status}</span></li>`)}
-      ${recent.results.length ? '' : html`<li class="muted">Nothing yet.</li>`}
-    </ul>
-  </div>
-  <div>
-    <div class="card">
-      <h2>At a glance</h2>
-      <dl class="kv" style="font-size:.88rem">
-        <dt>Version</dt><dd>${APP_VERSION}</dd>
-        <dt>Schema</dt><dd>${schema}${pendingUpdates ? html` · <a href="${base}/updates">${pendingUpdates} update${pendingUpdates === 1 ? '' : 's'}</a>` : ''}</dd>
-        <dt>Theme</dt><dd>${theme ? `${theme.name} v${theme.version}` : 'AMS Base'}</dd>
-        <dt>Comments</dt><dd>${counts.pending} pending · ${counts.approved} approved</dd>
-        <dt>Moderation</dt><dd>${moderated ? 'New comments wait for you' : 'Comments appear immediately'}</dd>
-      </dl>
+  const stats = [
+    can(user, 'editor') ? { href: `${base}/pages`, value: counts.pages, label: 'Pages', icon: 'file' } : null,
+    { href: `${base}/posts`, value: counts.posts, label: 'Posts', icon: 'edit' },
+    { href: `${base}/media`, value: counts.media, label: 'Media', icon: 'image' },
+  ].filter(Boolean) as { href: string; value: number; label: string; icon: string }[];
+
+  return layout(c, 'Dashboard', html`
+<section class="dash" aria-labelledby="dash-title">
+  <header class="dash__head">
+    <div>
+      <p class="dash__hi">${greeting(user.username)}</p>
+      <h1 id="dash-title">${siteName}</h1>
+      <p class="dash__sub">${attention.items.length
+        ? `${attention.items.length} thing${attention.items.length === 1 ? '' : 's'} could use you today.`
+        : recent.results.length ? 'Nothing is waiting on you. Pick up where you left off.' : 'Start by writing your first post.'}</p>
     </div>
-    ${can(c.var.user, 'editor') ? html`<div class="card">
-      <h2>Latest comments</h2>
-      ${recentComments.results.length ? html`<ul class="list">
-        ${recentComments.results.map((cm) => html`<li class="wrap"><div class="t"><b>${cm.author_name}</b> <small class="muted">on ${cm.post}</small><div class="comment-body-preview">${cm.body.slice(0, 120)}</div></div><span class="badge ${cm.status}">${cm.status}</span></li>`)}
-      </ul>` : html`<p class="muted" style="margin:0">No comments yet.</p>`}
-      <p class="hint" style="margin-bottom:0"><a href="${base}/comments">All comments</a></p>
-    </div>` : ''}
+    <div class="row">
+      <a class="btn" href="${base}/posts/new">${icon('plus', { cls: 'ico--sm' })}New post</a>
+      ${can(user, 'editor') ? html`<a class="btn ghost" href="${base}/pages/new">New page</a>` : ''}
+      <a class="btn ghost" href="${base}/media#upload">Upload media</a>
+    </div>
+  </header>
+
+  ${urgent.length ? notice(html`${urgent.map((item) => html`<a href="${item.href}">${item.title}</a>`).reduce((a, b) => html`${a} · ${b}`)}`, { tone: 'danger', title: 'Needs attention now:' }) : ''}
+
+  <ul class="stats" aria-label="Site totals">
+    ${stats.map((stat) => html`<li><a class="stat" href="${stat.href}">
+      <span class="stat__ico">${icon(stat.icon)}</span>
+      <b>${stat.value}</b><span>${stat.label}</span>
+    </a></li>`)}
+  </ul>
+
+  <div class="dash__cols">
+    <div class="dash__main">
+      ${card({
+        title: 'Needs attention',
+        actions: attention.items.length ? html`<span class="card__count">${attention.items.length}</span>` : '',
+        flush: true,
+        body: attention.items.length
+          ? html`<ul class="attention" data-attention>
+            ${attention.items.map((item) => html`<li class="attention__item attention__item--${item.tone}" data-attention-item="${item.key}">
+              <span class="attention__ico" aria-hidden="true">${icon(item.tone === 'info' ? 'info' : 'alert', { cls: 'ico--sm' })}</span>
+              <div class="attention__body">
+                <strong>${item.title}</strong>
+                <p>${item.body}</p>
+              </div>
+              <a class="btn ghost small" href="${item.href}">${item.cta}${icon('chevron-right', { cls: 'ico--sm' })}</a>
+            </li>`)}
+          </ul>`
+          : emptyState({
+            title: 'All clear',
+            body: `Every check passed${attention.checked ? ` (${attention.checked} of them)` : ''}. Nothing is broken, overdue or waiting on you.`,
+            iconName: 'check',
+          }),
+      })}
+
+      ${card({
+        title: 'Recently edited',
+        actions: html`<a class="btn ghost small" href="${base}/posts">All posts</a>`,
+        flush: true,
+        body: recent.results.length
+          ? html`<ul class="list list--rows">
+            ${recent.results.map((r) => html`<li>
+              <div class="t"><a href="${base}/${r.type}s/${r.id}">${r.title || '(untitled)'}</a>
+                <small>${r.type} · ${r.author ? r.author + ' · ' : ''}<time datetime="${r.updated_at}">${r.updated_at.slice(0, 10)}</time></small></div>
+              <span class="badge ${r.status}">${r.status}</span>
+            </li>`)}
+          </ul>`
+          : emptyState({ title: 'Nothing written yet', body: 'Your first post takes about five minutes.', action: html`<a class="btn" href="${base}/posts/new">Write a post</a>` }),
+      })}
+    </div>
+
+    <aside class="dash__side" aria-label="Site status">
+      ${card({
+        title: 'At a glance',
+        body: html`<dl class="kv kv--tight">
+          <dt>Version</dt><dd>${APP_VERSION}</dd>
+          <dt>Schema</dt><dd>${schema}${pendingUpdates ? html` · <a href="${base}/updates">${pendingUpdates} update${pendingUpdates === 1 ? '' : 's'} ready</a>` : ' · up to date'}</dd>
+          <dt>Theme</dt><dd>${theme ? `${theme.name} v${theme.version}` : 'AMS Base'}</dd>
+          <dt>Comments</dt><dd>${counts.pending} pending · ${counts.approved} approved</dd>
+          <dt>Moderation</dt><dd>${moderated ? 'New comments wait for you' : 'Comments appear immediately'}</dd>
+        </dl>`,
+      })}
+      ${can(user, 'editor') ? card({
+        title: 'Latest comments',
+        actions: html`<a class="btn ghost small" href="${base}/comments">All</a>`,
+        flush: true,
+        body: recentComments.results.length
+          ? html`<ul class="list list--rows">
+            ${recentComments.results.map((cm) => html`<li class="wrap">
+              <div class="t"><b>${cm.author_name}</b> <small>on ${cm.post}</small>
+                <div class="comment-body-preview">${cm.body.slice(0, 120)}</div></div>
+              <span class="badge ${cm.status}">${cm.status}</span>
+            </li>`)}
+          </ul>`
+          : html`<div class="card__pad"><p class="muted">No comments yet. They will show up here for you to approve.</p></div>`,
+      }) : ''}
+    </aside>
   </div>
-</div>`, '');
+</section>`, '');
 });
 
 /* ----------------------------------------------------------------- profile */
@@ -269,6 +336,7 @@ admin.route('/', updates);
 admin.route('/', appearance);
 admin.route('/', terms);
 admin.route('/', preferences);
+admin.route('/', shellRoutes);
 
 admin.notFound((c) => errorPage(c, 404, 'That admin page does not exist.'));
 

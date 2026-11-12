@@ -79,8 +79,10 @@ export type Column = {
   label: Child;
   /** Extra class on <th> and every <td> in this column. */
   cls?: string;
-  /** Renders the aria-sort attribute for sortable columns. */
-  sort?: 'ascending' | 'descending' | 'none';
+  /** Present on sortable columns: where clicking the header leads. */
+  sortHref?: string;
+  /** Whether this column is the active sort, and in which direction. */
+  sortState?: 'asc' | 'desc';
   align?: 'center' | 'right';
 };
 
@@ -91,13 +93,23 @@ export type Column = {
  */
 export function table(opts: { columns: Column[]; rows: Child[][]; cls?: string; caption?: string; wrapClass?: string }): Raw {
   const align = (c: Column) => (c.align === 'center' ? ' style="text-align:center"' : c.align === 'right' ? ' style="text-align:right"' : '');
+  const head = (c: Column) => {
+    if (!c.sortHref) return html`<th scope="col"${c.cls ? raw(` class="${c.cls}"`) : raw('')}${raw(align(c))}>${c.label}</th>`;
+    const aria = c.sortState ? (c.sortState === 'asc' ? 'ascending' : 'descending') : 'none';
+    const arrow = c.sortState ? (c.sortState === 'asc' ? '↑' : '↓') : '↕';
+    return html`<th scope="col"${c.cls ? raw(` class="${c.cls}"`) : raw('')}${raw(` aria-sort="${aria}"`)}>
+      <a class="th-sort${c.sortState ? ' is-active' : ''}" href="${c.sortHref}">${c.label}<span class="th-sort__arrow" aria-hidden="true">${arrow}</span></a>
+    </th>`;
+  };
   return html`<div class="table-wrap${opts.wrapClass ? ' ' + opts.wrapClass : ''}">
   <table class="table${opts.cls ? ' ' + opts.cls : ''}"${opts.caption ? raw(` aria-label="${opts.caption}"`) : raw('')}>
-    <thead><tr>
-      ${opts.columns.map((c) => html`<th scope="col"${c.cls ? raw(` class="${c.cls}"`) : raw('')}${c.sort ? raw(` aria-sort="${c.sort}"`) : raw('')}${raw(align(c))}>${c.label}</th>`)}
-    </tr></thead>
+    <thead><tr>${opts.columns.map(head)}</tr></thead>
     <tbody>
-      ${opts.rows.map((cells) => html`<tr>${cells.map((cell, i) => html`<td${opts.columns[i]?.cls ? raw(` class="${opts.columns[i].cls}"`) : raw('')}${raw(align(opts.columns[i]))}>${cell}</td>`)}</tr>`)}
+      ${opts.rows.map((cells) => html`<tr>${cells.map((cell, i) => {
+        const col = opts.columns[i];
+        const label = typeof col?.label === 'string' ? col.label : '';
+        return html`<td${col?.cls ? raw(` class="${col.cls}"`) : raw('')}${raw(align(col))}${label ? raw(` data-label="${label}"`) : raw('')}>${cell}</td>`;
+      })}</tr>`)}
     </tbody>
   </table>
 </div>`;
@@ -226,5 +238,132 @@ export const APP_JS = `<script>
       document.cookie = 'ams_rail=' + (railBox.checked ? '1' : '0') + '; path=/; max-age=31536000; samesite=lax';
     });
   }
+})();
+</script>`;
+
+/* -------------------------------------------------------------- list screens */
+
+/**
+ * Sortable column header. The default direction depends on the column: titles
+ * read A→Z first, dates read newest first.
+ */
+/** A sortable column definition, for screens that build columns in a loop. */
+export function sortColumn(opts: {
+  label: Child; href: string; active: boolean; dir: 'asc' | 'desc'; cls?: string;
+}): Column {
+  return { label: opts.label, sortHref: opts.href, sortState: opts.active ? opts.dir : undefined, cls: opts.cls };
+}
+
+/**
+ * The bar above a list: status tabs, search box, filters and the bulk actions.
+ * Everything is a plain GET form, so the state lives in the URL and a filtered
+ * list can be bookmarked or shared.
+ */
+export function listToolbar(opts: {
+  tabs?: Child;
+  search: { action: string; name?: string; value: string; placeholder: string; label: string; button?: string; hidden?: Record<string, string> };
+  filters?: Child;
+  actions?: Child;
+}): Raw {
+  const { search } = opts;
+  // Two sibling forms, never nested: a browser drops a form inside a form, which
+  // would silently disconnect the filter selects from their submit button.
+  return html`${opts.tabs ? html`<div class="list-toolbar__tabs">${opts.tabs}</div>` : ''}
+<div class="list-toolbar">
+  <form class="list-toolbar__search" method="get" action="${search.action}" role="search">
+    ${icon('search', { cls: 'ico--sm' })}
+    ${Object.entries(search.hidden || {}).filter(([, v]) => v).map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`)}
+    <label class="sr-only" for="list-q">${search.label}</label>
+    <input type="search" id="list-q" name="${search.name || 'q'}" value="${search.value}" placeholder="${search.placeholder}" maxlength="120">
+    <button class="btn small" type="submit">${search.button || 'Search'}</button>
+  </form>
+  ${opts.filters ? html`<div class="list-toolbar__filters">${opts.filters}</div>` : ''}
+  ${opts.actions ? html`<div class="list-toolbar__actions">${opts.actions}</div>` : ''}
+</div>`;
+}
+
+/**
+ * Bulk actions. One select, one Apply button, kept in sync with the copy at the
+ * bottom of the table; the bar only appears when something is selected
+ * (CSS-driven, no JavaScript needed for it to work).
+ */
+export function bulkBar(opts: { formId: string; id: string; count: number }): Raw {
+  return html`<div class="bulk-bar" id="${opts.id}" aria-live="polite">
+  <span class="bulk-bar__count"><b data-bulk-count>0</b> of ${opts.count} selected</span>
+  <label class="sr-only" for="${opts.id}-action">Bulk action</label>
+  <select id="${opts.id}-action" name="action" form="${opts.formId}">
+    <option value="">Bulk actions</option>
+    <option value="publish">Publish</option>
+    <option value="draft">Move to draft</option>
+    <option value="delete">Delete permanently</option>
+  </select>
+  <button class="btn small" type="submit" form="${opts.formId}">Apply</button>
+</div>`;
+}
+
+/**
+ * A row that collapses into a card on a narrow screen: the table keeps its
+ * columns on desktop, and each cell carries a label so the 360 px layout still
+ * reads as a list instead of a sideways scroll.
+ */
+export function td(label: string, value: Child, opts: { cls?: string; align?: 'center' } = {}): Raw {
+  return html`<td${opts.cls ? raw(` class="${opts.cls}"`) : raw('')}${opts.align === 'center' ? raw(' style="text-align:center"') : raw('')} data-label="${label}">${value}</td>`;
+}
+
+/** An empty row that spans a whole table and explains what to do next. */
+export function emptyRow(colspan: number, opts: { title: string; body?: Child; action?: Child }): Raw {
+  return html`<tr><td colspan="${colspan}" class="table-empty">
+  ${emptyState({ title: opts.title, body: opts.body, action: opts.action, iconName: 'search' })}
+</td></tr>`;
+}
+
+/**
+ * Client behaviour for list screens: select-all, the live count, keeping the two
+ * bulk selects in sync, and reflecting the selection on the toolbar. Without
+ * JavaScript the checkboxes, the selects and the forms still submit.
+ */
+export const LIST_JS = `<script>
+(function () {
+  'use strict';
+  document.querySelectorAll('[data-list]').forEach(function (root) {
+    var form = document.getElementById(root.getAttribute('data-list'));
+    if (!form) return;
+    var boxes = Array.prototype.slice.call(root.querySelectorAll('input[name="ids"]'));
+    var all = root.querySelector('[data-select-all]');
+    var count = root.querySelector('[data-bulk-count]');
+    var bar = root.querySelector('.bulk-bar');
+
+    function update() {
+      var checked = boxes.filter(function (box) { return box.checked; });
+      if (all) {
+        all.checked = boxes.length > 0 && checked.length === boxes.length;
+        all.indeterminate = checked.length > 0 && checked.length < boxes.length;
+      }
+      if (count) count.textContent = String(checked.length);
+      if (bar) bar.classList.toggle('is-active', checked.length > 0);
+      root.classList.toggle('has-selection', checked.length > 0);
+    }
+
+    if (all) all.addEventListener('change', function () {
+      boxes.forEach(function (box) { box.checked = all.checked; });
+      update();
+    });
+    boxes.forEach(function (box) { box.addEventListener('change', update); });
+
+    // Row click selects nothing; the title link and the checkbox stay targets.
+    form.addEventListener('submit', function (event) {
+      var select = form.querySelector('select[name="action"]');
+      if (!select) return;
+      var chosen = select.value;
+      var message = chosen === 'delete'
+        ? 'Permanently delete the selected items? This cannot be undone.'
+        : !chosen ? 'Choose a bulk action first.' : '';
+      if (!message) return;
+      if (chosen === 'delete' && !window.confirm(message)) { event.preventDefault(); return; }
+      if (!chosen) { event.preventDefault(); window.alert(message); }
+    });
+
+    update();
+  });
 })();
 </script>`;

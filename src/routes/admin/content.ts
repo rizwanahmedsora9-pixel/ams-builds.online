@@ -6,6 +6,10 @@ import { mediaUrl, permalinkStyle, postUrl } from '../../lib/content';
 import { sanitizeHtml, slugify } from '../../lib/security';
 import { localToUtc, utcToLocal } from '../../lib/time';
 import { isInPrimaryMenu, removeUrlFromMenus, syncPageMenu } from '../../lib/menus';
+import {
+  bulkBar, emptyRow, listToolbar, pageHead, pagination, table, tabs, LIST_JS,
+} from '../../admin/components';
+import { icon } from '../../admin/icons';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 
 /** Pages and posts share one table and one editor; posts add terms, featured image and scheduling. */
@@ -194,124 +198,111 @@ async function postsList(c: Ctx): Promise<Response> {
   const categoryOptions = categories.results;
   const rangeStart = total ? (state.p - 1) * per + 1 : 0;
   const rangeEnd = Math.min((state.p - 1) * per + rows.length, total);
-  const sortLink = (label: string, key: PostSort, defaultDir: 'asc' | 'desc' = 'asc') => {
-    const nextDir = state.sort === key ? (state.dir === 'asc' ? 'desc' : 'asc') : defaultDir;
-    const arrow = state.sort === key ? (state.dir === 'asc' ? '↑' : '↓') : '↕';
-    return html`<a class="posts-sort${state.sort === key ? ' active' : ''}" href="${postListHref(state, { sort: key, dir: nextDir, p: 1 })}">${label}<span aria-hidden="true">${arrow}</span></a>`;
+
+  /** Sortable column: clicking toggles the direction of that column. */
+  const sortCol = (label: string, key: PostSort, initial: 'asc' | 'desc', href: (change: { sort: PostSort; dir: 'asc' | 'desc'; p: number }) => string, cls?: string) => {
+    const active = state.sort === key;
+    const dir = active ? state.dir : initial;
+    const next: 'asc' | 'desc' = active ? (state.dir === 'asc' ? 'desc' : 'asc') : initial;
+    return { label, cls, sortHref: href({ sort: key, dir: next, p: 1 }), sortState: active ? dir : undefined };
   };
 
   return layout(c, 'Posts', html`
-<section class="posts-admin" aria-labelledby="posts-title">
-  <form method="post" action="${bulkAction}" id="posts-bulk-form" class="posts-bulk-form">
-    ${csrfField(c)}
-  </form>
-  <div class="posts-heading-row">
-    <h1 id="posts-title">Posts</h1>
-    <a class="btn ghost posts-add" href="${base}/posts/new">Add Post</a>
-  </div>
-  <nav class="posts-status-nav" aria-label="Post status filters">
-    ${statusTabs.map(([key, label]) => html`<a href="${postListHref(state, { status: key, p: 1 })}" class="${state.status === key ? 'current' : ''}"${state.status === key ? raw(' aria-current="page"') : ''}>${label} <b>(${counts[key]})</b></a>`)}
-  </nav>
-  <div class="posts-search-row">
-    <form method="get" action="${base}/posts" class="posts-search" role="search">
-      <input type="hidden" name="status" value="${state.status}">
-      ${state.month ? html`<input type="hidden" name="month" value="${state.month}">` : ''}
-      ${state.category ? html`<input type="hidden" name="category" value="${state.category}">` : ''}
-      ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
-      ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
-      <label class="sr-only" for="post-search">Search posts</label>
-      <input type="text" id="post-search" name="q" value="${state.q}" placeholder="Search posts…" maxlength="120">
-      <button class="btn ghost small" type="submit">Search Posts</button>
-    </form>
-  </div>
-  <div class="posts-controls-row">
-    <div class="posts-bulk-control">
-      <label class="sr-only" for="bulk-action-top">Bulk actions</label>
-      <select id="bulk-action-top" name="action" form="posts-bulk-form">
-        <option value="">Bulk actions</option><option value="publish">Publish</option><option value="draft">Move to draft</option><option value="delete">Delete permanently</option>
-      </select>
-      <button class="btn ghost small" type="submit" form="posts-bulk-form">Apply</button>
-    </div>
-    <form method="get" action="${base}/posts" class="post-filter-form">
-      <input type="hidden" name="status" value="${state.status}">
-      ${state.q ? html`<input type="hidden" name="q" value="${state.q}">` : ''}
-      ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
-      ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
-      <label class="sr-only" for="post-month">Filter by date</label>
-      <select id="post-month" name="month">
-        <option value="">All dates</option>
-        ${state.month && !monthOptions.some((row) => row.month === state.month) ? html`<option value="${state.month}" selected>${formatPostMonth(state.month)}</option>` : ''}
-        ${monthOptions.map((row) => html`<option value="${row.month}"${state.month === row.month ? raw(' selected') : ''}>${formatPostMonth(row.month)}</option>`)}
-      </select>
-      <label class="sr-only" for="post-category">Filter by category</label>
-      <select id="post-category" name="category">
-        <option value="">All Categories</option>
-        ${state.category && !selectedCategory ? html`<option value="${state.category}" selected>Selected category</option>` : ''}
-        ${categoryOptions.map((term) => html`<option value="${term.id}"${state.category === String(term.id) ? raw(' selected') : ''}>${term.name}</option>`)}
-      </select>
-      <button class="btn ghost small" type="submit">Filter</button>
-    </form>
-  </div>
-  <div class="posts-table-wrap">
-    <table class="posts-table">
-      <thead><tr>
-        <th scope="col" class="posts-check-column"><input type="checkbox" id="select-all-posts" aria-label="Select all posts"></th>
-        <th scope="col" aria-sort="${state.sort === 'title' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Title', 'title')}</th>
-        <th scope="col" aria-sort="${state.sort === 'author' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Author', 'author')}</th>
-        <th scope="col">Categories</th>
-        <th scope="col">Tags</th>
-        <th scope="col" class="posts-comments-column" aria-sort="${state.sort === 'comments' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Comments', 'comments', 'desc')}</th>
-        <th scope="col" aria-sort="${state.sort === 'date' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Date', 'date', 'desc')}</th>
-      </tr></thead>
-      <tbody>
-        ${rows.map((row) => {
-          const url = postUrl(row, style);
-          const date = row.status === 'published' ? row.published_at || row.created_at : row.status === 'scheduled' ? row.published_at || row.created_at : row.updated_at;
-          const dateLabel = row.status === 'published' ? 'Published' : row.status === 'scheduled' ? 'Scheduled' : 'Last modified';
-          const preview = url + (row.status === 'published' ? '' : '?preview=1');
-          return html`<tr>
-            <td class="posts-check-column"><input type="checkbox" name="ids" value="${row.id}" form="posts-bulk-form" aria-label="Select ${row.title}"></td>
-            <td class="posts-title-cell">
-              <a class="posts-title-link" href="${base}/posts/${row.id}">${row.title || '(untitled)'}</a>
-              <div class="post-row-actions"><a href="${base}/posts/${row.id}">Edit</a><span aria-hidden="true">·</span><a href="${preview}" target="_blank" rel="noopener">View</a></div>
-            </td>
-            <td>${row.author || '—'}</td>
-            <td>${row.categories || '—'}</td>
-            <td>${row.tags || '—'}</td>
-            <td class="posts-comments-column"><span class="post-comment-count" aria-label="${row.comment_count} comments">${row.comment_count}</span></td>
-            <td class="posts-date-cell"><strong>${dateLabel}</strong><time datetime="${date}">${formatPostDate(date, timezone)}</time></td>
-          </tr>`;
-        })}
-        ${rows.length ? '' : html`<tr><td colspan="7" class="posts-empty">No posts found. ${state.q || state.month || state.category || state.status !== 'all' ? 'Try changing your search or filters.' : html`Start by adding your first post.`}</td></tr>`}
-      </tbody>
-    </table>
-  </div>
-  <div class="posts-table-footer">
-    <div class="posts-bulk-control">
-      <label class="sr-only" for="bulk-action-bottom">Bulk actions</label>
-      <select id="bulk-action-bottom">
-        <option value="">Bulk actions</option><option value="publish">Publish</option><option value="draft">Move to draft</option><option value="delete">Delete permanently</option>
-      </select>
-      <button class="btn ghost small" type="submit" form="posts-bulk-form">Apply</button>
-    </div>
-    <span class="posts-count">${total ? `Showing ${rangeStart}–${rangeEnd} of ${total} posts` : '0 posts'}</span>
-  </div>
-  <div class="posts-pagination">
-    ${state.p > 1 ? html`<a class="btn ghost small" href="${postListHref(state, { p: state.p - 1 })}">&larr; Newer</a>` : ''}
-    ${total > state.p * per ? html`<a class="btn ghost small" href="${postListHref(state, { p: state.p + 1 })}">Older &rarr;</a>` : ''}
-  </div>
-  ${raw(`<script>
-(function(){
-  var top=document.getElementById('bulk-action-top'),bottom=document.getElementById('bulk-action-bottom');
-  if(top&&bottom){top.addEventListener('change',function(){bottom.value=top.value});bottom.addEventListener('change',function(){top.value=bottom.value})}
-  var all=document.getElementById('select-all-posts'),boxes=[].slice.call(document.querySelectorAll('input[name="ids"]'));
-  function updateAll(){if(!all)return;var checked=boxes.filter(function(box){return box.checked}).length;all.checked=boxes.length>0&&checked===boxes.length;all.indeterminate=checked>0&&checked<boxes.length}
-  if(all){all.addEventListener('change',function(){boxes.forEach(function(box){box.checked=all.checked});updateAll()});boxes.forEach(function(box){box.addEventListener('change',updateAll)})}
-  var form=document.getElementById('posts-bulk-form');if(form)form.addEventListener('submit',function(e){
-    if(top&&top.value==='delete'&&!confirm('Permanently delete the selected posts? This cannot be undone.'))e.preventDefault();
-  });
-})();
-</script>`)}
+<section class="list-page" data-list="posts-bulk-form" aria-labelledby="posts-title">
+  <form method="post" action="${bulkAction}" id="posts-bulk-form" class="list-bulk-form">${csrfField(c)}</form>
+  ${pageHead({
+    title: 'Posts',
+    sub: total ? `${total} post${total === 1 ? '' : 's'}${authorOnly ? ' of yours' : ''}` : 'Everything you have written, newest first.',
+    id: 'posts-title',
+    actions: html`<a class="btn" href="${base}/posts/new">${icon('plus', { cls: 'ico--sm' })}Add Post</a>`,
+  })}
+  ${listToolbar({
+    tabs: tabs(statusTabs.map(([key, label]) => ({
+        label: html`${label} <span class="tab-count">${counts[key]}</span>`,
+        href: postListHref(state, { status: key, p: 1 }),
+        current: state.status === key,
+    })), { label: 'Post status' }),
+    search: {
+      action: `${base}/posts`,
+      value: state.q,
+      placeholder: 'Search posts…',
+      label: 'Search posts',
+      button: 'Search Posts',
+      hidden: {
+        status: state.status !== 'all' ? state.status : '',
+        month: state.month,
+        category: state.category,
+        sort: state.sort !== 'date' ? state.sort : '',
+        dir: state.dir !== 'desc' ? state.dir : '',
+      },
+    },
+    filters: html`
+      <form class="list-filters" method="get" action="${base}/posts">
+        <input type="hidden" name="status" value="${state.status}">
+        ${state.q ? html`<input type="hidden" name="q" value="${state.q}">` : ''}
+        ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
+        ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
+        <label class="sr-only" for="post-month">Filter by date</label>
+        <select id="post-month" name="month">
+          <option value="">All dates</option>
+          ${state.month && !monthOptions.some((row) => row.month === state.month) ? html`<option value="${state.month}" selected>${formatPostMonth(state.month)}</option>` : ''}
+          ${monthOptions.map((row) => html`<option value="${row.month}"${state.month === row.month ? raw(' selected') : ''}>${formatPostMonth(row.month)}</option>`)}
+        </select>
+        <label class="sr-only" for="post-category">Filter by category</label>
+        <select id="post-category" name="category">
+          <option value="">All categories</option>
+          ${state.category && !selectedCategory ? html`<option value="${state.category}" selected>Selected category</option>` : ''}
+          ${categoryOptions.map((term) => html`<option value="${term.id}"${state.category === String(term.id) ? raw(' selected') : ''}>${term.name}</option>`)}
+        </select>
+        <button class="btn ghost small" type="submit">Filter</button>
+      </form>`,
+  })}
+  ${bulkBar({ formId: 'posts-bulk-form', id: 'posts-bulk', count: rows.length })}
+  ${rows.length
+    ? table({
+      cls: 'list-table',
+      columns: [
+        { label: html`<input type="checkbox" data-select-all aria-label="Select all posts">`, cls: 'list-check' },
+        sortCol('Title', 'title', 'asc', (change) => postListHref(state, change)),
+        sortCol('Author', 'author', 'asc', (change) => postListHref(state, change), 'col-hide-sm'),
+        { label: 'Categories', cls: 'col-hide-md' },
+        { label: 'Tags', cls: 'col-hide-md' },
+        { ...sortCol('Comments', 'comments', 'desc', (change) => postListHref(state, change), 'list-comments'), align: 'center' as const },
+        sortCol('Date', 'date', 'desc', (change) => postListHref(state, change), 'list-date'),
+      ],
+      rows: rows.map((row) => {
+        const url = postUrl(row, style);
+        const date = row.status === 'published' ? row.published_at || row.created_at : row.status === 'scheduled' ? row.published_at || row.created_at : row.updated_at;
+        const dateLabel = row.status === 'published' ? 'Published' : row.status === 'scheduled' ? 'Scheduled' : 'Last modified';
+        const preview = url + (row.status === 'published' ? '' : '?preview=1');
+        return [
+          html`<input type="checkbox" name="ids" value="${row.id}" form="posts-bulk-form" aria-label="Select ${row.title}">`,
+          html`<a class="row-title" href="${base}/posts/${row.id}">${row.title || '(untitled)'}</a>
+            <span class="row-meta">${row.status !== 'published' ? html`<span class="badge ${row.status}">${row.status}</span>` : ''}<span class="row-slug">/${row.slug}</span>
+              <span class="row-actions"><a href="${base}/posts/${row.id}">Edit</a>·<a href="${preview}" target="_blank" rel="noopener">View</a></span></span>`,
+          row.author || '—',
+          row.categories || '—',
+          row.tags || '—',
+          html`<span class="comment-count" aria-label="${row.comment_count} comments">${row.comment_count}</span>`,
+          html`<span class="row-date"><strong>${dateLabel}</strong><time datetime="${date}">${formatPostDate(date, timezone)}</time></span>`,
+        ];
+      }),
+    })
+    : emptyRow(7, {
+      title: 'No posts match',
+      body: state.q || state.month || state.category || state.status !== 'all'
+        ? 'Try a different search or clear the filters.'
+        : 'Your first post is one click away.',
+      action: html`<a class="btn" href="${base}/posts/new">Write a post</a>`,
+    })}
+  ${pagination({
+    prev: state.p > 1 ? postListHref(state, { p: state.p - 1 }) : undefined,
+    next: total > state.p * per ? postListHref(state, { p: state.p + 1 }) : undefined,
+    prevLabel: 'Newer',
+    nextLabel: 'Older',
+    info: total ? `${rangeStart}–${rangeEnd} of ${total}` : '0 posts',
+  })}
+  ${raw(LIST_JS)}
 </section>`, '/posts');
 }
 
@@ -424,100 +415,98 @@ async function pagesList(c: Ctx): Promise<Response> {
   const monthOptions = months.results.filter((row) => /^\d{4}-(0[1-9]|1[0-2])$/.test(row.month));
   const rangeStart = total ? (state.p - 1) * per + 1 : 0;
   const rangeEnd = Math.min((state.p - 1) * per + rows.length, total);
-  const sortLink = (label: string, key: PostSort, defaultDir: 'asc' | 'desc' = 'asc') => {
-    const nextDir = state.sort === key ? (state.dir === 'asc' ? 'desc' : 'asc') : defaultDir;
-    const arrow = state.sort === key ? (state.dir === 'asc' ? '↑' : '↓') : '↕';
-    return html`<a class="posts-sort${state.sort === key ? ' active' : ''}" href="${pageListHref(state, { sort: key, dir: nextDir, p: 1 })}">${label}<span aria-hidden="true">${arrow}</span></a>`;
+
+  /** Sortable column: clicking toggles the direction of that column. */
+  const sortCol = (label: string, key: PostSort, initial: 'asc' | 'desc', href: (change: { sort: PostSort; dir: 'asc' | 'desc'; p: number }) => string, cls?: string) => {
+    const active = state.sort === key;
+    const dir = active ? state.dir : initial;
+    const next: 'asc' | 'desc' = active ? (state.dir === 'asc' ? 'desc' : 'asc') : initial;
+    return { label, cls, sortHref: href({ sort: key, dir: next, p: 1 }), sortState: active ? dir : undefined };
   };
 
   return layout(c, 'Pages', html`
-<section class="posts-admin pages-admin" aria-labelledby="pages-title">
-  <form method="post" action="${bulkAction}" id="pages-bulk-form" class="posts-bulk-form">${csrfField(c)}</form>
-  <div class="posts-heading-row"><h1 id="pages-title">Pages</h1><a class="btn ghost posts-add" href="${base}/pages/new">Add Page</a></div>
-  <nav class="posts-status-nav" aria-label="Page status filters">
-    ${statusTabs.map(([key, label]) => html`<a href="${pageListHref(state, { status: key, p: 1 })}" class="${state.status === key ? 'current' : ''}"${state.status === key ? raw(' aria-current="page"') : ''}>${label} <b>(${counts[key]})</b></a>`)}
-  </nav>
-  <div class="posts-search-row">
-    <form method="get" action="${base}/pages" class="posts-search" role="search">
-      <input type="hidden" name="status" value="${state.status}">
-      ${state.month ? html`<input type="hidden" name="month" value="${state.month}">` : ''}
-      ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
-      ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
-      <label class="sr-only" for="page-search">Search pages</label>
-      <input type="text" id="page-search" name="q" value="${state.q}" placeholder="Search pages…" maxlength="120">
-      <button class="btn ghost small" type="submit">Search Pages</button>
-    </form>
-  </div>
-  <div class="posts-controls-row">
-    <div class="posts-bulk-control">
-      <label class="sr-only" for="pages-bulk-top">Bulk actions</label>
-      <select id="pages-bulk-top" name="action" form="pages-bulk-form">
-        <option value="">Bulk actions</option><option value="publish">Publish</option><option value="draft">Move to draft</option><option value="delete">Delete permanently</option>
-      </select>
-      <button class="btn ghost small" type="submit" form="pages-bulk-form">Apply</button>
-    </div>
-    <form method="get" action="${base}/pages" class="post-filter-form">
-      <input type="hidden" name="status" value="${state.status}">
-      ${state.q ? html`<input type="hidden" name="q" value="${state.q}">` : ''}
-      ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
-      ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
-      <label class="sr-only" for="page-month">Filter by date</label>
-      <select id="page-month" name="month">
-        <option value="">All dates</option>
-        ${state.month && !monthOptions.some((row) => row.month === state.month) ? html`<option value="${state.month}" selected>${formatPostMonth(state.month)}</option>` : ''}
-        ${monthOptions.map((row) => html`<option value="${row.month}"${state.month === row.month ? raw(' selected') : ''}>${formatPostMonth(row.month)}</option>`)}
-      </select>
-      <button class="btn ghost small" type="submit">Filter</button>
-    </form>
-  </div>
-  <div class="posts-table-wrap pages-table-wrap"><table class="posts-table pages-table">
-    <thead><tr>
-      <th scope="col" class="posts-check-column"><input type="checkbox" id="select-all-pages" aria-label="Select all pages"></th>
-      <th scope="col" aria-sort="${state.sort === 'title' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Title', 'title')}</th>
-      <th scope="col" aria-sort="${state.sort === 'author' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Author', 'author')}</th>
-      <th scope="col" class="posts-comments-column" aria-sort="${state.sort === 'comments' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Comments', 'comments', 'desc')}</th>
-      <th scope="col" aria-sort="${state.sort === 'date' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Date', 'date', 'desc')}</th>
-    </tr></thead>
-    <tbody>
-      ${rows.map((row) => {
+<section class="list-page" data-list="pages-bulk-form" aria-labelledby="pages-title">
+  <form method="post" action="${bulkAction}" id="pages-bulk-form" class="list-bulk-form">${csrfField(c)}</form>
+  ${pageHead({
+    title: 'Pages',
+    sub: total ? `${total} page${total === 1 ? '' : 's'}` : 'Standalone pages: about, contact, landing pages.',
+    id: 'pages-title',
+    actions: html`<a class="btn" href="${base}/pages/new">${icon('plus', { cls: 'ico--sm' })}Add Page</a>`,
+  })}
+  ${listToolbar({
+    tabs: tabs(statusTabs.map(([key, label]) => ({
+      label: html`${label} <span class="tab-count">${counts[key]}</span>`,
+      href: pageListHref(state, { status: key, p: 1 }),
+      current: state.status === key,
+    })), { label: 'Page status' }),
+    search: {
+      action: `${base}/pages`,
+      value: state.q,
+      placeholder: 'Search pages…',
+      label: 'Search pages',
+      button: 'Search Pages',
+      hidden: {
+        status: state.status !== 'all' ? state.status : '',
+        month: state.month,
+        sort: state.sort !== 'date' ? state.sort : '',
+        dir: state.dir !== 'desc' ? state.dir : '',
+      },
+    },
+    filters: html`
+      <form class="list-filters" method="get" action="${base}/pages">
+        <input type="hidden" name="status" value="${state.status}">
+        ${state.q ? html`<input type="hidden" name="q" value="${state.q}">` : ''}
+        ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
+        ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
+        <label class="sr-only" for="page-month">Filter by date</label>
+        <select id="page-month" name="month">
+          <option value="">All dates</option>
+          ${state.month && !monthOptions.some((row) => row.month === state.month) ? html`<option value="${state.month}" selected>${formatPostMonth(state.month)}</option>` : ''}
+          ${monthOptions.map((row) => html`<option value="${row.month}"${state.month === row.month ? raw(' selected') : ''}>${formatPostMonth(row.month)}</option>`)}
+        </select>
+        <button class="btn ghost small" type="submit">Filter</button>
+      </form>`,
+  })}
+  ${bulkBar({ formId: 'pages-bulk-form', id: 'pages-bulk', count: rows.length })}
+  ${rows.length
+    ? table({
+      cls: 'list-table',
+      columns: [
+        { label: html`<input type="checkbox" data-select-all aria-label="Select all pages">`, cls: 'list-check' },
+        sortCol('Title', 'title', 'asc', (change) => pageListHref(state, change)),
+        sortCol('Author', 'author', 'asc', (change) => pageListHref(state, change), 'col-hide-sm'),
+        { ...sortCol('Comments', 'comments', 'desc', (change) => pageListHref(state, change), 'list-comments'), align: 'center' as const },
+        sortCol('Date', 'date', 'desc', (change) => pageListHref(state, change), 'list-date'),
+      ],
+      rows: rows.map((row) => {
         const url = settings.home_page_id === String(row.id) ? '/' : '/' + row.slug;
         const date = row.status === 'published' ? row.published_at || row.created_at : row.updated_at;
-        const dateLabel = row.status === 'published' ? 'Published' : 'Last Modified';
+        const dateLabel = row.status === 'published' ? 'Published' : 'Last modified';
         const preview = url + (row.status === 'published' ? '' : '?preview=1');
-        return html`<tr>
-          <td class="posts-check-column"><input type="checkbox" name="ids" value="${row.id}" form="pages-bulk-form" aria-label="Select ${row.title}"></td>
-          <td class="posts-title-cell"><a class="posts-title-link" href="${base}/pages/${row.id}">${row.title || '(untitled)'}</a>${row.status === 'draft' ? html` <span class="page-draft-label">— Draft</span>` : ''}
-            <div class="post-row-actions"><a href="${base}/pages/${row.id}">Edit</a><span aria-hidden="true">·</span><a href="${preview}" target="_blank" rel="noopener">View</a></div>
-          </td>
-          <td>${row.author || '—'}</td>
-          <td class="posts-comments-column"><span class="post-comment-count" aria-label="${row.comment_count} comments">${row.comment_count}</span></td>
-          <td class="posts-date-cell"><strong>${dateLabel}</strong><time datetime="${date}">${formatPostDate(date, timezone)}</time></td>
-        </tr>`;
-      })}
-      ${rows.length ? '' : html`<tr><td colspan="5" class="posts-empty">No pages found. ${state.q || state.month || state.status !== 'all' ? 'Try changing your search or filters.' : html`Add a page to get started.`}</td></tr>`}
-    </tbody>
-  </table></div>
-  <div class="posts-table-footer">
-    <div class="posts-bulk-control"><label class="sr-only" for="pages-bulk-bottom">Bulk actions</label>
-      <select id="pages-bulk-bottom"><option value="">Bulk actions</option><option value="publish">Publish</option><option value="draft">Move to draft</option><option value="delete">Delete permanently</option></select>
-      <button class="btn ghost small" type="submit" form="pages-bulk-form">Apply</button>
-    </div>
-    <span class="posts-count">${total ? `Showing ${rangeStart}–${rangeEnd} of ${total} pages` : '0 pages'}</span>
-  </div>
-  <div class="posts-pagination">
-    ${state.p > 1 ? html`<a class="btn ghost small" href="${pageListHref(state, { p: state.p - 1 })}">&larr; Newer</a>` : ''}
-    ${total > state.p * per ? html`<a class="btn ghost small" href="${pageListHref(state, { p: state.p + 1 })}">Older &rarr;</a>` : ''}
-  </div>
-  ${raw(`<script>
-(function(){
-  var top=document.getElementById('pages-bulk-top'),bottom=document.getElementById('pages-bulk-bottom');
-  if(top&&bottom){top.addEventListener('change',function(){bottom.value=top.value});bottom.addEventListener('change',function(){top.value=bottom.value})}
-  var all=document.getElementById('select-all-pages'),boxes=[].slice.call(document.querySelectorAll('input[name="ids"][form="pages-bulk-form"]'));
-  function updateAll(){if(!all)return;var checked=boxes.filter(function(box){return box.checked}).length;all.checked=boxes.length>0&&checked===boxes.length;all.indeterminate=checked>0&&checked<boxes.length}
-  if(all){all.addEventListener('change',function(){boxes.forEach(function(box){box.checked=all.checked});updateAll()});boxes.forEach(function(box){box.addEventListener('change',updateAll)})}
-  var form=document.getElementById('pages-bulk-form');if(form)form.addEventListener('submit',function(e){if(top&&top.value==='delete'&&!confirm('Permanently delete the selected pages? This cannot be undone.'))e.preventDefault()});
-})();
-</script>`)}
+        return [
+          html`<input type="checkbox" name="ids" value="${row.id}" form="pages-bulk-form" aria-label="Select ${row.title}">`,
+          html`<a class="row-title" href="${base}/pages/${row.id}">${row.title || '(untitled)'}</a>
+            <span class="row-meta">${row.status === 'draft' ? html`<span class="badge draft">draft</span>` : ''}${settings.home_page_id === String(row.id) ? html`<span class="badge published">home page</span>` : ''}<span class="row-slug">/${row.slug}</span>
+              <span class="row-actions"><a href="${base}/pages/${row.id}">Edit</a>·<a href="${preview}" target="_blank" rel="noopener">View</a></span></span>`,
+          row.author || '—',
+          html`<span class="comment-count" aria-label="${row.comment_count} comments">${row.comment_count}</span>`,
+          html`<span class="row-date"><strong>${dateLabel}</strong><time datetime="${date}">${formatPostDate(date, timezone)}</time></span>`,
+        ];
+      }),
+    })
+    : emptyRow(5, {
+      title: 'No pages match',
+      body: state.q || state.month || state.status !== 'all' ? 'Try a different search or clear the filters.' : 'Add an about page or a landing page.',
+      action: html`<a class="btn" href="${base}/pages/new">Add a page</a>`,
+    })}
+  ${pagination({
+    prev: state.p > 1 ? pageListHref(state, { p: state.p - 1 }) : undefined,
+    next: total > state.p * per ? pageListHref(state, { p: state.p + 1 }) : undefined,
+    prevLabel: 'Newer',
+    nextLabel: 'Older',
+    info: total ? `${rangeStart}–${rangeEnd} of ${total}` : '0 pages',
+  })}
+  ${raw(LIST_JS)}
 </section>`, '/pages');
 }
 

@@ -1,0 +1,67 @@
+/* ===========================================================================
+   AMS admin - dashboard
+   ---------------------------------------------------------------------------
+   The first screen after logging in answers three questions in reading order:
+   what is broken, what is waiting, and what did I touch last. The "needs
+   attention" list is the whole point, so it owns the widest column.
+   =========================================================================== */
+
+.dash { display: flex; flex-direction: column; gap: var(--space-4); }
+.dash__head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); justify-content: space-between; }
+.dash__head h1 { margin: 0; font-size: var(--text-2xl); letter-spacing: -0.02em; }
+.dash__hi { margin: 0 0 var(--space-1); color: var(--accent); font-size: var(--text-sm); font-weight: 650; }
+.dash__sub { margin: var(--space-1) 0 0; color: var(--muted); }
+.dash .notice a { font-weight: 600; }
+
+.dash .stats { margin-bottom: 0; }
+.dash .stats li { list-style: none; display: flex; }
+.dash .stats .stat { flex: 1; }
+.stat__ico { display: inline-flex; color: var(--accent); margin-bottom: var(--space-1); }
+
+.dash__cols { display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 1.65fr) minmax(18rem, 1fr); align-items: start; }
+.dash__main, .dash__side { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.dash__side .card { margin: 0; }
+.card__count {
+  display: inline-grid; place-items: center; min-width: 1.5rem; height: 1.5rem; padding: 0 var(--space-2);
+  border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent);
+  font-size: var(--text-xs); font-weight: 700;
+}
+.card__pad { padding: var(--space-4); }
+.card__pad p:last-child { margin-bottom: 0; }
+
+/* Needs attention --------------------------------------------------------- */
+.attention { margin: 0; padding: 0; list-style: none; }
+.attention__item {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-3); align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.attention__item:last-child { border-bottom: 0; }
+.attention__item:hover { background: var(--surface-2); }
+.attention__ico {
+  display: grid; place-items: center; width: 1.9rem; height: 1.9rem;
+  border-radius: 50%; background: var(--surface-3); color: var(--muted);
+}
+.attention__item--danger .attention__ico { background: var(--danger-soft); color: var(--danger); }
+.attention__item--warn .attention__ico { background: var(--warn-soft); color: var(--warn); }
+.attention__item--info .attention__ico { background: var(--accent-soft); color: var(--accent); }
+.attention__body { min-width: 0; }
+.attention__body strong { display: block; margin-bottom: 0.1rem; }
+.attention__body p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
+
+/* Sidebar lists ----------------------------------------------------------- */
+.list--rows { margin: 0; padding: 0; }
+.list--rows li { padding: var(--space-2) var(--space-4); }
+.list--rows li:last-child { border-bottom: 0; }
+.kv--tight { gap: var(--space-1) var(--space-3); font-size: var(--text-sm); }
+.kv--tight dt { white-space: nowrap; }
+
+@media (max-width: 960px) {
+  .dash__cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 620px) {
+  .dash__head { align-items: flex-start; }
+  .attention__item { grid-template-columns: auto minmax(0, 1fr); }
+  .attention__item .btn { grid-column: 2; justify-self: start; }
+}

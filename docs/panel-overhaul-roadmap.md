@@ -125,7 +125,9 @@ Shipped:
 
 **Acceptance:** no admin CSS inline; every existing test green; one shared `pageHeader` used by ≥3 screens.
 
-### Phase 1 — Panel shell overhaul (7 d)
+### Phase 1 — Panel shell overhaul (7 d) — ✅ shipped in 0.4.0
+
+*Scope note: the "list table component" landed as a shared list pattern in `src/admin/components.ts` + `screens/lists.css`, applied to posts and pages. Media, tools and the remaining screens still use their legacy markup (moved to Phase 1b below).*
 
 - **App shell v2**: persistent rail (collapsible, remembers state in a cookie so the server can render
   the right width — no layout flash), sticky page header, breadcrumbs, user menu (profile / preferences
@@ -147,6 +149,45 @@ Shipped:
 
 **Acceptance:** palette finds any post in < 2 keystrokes after the query; posts list usable at 360 px;
 Lighthouse a11y ≥ 95 on dashboard and posts list; admin HTML payload down ≥ 60 %.
+
+Shipped in 0.4.0:
+
+- **Command palette** (`src/admin/palette.ts`): ⌘K / Ctrl+K and `/`, arrow keys with
+  `aria-activedescendant`, Esc, backdrop click, one `role="status"` live region that
+  announces "Searching…", result counts and failures. 120 ms debounced fetch of
+  `GET /{admin}/search?q=…&partial=1`; without JavaScript the same form submits to the page.
+- **Global search** (`src/admin/search.ts`, `routes/admin/shell.ts`): posts and pages, media,
+  comments, categories/tags, users; role-scoped (authors see only their own content, the users
+  group is admin-only); comment lookups degrade on pre-migration databases. Grouped results,
+  `Cache-Control: no-store`, query echoed back escaped.
+- **List pattern** (`listToolbar`, `bulkBar`, `emptyRow`, `td`, `sortColumn`, `LIST_JS` +
+  `screens/lists.css`): status tabs with counts, search + filter toolbar, one bulk bar (the
+  duplicated top/bottom selects are gone), sortable `<th>` with `aria-sort`, `data-label` on
+  every cell so the 700 px breakpoint renders each row as a card. Posts and pages converted.
+- **Dashboard v2** (`src/admin/attention.ts` + `screens/dashboard.css`): greeting, site name,
+  "needs attention" checklist sorted danger → warn → info (pending/spam comments, overdue
+  scheduled posts, posts untouched for 60 days, media without alt text, incomplete media rows,
+  pending schema updates, idle authors), each with a link that fixes it; plus "recently
+  edited", "at a glance" and "latest comments". Every probe fails soft.
+- **Preferences as one-click links**: `GET /{admin}/scheme/:scheme?next=` and
+  `GET /{admin}/rail/:state?next=` set the cookie and bounce back (same-panel `next` only);
+  `POST /{admin}/density` toggles density.
+- **A11y**: skip link first in the document, labelled `main`/`rail`/`search` landmarks,
+  `aria-current="page"` on the open section and tab, visible `:focus-visible` rings,
+  `:focus-within` on wrapped inputs, live regions for search results and bulk selection,
+  `prefers-reduced-motion` zeroes transitions, card mode at 700 px.
+- **Tests**: `tests/panel.test.mjs` grew from 5 to 14 cases covering palette markup, search
+  full page + fragment + guard + escaping, rail/scheme/density cookies, the list pattern and
+  empty states, dashboard priority order, and the a11y floor (including a rule that every
+  `outline: none` is scoped to a wrapper that draws its own ring).
+
+**Phase 1b (not shipped, no date committed):** convert media, tools, themes, menus and plugins
+screens to the list pattern; 3-step onboarding checklist for fresh installs; dismissible toast
+region; per-user rows-per-page; sticky list headers.
+
+**Measured in 0.4.0:** dashboard 33.6 KB HTML, posts list 37.5 KB, `<head>` ~530 B because all
+styling lives in cached bundles, largest CSS bundle 29.6 KB raw / 5.7 KB gzip. The ≥ 60 %
+payload target is a whole-panel average and is still open for the screens listed in Phase 1b.
 
 ### Phase 2 — Posts & pages workflow (11 d)
 

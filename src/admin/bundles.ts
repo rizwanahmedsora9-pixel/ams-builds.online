@@ -17,10 +17,12 @@ import { APP_VERSION } from '../lib/version';
 import tokensCss from './assets/tokens.css';
 import appCss from './assets/app.css';
 import legacyScreens from './assets/screens/legacy.css';
+import listScreens from './assets/screens/lists.css';
+import dashboardScreens from './assets/screens/dashboard.css';
 import { iconSprite } from './icons';
 
 /** Kept as a module so the login/installer shell (which has no admin URL) can inline it. */
-export const ADMIN_CSS = `${tokensCss}\n${appCss}\n${legacyScreens}`;
+export const ADMIN_CSS = `${tokensCss}\n${appCss}\n${dashboardScreens}\n${listScreens}\n${legacyScreens}`;
 
 export type BundleName = 'app' | 'tokens' | 'screens';
 
@@ -29,7 +31,7 @@ const BUNDLES: Record<BundleName, { css: string; etag: string }> = (() => {
   return {
     app: build(appCss),
     tokens: build(tokensCss),
-    screens: build(legacyScreens),
+    screens: build(`${dashboardScreens}\n${listScreens}\n${legacyScreens}`),
   };
 })();
 

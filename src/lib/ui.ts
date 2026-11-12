@@ -2,6 +2,8 @@ import type { Ctx } from '../types';
 import { ADMIN_CSS, assetLinks } from '../admin/bundles';
 import { APP_JS } from '../admin/components';
 import { icon, iconSprite } from '../admin/icons';
+import { commandsFor } from '../admin/search';
+import { PALETTE_JS, paletteConfig } from '../admin/palette';
 import { can } from './auth';
 import { pendingComments } from './comments';
 import { getSettings } from './config';
@@ -160,7 +162,7 @@ export function navGroups(user: { role: string }, pending: number): NavGroup[] {
   ];
 }
 
-function renderRail(c: Ctx, groups: NavGroup[], activeKey: string, path: string, search: string): Raw {
+function renderRail(c: Ctx, groups: NavGroup[], activeKey: string, path: string, search: string, prefs: { density: string }): Raw {
   const base = c.var.base;
   const isChildActive = (child: string) => (child.includes('?') ? path + search === child : path === child);
   const visible = groups.filter((g) => g.show);
@@ -176,13 +178,13 @@ ${open ? html`<div class="rail__sub">${children.map((ch) => html`<a href="${base
   return html`<nav class="rail" aria-label="Admin sections">
   <div class="rail__section">${items}</div>
   <div class="rail__foot">
-    <label for="side-c" class="rail__collapse" title="Collapse or expand the sidebar">${icon('chevron-left', { cls: 'rail__ico' })}<span class="rail__label">Collapse Menu</span></label>
     <a class="rail__item" href="${base}/preferences"${activeKey === 'preferences' ? raw(' aria-current="page"') : raw('')} title="Preferences">${icon('settings', { cls: 'rail__ico' })}<span class="rail__label">Preferences</span></a>
+    <form method="post" action="${base}/density">${csrfField(c)}<button type="submit" title="Switch density">${icon('grid', { cls: 'rail__ico' })}<span class="rail__label">${prefs.density === 'compact' ? 'Comfortable view' : 'Compact view'}</span></button></form>
   </div>
 </nav>`;
 }
 
-function renderUserMenu(c: Ctx): Raw {
+function renderUserMenu(c: Ctx, prefs: { scheme: string; density: string }, path: string): Raw {
   const base = c.var.base;
   const user = c.var.user;
   return html`<details class="usermenu">
@@ -192,9 +194,72 @@ function renderUserMenu(c: Ctx): Raw {
     <a href="${base}/profile">${icon('user')} Profile</a>
     <a href="${base}/preferences">${icon('settings')} Preferences</a>
     <div class="usermenu__sep"></div>
+    <span class="usermenu__label">Colour scheme</span>
+    <div class="usermenu__schemes" role="group" aria-label="Colour scheme">
+      ${(['auto', 'light', 'dark'] as const).map((scheme) => html`<a href="${base}/scheme/${scheme}?next=${encodeURIComponent(path)}"${prefs.scheme === scheme ? raw(' aria-pressed="true"') : raw('')} title="${scheme === 'auto' ? 'Match my system' : scheme}">${icon(scheme === 'auto' ? 'monitor' : scheme === 'light' ? 'sun' : 'moon', { cls: 'ico--sm' })}<span>${scheme === 'auto' ? 'System' : scheme[0].toUpperCase() + scheme.slice(1)}</span></a>`)}
+    </div>
+    <form method="post" action="${base}/density">${csrfField(c)}<button type="submit">${icon('grid', { cls: 'ico--sm' })} ${prefs.density === 'compact' ? 'Comfortable' : 'Compact'} density</button></form>
+    <div class="usermenu__sep"></div>
     <form method="post" action="${base}/logout">${csrfField(c)}<button type="submit">${icon('logout')} Log out</button></form>
   </div>
 </details>`;
+}
+
+/**
+ * Collapse control. A GET link, so it works without JavaScript and keeps the
+ * collapsed state in a cookie the server reads on the next request. It sits in
+ * the top bar because the rail itself is hidden when collapsed.
+ */
+function railCollapseControl(base: string, prefs: { railCollapsed: boolean }, path: string, search: string): Raw {
+  const back = encodeURIComponent(path + search);
+  return html`<label for="side-c" class="rail__collapse" title="Collapse or expand the menu">${icon('chevron-left', { cls: 'ico--sm' })}<span>Collapse Menu</span></label>
+<a class="rail-toggle" href="${base}/rail/${prefs.railCollapsed ? 'open' : 'collapsed'}?next=${encodeURIComponent(path + search)}" title="${prefs.railCollapsed ? 'Expand the menu' : 'Collapse the menu'}">${icon('chevron-right', { cls: 'ico--sm' })}<span class="sr-only">Toggle menu</span></a>`;
+}
+
+/**
+ * The command palette (⌘K / Ctrl+K). A <dialog> containing a form that falls
+ * back to the /search page when JavaScript is unavailable; with JavaScript the
+ * client fetches /search?partial=1 as you type and takes over the arrow keys.
+ */
+function palette(c: Ctx, prefs: { scheme: string; density: string }): Raw {
+  const base = c.var.base;
+  const commands = commandsFor(base, c.var.user);
+  const grouped = new Map<string, typeof commands>();
+  for (const cmd of commands) {
+    const list = grouped.get(cmd.group) || [];
+    list.push(cmd);
+    grouped.set(cmd.group, list);
+  }
+  return html`<dialog id="palette" class="palette" aria-labelledby="palette-title">
+  <h2 id="palette-title" class="sr-only">Search and commands</h2>
+  <form method="get" action="${base}/search" class="palette__form" role="search">
+    <span class="palette__ico">${icon('search')}</span>
+    <input type="search" id="palette-input" name="q" placeholder="Search posts, pages, media… or type a command"
+           autocomplete="off" spellcheck="false" aria-controls="palette-results" aria-describedby="palette-help" maxlength="80">
+    <button class="btn ghost small palette__close" type="button" data-palette-close>Esc</button>
+  </form>
+  <div class="palette__results" id="palette-results" role="region" aria-label="Search results">
+    <div data-palette-commands>
+      ${[...grouped].map(([group, items]) => html`<section class="search-group">
+        <h3 class="search-group__title">${group}</h3>
+        <ul class="search-hits">
+          ${items.map((cmd, i) => html`<li>
+            <a class="search-hit" id="palette-cmd-${i}" href="${cmd.href}" data-palette-item data-keys="${cmd.keys.join(' ')}">
+              <span class="search-hit__ico">${icon(cmd.icon, { cls: 'ico--sm' })}</span>
+              <span class="search-hit__body"><b>${cmd.label}</b></span>
+            </a>
+          </li>`)}
+        </ul>
+      </section>`)}
+    </div>
+    <div data-palette-live></div>
+    <div id="palette-status" class="sr-only" role="status" aria-live="polite"></div>
+  </div>
+  <p class="palette__help hint" id="palette-help">
+    <kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>Enter</kbd> to open · <kbd>Esc</kbd> to close
+    <span class="palette__scheme">· <a href="${base}/preferences">Preferences</a></span>
+  </p>
+</dialog>`;
 }
 
 /**
@@ -237,21 +302,25 @@ export async function layout(c: Ctx, title: string, body: Raw, _active = '', opt
   <a class="topbar__brand" href="${base}">${icon('globe')}<span>${siteTitle || 'Dashboard'}</span></a>
   <span class="topbar__spacer"></span>
   <div class="topbar__actions">
-    <a class="topbar__link" href="/" target="_blank" rel="noopener">${icon('external', { cls: 'ico--sm' })}<span>View site</span></a>
-    ${renderUserMenu(c)}
+    <a class="topbar__search" href="${base}/search" id="search-trigger" data-palette-open>
+      ${icon('search', { cls: 'ico--sm' })}<span class="topbar__search-label">Search</span><kbd class="topbar__kbd">⌘K</kbd>
+    </a>
+    <a class="topbar__link" href="/" target="_blank" rel="noopener">${icon('external', { cls: 'ico--sm' })}<span class="topbar__link-label">View site</span></a>
+    ${renderUserMenu(c, prefs, path)}
   </div>
 </header>
 <input type="checkbox" id="nav-t" aria-hidden="true" tabindex="-1">
 <input type="checkbox" id="side-c" aria-hidden="true" tabindex="-1"${prefs.railCollapsed ? raw(' checked') : raw('')}>
 <div class="shell">
-  ${renderRail(c, groups, activeKey, path, search)}
+  ${renderRail(c, groups, activeKey, path, search, prefs)}
   <main class="main${opts.wide ? ' main--wide' : ''}" id="main">
     <div class="main__inner">
       ${flash(c)}${body}
     </div>
   </main>
 </div>
-${raw(APP_JS)}`;
+${railCollapseControl(base, prefs, path, search)}
+${palette(c, prefs)}`;
 
   const doc = `<!doctype html><html lang="en"${documentAttrs(prefs)}>`
     + '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
@@ -260,7 +329,7 @@ ${raw(APP_JS)}`;
     + assetLinks(base).s
     + '</head><body>'
     + `${iconSprite().s}<a class="skip" href="#main">Skip to content</a>${page.s}`
-    + '</body></html>';
+    + `${raw(APP_JS).s}${raw(paletteConfig(base + '/search')).s}${raw(PALETTE_JS).s}</body></html>`;
   return c.html(doc);
 }
 

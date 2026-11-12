@@ -21,7 +21,9 @@ const ASSETS = join(ROOT, 'src/admin/assets');
 
 const limits = {
   'tokens.css': { raw: 12 * 1024, gzip: 4 * 1024 },
-  'app.css': { raw: 32 * 1024, gzip: 9 * 1024 },
+  'app.css': { raw: 36 * 1024, gzip: 10 * 1024 },
+  'screens/dashboard.css': { raw: 10 * 1024, gzip: 3 * 1024 },
+  'screens/lists.css': { raw: 12 * 1024, gzip: 4 * 1024 },
   'screens/legacy.css': { raw: 24 * 1024, gzip: 7 * 1024 },
 };
 
@@ -52,7 +54,7 @@ for (const [rel, budget] of Object.entries(limits)) {
 const tokens = read('tokens.css');
 const defined = new Set([...tokens.matchAll(/^\s*(--[a-z0-9-]+):/gim)].map((m) => m[1]));
 const used = new Set();
-for (const rel of ['app.css', 'screens/legacy.css']) {
+for (const rel of Object.keys(limits).filter((r) => r !== 'tokens.css')) {
   for (const m of read(rel).matchAll(/var\((--[a-z0-9-]+)/g)) used.add(m[1]);
 }
 const missing = [...used].filter((name) => !defined.has(name));

@@ -22,7 +22,7 @@ const fmtSize = (n: number) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' 
 
 type MediaTypeFilter = 'all' | 'images' | 'audio' | 'video' | 'documents' | 'fonts';
 type MediaView = 'grid' | 'list';
-type MediaListState = { type: MediaTypeFilter; month: string; q: string; view: MediaView; bulk: boolean; p: number };
+type MediaListState = { type: MediaTypeFilter; month: string; q: string; view: MediaView; bulk: boolean; alt: boolean; p: number };
 type MediaListRow = { id: number; r2_key: string; filename: string; mime: string; size: number; uploaded_by: number | null; created_at: string };
 
 function mediaListState(c: Ctx): MediaListState {
@@ -36,6 +36,8 @@ function mediaListState(c: Ctx): MediaListState {
     q: (c.req.query('q') || '').trim().slice(0, 120),
     view: rawView === 'list' ? 'list' : 'grid',
     bulk: c.req.query('bulk') === '1',
+    // ?alt=missing is the "fix your alt text" view, linked from the dashboard.
+    alt: c.req.query('alt') === 'missing',
     p: Math.min(100_000, Math.max(1, Math.trunc(rawPage) || 1)),
   };
 }
@@ -48,6 +50,7 @@ function mediaListHref(state: MediaListState, change: Partial<MediaListState> = 
   if (next.q) params.set('q', next.q);
   if (next.view !== 'grid') params.set('view', next.view);
   if (next.bulk) params.set('bulk', '1');
+  if (next.alt) params.set('alt', 'missing');
   if (next.p > 1) params.set('p', String(next.p));
   const query = params.toString();
   return '/media' + (query ? '?' + query : '');
@@ -88,6 +91,7 @@ media.get('/media', async (c) => {
   if (state.type !== 'all') where.push(typeWhere[state.type]!);
   if (state.month) { where.push('substr(m.created_at,1,7)=?'); args.push(state.month); }
   if (state.q) { where.push('instr(lower(m.filename),lower(?))>0'); args.push(state.q); }
+  if (state.alt) where.push("(m.alt IS NULL OR trim(m.alt)='')");
   const whereSql = where.join(' AND ');
   const [listResult, totalRow, months] = await Promise.all([
     c.env.DB.prepare(`SELECT m.id,m.r2_key,m.filename,m.mime,m.size,m.uploaded_by,m.created_at

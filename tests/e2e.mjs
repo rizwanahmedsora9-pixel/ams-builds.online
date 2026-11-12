@@ -188,7 +188,7 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   pub = await anon('/about-us');
   assert.match(pub.text, /We build better things\./, 'edit is visible immediately');
   const pagesWithoutDrafts = await get(`${admin}/pages`);
-  assert.match(pagesWithoutDrafts.text, /Draft <b>\(0\)<\/b>/, 'all status tabs remain available when a status has no pages');
+  assert.match(pagesWithoutDrafts.text, /Draft <span class="tab-count">0<\/span>/, 'all status tabs remain available when a status has no pages');
   const reserved = await adminPost('/pages/save', { title: 'Blog', slug: 'blog', body: '', status: 'draft' });
   const editor = await get(reserved.location.split('?')[0]);
   assert.match(editor.text, /<title>Edit page/, 'edit URL opens the editor, not the list');
@@ -217,7 +217,7 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   for (const label of ['Add Page', 'All', 'Published', 'Draft', 'Search Pages', 'Bulk actions', 'Comments', 'Date']) {
     assert.ok(pageList.text.includes(label), `pages list includes ${label}`);
   }
-  assert.match(pageList.text, /class="posts-table pages-table"/);
+  assert.match(pageList.text, /class="table list-table"/);
   assert.match((await get(`${admin}/pages?q=About`)).text, /About Us/);
   assert.match((await get(`${admin}/pages?status=draft`)).text, /Blog/);
   const currentMonth = new Date().toISOString().slice(0, 7);
@@ -321,16 +321,18 @@ test('8a. posts list searches, filters and applies bulk actions', async () => {
   for (const label of ['Add Post', 'All', 'Published', 'Categories', 'Tags', 'Comments', 'Date', 'Bulk actions']) {
     assert.ok(all.text.includes(label), `posts list includes ${label}`);
   }
-  assert.match(all.text, /class="posts-table"/);
+  assert.match(all.text, /class="table list-table"/);
   assert.match(all.text, /Launch Day &amp; More/);
   assert.match(all.text, /name="ids"/);
   assert.match(all.text, /name="action" form="posts-bulk-form"/);
+  assert.match(all.text, /class="bulk-bar"/, 'bulk actions live in one bar');
+  assert.match(all.text, /data-label="Date"/, 'rows carry labels for the card layout');
 
   const searched = await get(`${admin}/posts?q=Launch+Day`);
   assert.match(searched.text, /Launch Day &amp; More/);
   const empty = await get(`${admin}/posts?q=not-a-real-title`);
   assert.doesNotMatch(empty.text, /Launch Day &amp; More/);
-  assert.match(empty.text, /No posts found/);
+  assert.match(empty.text, /No posts match/);
   const editor = await get(`${admin}/posts/${state.postId}`);
   const categoryId = editor.text.match(/name="cat" value="(\d+)" checked/)[1];
   const byCategory = await get(`${admin}/posts?category=${categoryId}`);
@@ -740,7 +742,7 @@ test('12g. tools: redirects, export/import, backups, health and cache', async ()
 test('12h. updates and taxonomy management: version page, run updates, categories and tags', async () => {
   const page = await get(`${admin}/updates`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /0\.3\.0/);
+  assert.match(page.text, /0\.4\.0/, 'the updates page states the running version');
   assert.match(page.text, /Database schema/);
   assert.match((await adminPost('/updates/run', {})).location, /\/updates\?ok=/);
 
