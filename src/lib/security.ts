@@ -191,7 +191,12 @@ export function sanitizeHtml(input: string): string {
       attrs += ` ${name}="${esc(value)}"`;
     }
     if (tag === 'iframe' && !seen.has('src')) continue;
-    if (tag === 'a' && /target=/.test(attrs)) attrs = attrs.replace(/ rel="[^"]*"/, '') + ' rel="noopener noreferrer"';
+    // A new-tab link always carries the rel that stops the target page from
+    // reaching back through window.opener; an existing one is replaced, not
+    // duplicated. An in-page link keeps whatever rel it was given.
+    if (tag === 'a' && /\starget="/.test(attrs)) {
+      attrs = attrs.replace(/\srel="[^"]*"/, '') + ' rel="noopener noreferrer"';
+    }
     out += `<${tag}${attrs}>`;
   }
   return out + text(src.slice(last));

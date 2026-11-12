@@ -114,3 +114,12 @@ img { max-width: 100%; height: auto; display: block; }
   .button, .comments button { color: #0e1116; }
 }
 .prose figure.image-block{margin:1.5em auto;max-width:100%}.prose figure.image-block img{width:100%}.prose figure.image-block figcaption{font-size:.88rem;text-align:center;margin-top:.4rem;opacity:.7}.prose .align-left{float:left;margin:.3em 1.2em 1em 0}.prose .align-right{float:right;margin:.3em 0 1em 1.2em}.prose .align-center{margin-left:auto;margin-right:auto}@media(max-width:640px){.prose .align-left,.prose .align-right{float:none;margin-left:auto;margin-right:auto}}
+
+/* Editor blocks: the figure the editor places (width + alignment), a divider
+   the writer inserted, and the print page break. Each theme styles its own
+   reading column, so the same markup reads the same way everywhere. */
+.prose hr{border:0;border-top:1px solid color-mix(in oklab,currentColor 22%,transparent);margin:2em 0}
+.prose hr.page-break{border-top-style:dashed;break-after:page;page-break-after:always}
+.prose a>img{border-radius:inherit}
+.prose .video-block iframe,.prose .video-responsive{width:100%;max-width:100%}
+.prose figure.image-block[style*="width:100%"]{clear:both}
