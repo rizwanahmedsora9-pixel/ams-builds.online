@@ -81,6 +81,7 @@ const ADMIN_SECTIONS: Record<string, string> = {
   '/appearance': 'appearance',
   '/templates': 'appearance',
   '/identity': 'appearance',
+  '/landing': 'landing',
   '/plugins': 'plugins',
   '/users': 'users',
   '/tools': 'tools',
@@ -139,6 +140,11 @@ export function navGroups(user: { role: string }, pending: number): NavGroup[] {
       ],
     },
     {
+      // What a first-time visitor meets, kept apart from Settings so the two
+      // decisions (on/off, play control) are one click from the rail.
+      key: 'landing', path: '/landing', label: 'Landing page', icon: 'play', show: admin,
+    },
+    {
       key: 'plugins', path: '/plugins', label: 'Plugins', icon: 'plug', show: admin, children: [
         { path: '/plugins', label: 'Installed Plugins' },
         { path: '/plugins/new', label: 'Add New' },
@@ -163,7 +169,7 @@ export function navGroups(user: { role: string }, pending: number): NavGroup[] {
       key: 'settings', path: '/settings', label: 'Settings', icon: 'settings', show: admin, children: [
         { path: '/settings', label: 'General' },
         { path: '/settings#reading', label: 'Reading' },
-        { path: '/settings#landing', label: 'Landing screen' },
+        { path: '/settings#landing', label: 'Landing soundtrack' },
         { path: '/settings#discussion', label: 'Discussion' },
         { path: '/settings#domains', label: 'Domains & URL' },
       ],

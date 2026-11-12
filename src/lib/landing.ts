@@ -15,6 +15,14 @@ export function parseLandingAudioIds(value: string | undefined): number[] {
 }
 
 /**
+ * Two switches on the panel's Landing page screen. Both default to *on*, so an
+ * install that never opened that screen keeps the splash and its play control;
+ * only the stored string "0" turns anything off.
+ */
+export const landingEnabled = (settings: Record<string, string>): boolean => settings.landing_enabled !== '0';
+export const landingPlayShown = (settings: Record<string, string>): boolean => settings.landing_play_button !== '0';
+
+/**
  * The splash is a fixed part of the public home response — it is never built
  * from a CMS Page or sample content. Its identity comes from saved settings
  * (site title, tagline and logo), while its soundtrack is explicitly started
@@ -27,11 +35,14 @@ export function landingScreenMarkup(opts: {
   tagline: string;
   logoUrl: string;
   tracks: LandingAudioTrack[];
+  /** False when the panel's Landing page screen hides the play control; the
+   *  playlist is then left out entirely, so nothing is fetched or played. */
+  showPlay: boolean;
   nonce: string;
 }): { head: string; body: string } {
   const nonce = esc(opts.nonce);
-  const hasTracks = opts.tracks.length > 0;
-  const urls = JSON.stringify(opts.tracks.map((track) => track.url));
+  const hasTracks = opts.showPlay && opts.tracks.length > 0;
+  const urls = JSON.stringify(hasTracks ? opts.tracks.map((track) => track.url) : []);
   const siteTitle = esc(opts.siteTitle.trim());
   const tagline = esc(opts.tagline.trim());
   const logo = opts.logoUrl.trim()
@@ -52,13 +63,13 @@ export function landingScreenMarkup(opts: {
       <h1 id="ams-landing-title">${siteTitle}</h1>
       ${copy}
     </div>
-    <div class="ams-landing-equalizer" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-    <p class="ams-landing-status" id="ams-landing-status" role="status" aria-live="polite">${status}</p>
+    ${opts.showPlay ? `<div class="ams-landing-equalizer" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+    <p class="ams-landing-status" id="ams-landing-status" role="status" aria-live="polite">${status}</p>` : ''}
     <div class="ams-landing-controls">
-      <button class="ams-landing-play" type="button" data-landing-play aria-label="Play soundtrack"${hasTracks ? '' : ' disabled'}>
+      ${opts.showPlay ? `<button class="ams-landing-play" type="button" data-landing-play aria-label="Play soundtrack"${hasTracks ? '' : ' disabled'}>
         <svg class="ams-landing-icon ams-landing-icon-play" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8.6 4.9a1 1 0 0 1 1.53-.84l10 7.1a1 1 0 0 1 0 1.68l-10 7.1a1 1 0 0 1-1.53-.84z"/></svg>
         <svg class="ams-landing-icon ams-landing-icon-pause" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.2 5h3.5v14H7.2zM13.3 5h3.5v14h-3.5z"/></svg>
-      </button>
+      </button>` : ''}
       <div class="ams-landing-secondary">
         ${hasTracks ? '<button class="ams-landing-mute" type="button" data-landing-mute aria-pressed="false">Mute sound</button>' : ''}
         <button class="ams-landing-enter" type="button" data-landing-enter>Enter site</button>
@@ -130,7 +141,7 @@ const LANDING_PLAYER = `(function(){
     // the click; if the file is unusable, fall through to the next track.
     audio.play().then(update).catch(function(){playTrack((current+1)%tracks.length,tracks.length-1)});
   }
-  if(active)warm();
+  if(active&&playButton)warm();
   if(playButton)playButton.addEventListener('click',function(){if(audio.paused)start();else audio.pause()});
   if(muteButton)muteButton.addEventListener('click',function(){muted=!muted;audio.muted=muted;update()});
   audio.addEventListener('play',update);

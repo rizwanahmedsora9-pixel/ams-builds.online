@@ -14,6 +14,7 @@ import { card, emptyState, notice } from '../../admin/components';
 import content from './content';
 import media from './media';
 import settings from './settings';
+import landing from './landing';
 import menus from './menus';
 import themes from './themes';
 import comments from './comments';
@@ -327,6 +328,7 @@ admin.post('/profile', async (c) => {
 admin.route('/', content);
 admin.route('/', media);
 admin.route('/', settings);
+admin.route('/', landing);
 admin.route('/', menus);
 admin.route('/', themes);
 admin.route('/', comments);

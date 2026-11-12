@@ -113,13 +113,18 @@ empty leftovers, so the stored markup is as clean as the writing.
 - **Fixed first-visit landing screen.** The welcome screen is built into the site and cannot be
   replaced by a CMS Page or sample content. It takes the company name from **Settings → Site title**,
   the welcome line from **Settings → Tagline**, and an optional image from **Appearance → Identity**.
-  Under **Settings → Landing screen**, upload/select up to 20 audio tracks; the fixed screen has a
+  **Landing page** in the sidebar is where the screen is switched: *Show the landing page* (Yes/No)
+  and *Show the play button on the landing page* (Yes/No). Turning the screen off removes the welcome
+  layer completely; turning the play button off keeps the welcome copy and **Enter site** but drops
+  the player, the equalizer, the mute control and the audio download. Both answers default to Yes and
+  are saved together with **Save landing options**.
+  Under **Settings → Landing soundtrack**, upload/select up to 20 audio tracks; the fixed screen has a
   centered round play/pause icon button, equalizer, mute control and Enter button. The first track is
   preloaded while the screen is up, so pressing Play starts sound immediately. Tracks play in order and
   loop after Play is pressed. Enter stops playback and reveals the regular home page. The welcome layer stays
-  dismissed in that tab until the tab is closed; **Preview the landing screen** (`/?landing=1`)
-  reopens it for a check. Browsers require a visitor gesture for audible playback, so audio does not
-  start automatically on page load.
+  dismissed in that tab until the tab is closed; **Preview** on the Landing page screen (or the link in
+  Settings) reopens it via `/?landing=1`, even while the screen is switched off. Browsers require a
+  visitor gesture for audible playback, so audio does not start automatically on page load.
 
   Soundtrack files upload one at a time as soon as you pick them, each with its own progress row, so a
   large MP3 on a slow connection cannot take the rest of the settings down with it. A file the server
@@ -146,7 +151,8 @@ blank 500.
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects (301/302), JSON import/export, server-stored backups, site health, page-cache reset |
-| Settings | Site identity and favicon (the title follows the domain until you rename it), reading, a fixed first-visit landing screen driven by those settings with an ordered looping soundtrack uploaded one track at a time, discussion, domains and the admin URL |
+| Landing page | Two Yes/No switches: *Show the landing page* and *Show the play button on the landing page*, with a preview that works even while the screen is off |
+| Settings | Site identity and favicon (the title follows the domain until you rename it), reading, the landing soundtrack (an ordered looping playlist uploaded one track at a time), discussion, domains and the admin URL |
 
 ## Who changed what
 
