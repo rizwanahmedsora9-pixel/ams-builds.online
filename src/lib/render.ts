@@ -9,6 +9,7 @@ import { activeThemeFor, applyLayout, loadTheme, renderWithTheme, themeAssetUrl 
 import { variablesFor } from './tokens';
 import { DEFAULT_WIDGET_AREAS, widgetKey } from './theme-manifest';
 import { cspFor, nonceFor } from './security';
+import { verificationTags } from './plugins';
 import { readTokens, supportedTokens, tokensCss, schemeMeta } from './tokens';
 
 export type { ThemeBundle } from './theme-manifest';
@@ -47,6 +48,9 @@ function buildHead(meta: PageMeta, settings: Settings, origin: string, extra = '
   const tags = [`<title>${esc(meta.title)}</title>`];
   if (meta.description) tags.push(`<meta name="description" content="${esc(meta.description)}">`);
   if (meta.noindex) tags.push('<meta name="robots" content="noindex">');
+  // Search Console Verification plugin: pasted Google/Bing/Yandex codes, live on every page.
+  const verification = verificationTags(settings);
+  if (verification) tags.push(verification);
   if (meta.canonical) tags.push(`<link rel="canonical" href="${esc(origin + meta.canonical)}">`);
   tags.push(`<meta property="og:title" content="${esc(meta.title)}">`, `<meta property="og:type" content="${meta.type || 'website'}">`);
   if (meta.description) tags.push(`<meta property="og:description" content="${esc(meta.description)}">`);

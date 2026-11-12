@@ -95,3 +95,4 @@ x;border:1px solid var(--line);border-radius:.6rem;padding:.85rem 1rem;margin:0 
 .site-widget .widget-title,.site-widget h2{font-size:.95rem;margin:0 0 .4rem;color:var(--fg)}
 .site-widget p{margin:.3rem 0}
 .brand--logo{display:inline-flex;align-items:center;gap:.5rem}.brand-logo{height:1.8rem;width:auto;display:block}
+.content figure.image-block{margin:1.5em auto;max-width:100%}.content figure.image-block img{width:100%}.content figure.image-block figcaption{color:var(--muted);font-size:.88rem;text-align:center;margin-top:.4rem}.content .align-left{float:left;margin:.3em 1.2em 1em 0}.content .align-right{float:right;margin:.3em 0 1em 1.2em}.content .align-center{margin-left:auto;margin-right:auto}@media(max-width:640px){.content .align-left,.content .align-right{float:none;margin-left:auto;margin-right:auto}}

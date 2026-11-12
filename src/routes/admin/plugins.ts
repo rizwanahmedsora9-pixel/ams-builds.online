@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv, Ctx } from '../../types';
 import { can } from '../../lib/auth';
 import { bumpCache, getSettings, setSettings } from '../../lib/config';
-import { BUILTIN_PLUGINS, HOOK_POINTS, isHookPoint, listHooks, pluginOn, pluginSetting, type HookRow } from '../../lib/plugins';
+import { BUILTIN_PLUGINS, HOOK_POINTS, VERIFICATION_ENGINES, extractVerificationCode, isHookPoint, listHooks, pluginOn, pluginSetting, verificationMetaTag, type HookRow } from '../../lib/plugins';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 
 /**
@@ -62,7 +62,7 @@ plugins.get('/plugins', async (c) => {
       const on = pluginOn(settings, p.key);
       return html`<li>
         <div class="t"><b>${p.name}</b> <span class="pill ${on ? 'on' : 'off'}">${on ? 'Active' : 'Inactive'}</span>
-          <small>${p.description}${on ? html` · <a href="${p.adminUrl}" target="_blank" rel="noopener">Open</a>` : ''}</small></div>
+          <small>${p.description}${p.configureUrl ? html` · <a href="${base}${p.configureUrl}">Configure</a>` : ''}${on && p.adminUrl ? html` · <a href="${p.adminUrl}" target="_blank" rel="noopener">Open</a>` : ''}</small></div>
         <form method="post" action="${base}/plugins/toggle" class="inline">
           ${csrfField(c)}<input type="hidden" name="key" value="${p.key}">
           <button class="btn ${on ? 'ghost' : ''} small" type="submit">${on ? 'Deactivate' : 'Activate'}</button>
@@ -96,6 +96,72 @@ plugins.get('/plugins', async (c) => {
   <p class="hint" style="margin-bottom:0">Code from plugins is trusted like theme code. Only add code you understand.</p>
 </div>
 ${raw(`<script>document.querySelectorAll('[data-confirm]').forEach(function(f){f.addEventListener('submit',function(e){if(!confirm('Delete this plugin? Its code is removed from the site.'))e.preventDefault()})});</script>`)}`, '/plugins');
+});
+
+
+/* ------------------------------------------- Search Console Verification */
+/**
+ * Built-in plugin screen: paste a verification tag (or bare code) per search
+ * engine, save, and the exact <meta> tag is live in <head> on the next request.
+ * Saving always (re)activates the plugin — that is the "paste and boom" flow.
+ */
+plugins.get('/plugins/search-verification', async (c) => {
+  const s = await getSettings(c.env);
+  const base = c.var.base;
+  const on = pluginOn(s, 'search-verification');
+  const origin = new URL(c.req.url).origin;
+  return layout(c, 'Search Console Verification', html`
+<div class="row between" style="margin-bottom:1rem">
+  <h1 style="margin:0">Search Console Verification</h1>
+  <a href="${base}/plugins">&larr; Plugins</a>
+</div>
+<div class="card">
+  <p style="margin-top:0"><span class="pill ${on ? 'on' : 'off'}">${on ? 'Active' : 'Inactive'}</span>
+  <span class="hint" style="margin-left:.5rem">Built-in plugin — installed and ready. It prints your verification <code>&lt;meta&gt;</code> tags inside <code>&lt;head&gt;</code> on every public page.</span></p>
+  <ol class="hint" style="margin:.6rem 0 0;padding-left:1.2rem">
+    <li>In <a href="https://search.google.com/search-console" target="_blank" rel="noopener">Google Search Console</a> choose <b>Add property → URL prefix</b>, enter <code>${origin}/</code>, then pick the <b>HTML tag</b> method.</li>
+    <li>Copy the tag Google shows and paste it below (pasting only the code inside <code>content="…"</code> works too).</li>
+    <li>Press <b>Save &amp; activate</b>, go back to Google and press <b>Verify</b>. Done — no theme or file editing.</li>
+  </ol>
+</div>
+<form method="post" action="${base}/plugins/search-verification" class="card">
+  ${csrfField(c)}
+  ${VERIFICATION_ENGINES.map((e) => {
+    const token = extractVerificationCode(s[e.setting] || '', e.metaName);
+    const tag = token ? verificationMetaTag(e, token) : '';
+    return html`
+  <h2 style="margin-bottom:.3rem">${e.label}</h2>
+  <p class="hint" style="margin-top:0">${e.help}</p>
+  <label for="verify-${e.key}">Verification tag or code</label>
+  <textarea id="verify-${e.key}" name="${e.setting}" class="code" rows="2" spellcheck="false" placeholder="&lt;meta name=&quot;${e.metaName}&quot; content=&quot;…&quot;&gt;">${tag || (s[e.setting] ?? '')}</textarea>
+  ${token
+    ? html`<p class="hint" role="status">✓ Live tag: <code>${tag}</code></p>`
+    : html`<p class="hint">Not set yet — nothing is printed for ${e.label}.</p>`}`;
+  })}
+  <p class="row" style="margin:1.1rem 0 0"><button class="btn" type="submit">Save &amp; activate</button>
+  <a class="btn ghost" href="/" target="_blank" rel="noopener">View homepage source to check</a></p>
+  <p class="hint">To stop printing the tags, clear a box and save, or deactivate the plugin on the Plugins screen. Tip: after verifying, also submit your sitemap in Search Console: <code>${origin}/sitemap.xml</code>.</p>
+</form>`, '/plugins');
+});
+
+plugins.post('/plugins/search-verification', async (c) => {
+  const values: Record<string, string> = { [pluginSetting('search-verification')]: '1' };
+  for (const e of VERIFICATION_ENGINES) {
+    const pasted = String(c.var.form.get(e.setting) ?? '');
+    const token = extractVerificationCode(pasted, e.metaName);
+    if (pasted.trim() && !token) {
+      return go(c, '/plugins/search-verification', { err: `${e.label}: could not find a verification code in what you pasted. Paste the whole <meta …> tag or only the code inside content="…".` });
+    }
+    values[e.setting] = token;
+  }
+  await setSettings(c.env, values);
+  await bumpCache(c.env, c.var.cfg);
+  const active = VERIFICATION_ENGINES.filter((e) => values[e.setting]).map((e) => e.label);
+  return go(c, '/plugins/search-verification', {
+    ok: active.length
+      ? `Saved and active — verification tag live in <head> for ${active.join(', ')}. Now press Verify in Search Console.`
+      : 'Saved. Paste a verification tag to make it live.',
+  });
 });
 
 plugins.post('/plugins/toggle', async (c) => {

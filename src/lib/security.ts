@@ -100,6 +100,28 @@ const TAG_ATTRS: Record<string, string[]> = {
   details: ['open'],
 };
 const URL_ATTRS = new Set(['href', 'src']);
+
+/**
+ * Image sizing/alignment written by the editor (width:% + align classes) is
+ * stored as inline style. Only those exact, value-checked declarations may
+ * survive sanitizing — anything else in a style attribute is dropped whole.
+ */
+const SAFE_STYLE_TAGS = new Set(['figure', 'img', 'div']);
+const SAFE_STYLE_VALUE = /^(\d{1,3}(?:\.\d+)?%|\d{1,4}px|auto|left|right|center|block|none)$/i;
+const SAFE_STYLE_PROPS = new Set(['width', 'max-width', 'margin-left', 'margin-right', 'float', 'display', 'text-align']);
+export function safeStyle(value: string): string {
+  const kept: string[] = [];
+  for (const decl of value.split(';')) {
+    const [propRaw, ...rest] = decl.split(':');
+    const prop = (propRaw || '').trim().toLowerCase();
+    const val = rest.join(':').trim().toLowerCase();
+    if (!SAFE_STYLE_PROPS.has(prop) || !SAFE_STYLE_VALUE.test(val)) continue;
+    if (prop === 'width' && val.endsWith('%') && parseFloat(val) > 100) continue;
+    kept.push(`${prop}:${val}`);
+    if (kept.length >= 6) break;
+  }
+  return kept.join(';');
+}
 // Elements whose whole content is dropped, not just the tags.
 const DROP_BLOCKS = /<(script|style|object|embed|noscript|template|svg|math|form|textarea|select|button|title|xmp|plaintext|noembed|frameset)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
 const TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^'">])*)>?/g;
@@ -149,8 +171,18 @@ export function sanitizeHtml(input: string): string {
     const seen = new Set<string>();
     for (const a of m[3].matchAll(ATTR)) {
       const name = a[1].toLowerCase();
-      if (!allowed.includes(name) || seen.has(name)) continue;
       let value = (a[2] ?? a[3] ?? a[4] ?? '').replace(/&amp;/g, '&');
+      if (name === 'style') {
+        // Not in the allow-list above on purpose: handled here, value-checked,
+        // and it must run before the allow-list check or it never runs at all.
+        if (!SAFE_STYLE_TAGS.has(tag) || seen.has('style')) continue;
+        const clean = safeStyle(value);
+        if (!clean) continue;
+        seen.add('style');
+        attrs += ` style="${esc(clean)}"`;
+        continue;
+      }
+      if (!allowed.includes(name) || seen.has(name)) continue;
       if (URL_ATTRS.has(name)) {
         value = safeUrl(value);
         if (!value || (tag === 'iframe' && !safeYouTubeEmbed(value))) continue;

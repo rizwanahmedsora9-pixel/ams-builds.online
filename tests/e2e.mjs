@@ -225,6 +225,21 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   assert.match(editor.text, /data-is-new="0"/, 'edit has its own state');
   assert.match(editor.text, /id="editor-mode-switch"/, 'Text/HTML switch is present');
   assert.match(editor.text, /id="editor-status" role="status"/, 'the switch reports its state');
+  // Classic must never hide its own switch: the bar holding Classic/Modern
+  // stays visible in both skins, and the rendered skin class is the chosen one.
+  assert.doesNotMatch(editor.text, /is-classic \.ams-editor-bar\{display:none\}/, 'classic does not hide the Classic/Modern switch');
+  assert.match(editor.text, /class="ams-editor is-modern" id="content-editor"/, 'editor renders its initial skin class');
+  assert.match(editor.text, /applySkin\(skin\)/, 'boot keeps the remembered skin instead of resetting it');
+  // Images get size/align controls and drag anchors, inserted at 50% not full width.
+  assert.match(editor.text, /id="image-tools"/, 'selected-image toolbar is present');
+  assert.match(editor.text, /data-img-size="50"/, 'image size presets are present');
+  assert.match(editor.text, /data-img-align="left"/, 'image alignment controls are present');
+  assert.match(editor.text, /id="img-overlay"/, 'image resize anchors overlay is present');
+  assert.match(editor.text, /data-handle="se"/, 'image corner drag anchor is present');
+  assert.match(editor.text, /image-block align-center" style="width:50%"/, 'inserted images start at 50%, centred');
+  assert.match(editor.text, /if\(mode==='html'&&!hasRawBlock\(ta\.value\)\)toText\(\)/, 'inserting an image switches HTML mode to Text so its anchors show');
+  assert.match(editor.text, /visual\.addEventListener\('input',positionOverlay\)/, 'anchors follow the image while typing');
+  assert.match(editor.text, /window\.addEventListener\('pointermove',move\)/, 'anchor drags are tracked on the window, not just the handle');
 
   const pageList = await get(`${admin}/pages`);
   for (const label of ['Add Page', 'All', 'Published', 'Draft', 'Search Pages', 'Bulk actions', 'Comments', 'Date']) {
@@ -763,7 +778,28 @@ test('12f. plugins and appearance: snippets, built-ins, custom CSS and widgets',
 
   await adminPost(`/plugins/${pluginId}/delete`, {});
   assert.doesNotMatch((await anon('/')).text, /name="e2e-plugin"/);
-  log('snippets inject/toggle/delete, sitemap+robots+RSS switch off and on, custom CSS/head/footer and footer widgets render');
+
+  // Search Console Verification built-in: paste the whole Google tag, boom.
+  assert.match((await get(`${admin}/plugins`)).text, /Search Console Verification/, 'verification plugin is listed as built-in');
+  assert.match((await get(`${admin}/plugins`)).text, /\/plugins\/search-verification/, 'verification plugin has a Configure link');
+  const verifyPage = await get(`${admin}/plugins/search-verification`);
+  assert.match(verifyPage.text, /Google Search Console/, 'verification screen explains Google');
+  assert.match(verifyPage.text, /Save &amp; activate/, 'verification screen is one paste-and-save form');
+  assert.match((await adminPost('/plugins/search-verification', {
+    verify_google: '<meta name="google-site-verification" content="e2eGoogleToken_123-ABC">',
+    verify_bing: 'e2eBingToken1234567890',
+    verify_yandex: '',
+  })).location, /ok=/, 'pasting a full Google tag saves');
+  const verifiedHome = await anon('/');
+  assert.match(verifiedHome.text, /<meta name="google-site-verification" content="e2eGoogleToken_123-ABC">/, 'Google tag is live in <head>');
+  assert.match(verifiedHome.text, /<meta name="msvalidate\.01" content="e2eBingToken1234567890">/, 'bare Bing code becomes a tag');
+  await adminPost('/plugins/toggle', { key: 'search-verification' });
+  assert.doesNotMatch((await anon('/')).text, /google-site-verification/, 'deactivating the plugin removes the tags');
+  await adminPost('/plugins/toggle', { key: 'search-verification' });
+  assert.match((await anon('/')).text, /google-site-verification/, 'reactivating brings the tags back');
+  await adminPost('/plugins/search-verification', { verify_google: '', verify_bing: '', verify_yandex: '' });
+  assert.doesNotMatch((await anon('/')).text, /google-site-verification/, 'clearing the code removes the tag');
+  log('snippets inject/toggle/delete, sitemap+robots+RSS switch off and on, custom CSS/head/footer, footer widgets and Search Console verification render');
 });
 
 test('12g. tools: redirects, export/import, backups, health and cache', async () => {

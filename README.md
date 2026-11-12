@@ -206,7 +206,7 @@ autosaved and versioned, and no screen needs JavaScript to work.
 | Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes** (store, installed, editor), **Templates**, **Menus**, **Widgets**, **Identity** |
-| Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
+| Plugins | Built-in XML sitemap, robots.txt, RSS feed and **Search Console Verification** (paste Google/Bing/Yandex meta tag → live in `<head>`) can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects, JSON import/export (v2, includes themes), server-stored backups, site health with performance budgets, audit log, page-cache reset |
 | Settings | Site identity and favicon, reading (home page, posts per page, permalinks, default editor), discussion, domains and the admin URL |
@@ -223,6 +223,12 @@ it is remembered on that device; change the site-wide default under
 **Settings → Reading → Default editor** (`Ask every time`, `Modern editor`,
 `Classic editor`). You can switch instantly from the **Classic / Modern** buttons
 inside the editor at any time — the content is the same either way.
+
+Inserted images start at **50% width, centred** — never stretched across the whole
+post. In the Text editor, click any image to select it: corner **anchors** appear
+that you can drag to resize, plus a bar with **S / M / L / Full** presets, a width
+slider and **Left / Center / Right** alignment. The size and alignment are saved
+with the post, so the published page shows the image exactly as placed.
 
 The **Text** and **HTML** tabs show the same content: Text is the visual editor and
 HTML is the underlying markup. Switching back and forth keeps everything, and both
@@ -272,8 +278,14 @@ content. Comment bodies are stored as plain text and escaped on output.
 
 **Plugins** has two halves:
 
-- **Built-in**: XML sitemap (`/sitemap.xml`), robots.txt (`/robots.txt`) and RSS
-  (`/feed.xml`). Each can be deactivated and comes back instantly.
+- **Built-in**: XML sitemap (`/sitemap.xml`), robots.txt (`/robots.txt`), RSS
+  (`/feed.xml`) and **Search Console Verification**. Each can be deactivated and
+  comes back instantly. Verification is paste-and-go: **Plugins → Search Console
+  Verification → Configure**, paste the whole `<meta name="google-site-verification" …>`
+  tag Google gives you (or only the code inside `content="…"`, Bing and Yandex
+  work the same way), **Save & activate**, then press **Verify** in Search Console.
+  The tag is printed in `<head>` on every public page; clear the box or deactivate
+  the plugin to remove it.
 - **Your plugins**: snippets of HTML injected into `<head>` or before `</body>` on
   every public page — analytics, verification tags, chat widgets. They run after
   the active theme.
