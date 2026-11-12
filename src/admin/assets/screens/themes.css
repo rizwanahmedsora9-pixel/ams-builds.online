@@ -63,6 +63,7 @@
 
 /* ----------------------------------------------------------- live preview */
 
-.customizer__bar { position: sticky; top: 0; z-index: 2; }
+/* The bar itself is styled in appearance.css (one definition, so the two
+   screens cannot disagree about where it sticks or how high it floats). */
 .customizer__bar .row { align-items: center; flex-wrap: wrap; gap: var(--space-2); }
-.customizer__devices { display: inline-flex; gap: var(--space-1); }
+.customizer__devices { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); }

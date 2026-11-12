@@ -187,6 +187,7 @@ ${open ? html`<div class="rail__sub">${children.map((ch) => html`<a href="${base
   <div class="rail__foot">
     <a class="rail__item" href="${base}/preferences"${activeKey === 'preferences' ? raw(' aria-current="page"') : raw('')} title="Preferences">${icon('settings', { cls: 'rail__ico' })}<span class="rail__label">Preferences</span></a>
     <form method="post" action="${base}/density">${csrfField(c)}<button type="submit" title="Switch density">${icon('grid', { cls: 'rail__ico' })}<span class="rail__label">${prefs.density === 'compact' ? 'Comfortable view' : 'Compact view'}</span></button></form>
+    ${railCollapseSwitch()}
   </div>
 </nav>`;
 }
@@ -195,7 +196,7 @@ function renderUserMenu(c: Ctx, prefs: { scheme: string; density: string }, path
   const base = c.var.base;
   const user = c.var.user;
   return html`<details class="usermenu">
-  <summary aria-label="Account menu"><span class="avatar" aria-hidden="true">${user.username.slice(0, 1)}</span><span>${user.username}</span></summary>
+  <summary aria-label="Account menu"><span class="avatar" aria-hidden="true">${user.username.slice(0, 1)}</span><span class="usermenu__name">${user.username}</span></summary>
   <div class="usermenu__panel">
     <span class="usermenu__label">${user.role} · signed in</span>
     <a href="${base}/profile">${icon('user')} Profile</a>
@@ -213,14 +214,24 @@ function renderUserMenu(c: Ctx, prefs: { scheme: string; density: string }, path
 }
 
 /**
- * Collapse control. A GET link, so it works without JavaScript and keeps the
- * collapsed state in a cookie the server reads on the next request. It sits in
- * the top bar because the rail itself is hidden when collapsed.
+ * The in-rail collapse switch. A <label> for the `#side-c` checkbox the CSS
+ * reads, so collapsing works with no JavaScript at all. It has to live *inside*
+ * `.shell`: every collapsed-rail rule is written `#side-c:checked ~ .shell …`,
+ * and a control rendered outside the shell would never be styled by them (it
+ * would also keep its text while the rail is only 3.75rem wide).
  */
-function railCollapseControl(base: string, prefs: { railCollapsed: boolean }, path: string, search: string): Raw {
-  const back = encodeURIComponent(path + search);
-  return html`<label for="side-c" class="rail__collapse" title="Collapse or expand the menu">${icon('chevron-left', { cls: 'ico--sm' })}<span>Collapse Menu</span></label>
-<a class="rail-toggle" href="${base}/rail/${prefs.railCollapsed ? 'open' : 'collapsed'}?next=${encodeURIComponent(path + search)}" title="${prefs.railCollapsed ? 'Expand the menu' : 'Collapse the menu'}">${icon('chevron-right', { cls: 'ico--sm' })}<span class="sr-only">Toggle menu</span></a>`;
+function railCollapseSwitch(): Raw {
+  return html`<label for="side-c" class="rail__collapse" title="Collapse or expand the menu">${icon('chevron-left', { cls: 'ico--sm' })}<span class="rail__label">Collapse Menu</span></label>`;
+}
+
+/**
+ * Expand control for the collapsed rail. A GET link, so it works without
+ * JavaScript and keeps the collapsed state in a cookie the server reads on the
+ * next request. It sits in the top bar because the rail itself is too narrow to
+ * hold it when collapsed.
+ */
+function railToggleButton(base: string, prefs: { railCollapsed: boolean }, path: string, search: string): Raw {
+  return html`<a class="rail-toggle" href="${base}/rail/${prefs.railCollapsed ? 'open' : 'collapsed'}?next=${encodeURIComponent(path + search)}" title="${prefs.railCollapsed ? 'Expand the menu' : 'Collapse the menu'}">${icon('chevron-right', { cls: 'ico--sm' })}<span class="sr-only">Toggle menu</span></a>`;
 }
 
 /**
@@ -304,11 +315,14 @@ export async function layout(c: Ctx, title: string, body: Raw, _active = '', opt
     /* settings not readable yet */
   }
 
-  const page = html`<header class="topbar">
+  const page = html`<input type="checkbox" id="nav-t" aria-hidden="true" tabindex="-1">
+<input type="checkbox" id="side-c" aria-hidden="true" tabindex="-1"${prefs.railCollapsed ? raw(' checked') : raw('')}>
+<header class="topbar">
   <label for="nav-t" class="burger" aria-label="Menu">${icon('menu')}</label>
-  <a class="topbar__brand" href="${base}">${icon('globe')}<span>${siteTitle || 'Dashboard'}</span></a>
+  <a class="topbar__brand" href="${base}">${icon('globe')}<span class="topbar__title">${siteTitle || 'Dashboard'}</span></a>
   <span class="topbar__spacer"></span>
   <div class="topbar__actions">
+    ${railToggleButton(base, prefs, path, search)}
     <a class="topbar__search" href="${base}/search" id="search-trigger" data-palette-open>
       ${icon('search', { cls: 'ico--sm' })}<span class="topbar__search-label">Search</span><kbd class="topbar__kbd">⌘K</kbd>
     </a>
@@ -316,8 +330,6 @@ export async function layout(c: Ctx, title: string, body: Raw, _active = '', opt
     ${renderUserMenu(c, prefs, path)}
   </div>
 </header>
-<input type="checkbox" id="nav-t" aria-hidden="true" tabindex="-1">
-<input type="checkbox" id="side-c" aria-hidden="true" tabindex="-1"${prefs.railCollapsed ? raw(' checked') : raw('')}>
 <div class="shell">
   ${renderRail(c, groups, activeKey, path, search, prefs)}
   <main class="main${opts.wide ? ' main--wide' : ''}" id="main">
@@ -326,7 +338,6 @@ export async function layout(c: Ctx, title: string, body: Raw, _active = '', opt
     </div>
   </main>
 </div>
-${railCollapseControl(base, prefs, path, search)}
 ${palette(c, prefs)}`;
 
   const doc = `<!doctype html><html lang="en"${documentAttrs(prefs)}>`

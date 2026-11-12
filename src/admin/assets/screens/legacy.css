@@ -28,18 +28,21 @@ textarea.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;f
 .media figcaption{padding:.5rem;font-size:.78rem;word-break:break-all}
 .media .row{padding:0 .5rem .5rem;gap:.3rem}
 .media-admin{width:100%;max-width:100rem}
-.media-heading-row{display:flex;align-items:center;gap:.65rem;margin-bottom:.8rem}
-.media-heading-row h1{font-size:1.45rem;font-weight:500;margin:0}
-.media-upload{position:relative}
+.media-heading-row{display:flex;align-items:center;flex-wrap:wrap;gap:.65rem;margin-bottom:.8rem;position:relative}
+.media-heading-row h1{font-size:1.45rem;font-weight:500;margin:0;min-width:0;overflow-wrap:anywhere}
+/* The upload panel is positioned by the heading row, not by the button: the
+   button sits right after the title, so a panel hanging off its right edge ran
+   off the left of the screen and covered the heading. */
+.media-upload{position:static}
 .media-upload summary{list-style:none;cursor:pointer}
 .media-upload summary::-webkit-details-marker{display:none}
-.media-upload-form{position:absolute;top:calc(100% + .5rem);right:0;z-index:5;width:min(30rem,calc(100vw - 2rem));padding:1rem;background:var(--surface);border:1px solid var(--line);border-radius:.5rem;box-shadow:var(--shadow-lg)}
+.media-upload-form{position:absolute;top:calc(100% + .5rem);left:0;right:auto;z-index:5;width:min(30rem,100%);padding:1rem;background:var(--surface);border:1px solid var(--line);border-radius:.5rem;box-shadow:var(--shadow-lg)}
 .media-upload-form input[type=file]{width:100%;padding:.4rem;border:1px solid var(--line);border-radius:.35rem;background:var(--bg);color:var(--fg)}
 .media-upload-form .hint{margin:.5rem 0 .8rem}
 .media-toolbar{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;padding:.8rem 1rem;margin-bottom:1rem;background:var(--surface);border:1px solid var(--line)}
 .media-toolbar-left{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
 .media-view-toggle{display:flex;align-items:center;gap:.15rem}
-.media-view-toggle a{display:inline-flex;align-items:center;justify-content:center;width:1.8rem;height:1.8rem;color:var(--muted);text-decoration:none;font-size:1.2rem}
+.media-view-toggle a{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:1.8rem;height:1.8rem;line-height:1;color:var(--muted);text-decoration:none;font-size:1.2rem}
 .media-view-toggle a.current{color:var(--fg)}
 .media-filter-form{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
 .media-filter-form select{width:auto;min-width:8rem;padding:.38rem .55rem;border-radius:.2rem;background:var(--surface);font-size:.86rem}
@@ -60,7 +63,7 @@ textarea.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;f
 .media-gallery .media-item-actions{display:flex;align-items:center;flex-wrap:wrap}
 .media-gallery .media-select{position:absolute;z-index:2;top:.45rem;left:.45rem;display:flex;align-items:center;justify-content:center;width:1.55rem;height:1.55rem;margin:0;border-radius:.25rem;background:var(--surface);box-shadow:var(--shadow-sm)}
 .media-gallery .media-select input{width:1rem;height:1rem;accent-color:var(--accent)}
-.media-file-icon{display:inline-flex;align-items:center;justify-content:center;width:4.4rem;height:3.3rem;border:1px solid var(--line);border-radius:.3rem;background:var(--surface);color:var(--muted);font-size:.75rem;font-weight:700;letter-spacing:.04em}
+.media-file-icon{display:inline-flex;align-items:center;justify-content:center;max-width:100%;overflow:hidden;width:4.4rem;height:3.3rem;border:1px solid var(--line);border-radius:.3rem;background:var(--surface);color:var(--muted);font-size:.75rem;font-weight:700;letter-spacing:.04em}
 .media-list-wrap{width:100%;overflow-x:auto;background:var(--surface);border:1px solid var(--line)}
 .media-list-table{width:100%;min-width:48rem;border-collapse:collapse;background:var(--surface);font-size:.86rem}
 .media-list-table th,.media-list-table td{text-align:left;padding:.6rem .55rem;border-top:1px solid var(--line);vertical-align:middle}
@@ -94,7 +97,7 @@ textarea.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;f
 }
 .handle{cursor:grab;touch-action:none;user-select:none;padding:.6rem .3rem;color:var(--muted);letter-spacing:-.25em}
 .mi-btns{display:flex;gap:.2rem}
-.mi-btns button{width:2.1rem;height:2.1rem;border:1px solid var(--line);border-radius:.4rem;background:var(--surface);color:var(--fg);font:inherit;cursor:pointer}
+.mi-btns button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:2.1rem;height:2.1rem;border:1px solid var(--line);border-radius:.4rem;background:var(--surface);color:var(--fg);font:inherit;cursor:pointer}
 .store{display:grid;gap:.8rem;grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))}
 .store-item{margin:0;display:flex;flex-direction:column}
 .store-item h3{margin:.7rem 0 .2rem;font-size:1.05rem}
@@ -113,7 +116,7 @@ form.inline{display:inline}
 .list li.wrap .t a{white-space:normal}
 .table td.actions{text-align:right;white-space:nowrap}
 .posts-admin{width:100%;max-width:100rem}
-.posts-heading-row{display:flex;align-items:center;gap:.55rem;margin-bottom:.7rem}
+.posts-heading-row{display:flex;align-items:center;flex-wrap:wrap;gap:.55rem;margin-bottom:.7rem}
 .posts-heading-row h1{font-size:1.55rem;font-weight:500;margin:0}
 .posts-add{padding:.32rem .75rem;border-radius:.2rem;font-size:.87rem;font-weight:500}
 .posts-add.btn.ghost{background:var(--surface)}
@@ -148,6 +151,9 @@ form.inline{display:inline}
 .posts-title-link{font-weight:600;text-decoration:none}
 .post-row-actions{display:flex;align-items:center;gap:.35rem;height:0;overflow:hidden;font-size:.78rem;opacity:0;transition:opacity .12s}
 .posts-table tr:hover .post-row-actions,.posts-table tr:focus-within .post-row-actions{height:auto;opacity:1}
+/* No hover on a touch screen: keep the actions there, or the only path to a
+   post from the old table is a pointer. */
+@media (hover:none){.post-row-actions{height:auto;opacity:1}}
 .posts-date-cell{white-space:nowrap}
 .posts-date-cell strong,.posts-date-cell time{display:block;font-size:.82rem;font-weight:400}
 .posts-date-cell strong{color:var(--fg)}
@@ -172,7 +178,7 @@ form.inline{display:inline}
 .pill.off{color:var(--muted)}
 .widget-slot{border-top:1px solid var(--line);padding-top:.9rem;margin-top:.9rem}
 .widget-slot:first-of-type{border-top:0;padding-top:0;margin-top:0}
-.comment-body-preview{color:var(--muted);font-size:.86rem;margin-top:.25rem;white-space:pre-wrap}
+.comment-body-preview{color:var(--muted);font-size:.86rem;margin-top:.25rem;white-space:pre-wrap;overflow-wrap:anywhere}
 
 /* ---------------------------------------------------------- preferences page */
 .pref-grid{display:grid;gap:var(--space-2);margin-top:var(--space-3)}
@@ -182,5 +188,6 @@ form.inline{display:inline}
 .pref-option.is-on{border-color:var(--accent);background:var(--accent-soft)}
 .pref-option input{margin-top:.15rem}
 .pref-option__body{display:flex;flex-direction:column;gap:.15rem;min-width:0}
-.pref-option__body b{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-base);color:var(--fg)}
-.pref-option__body span{color:var(--muted);font-size:var(--text-sm)}
+.pref-option__body b{display:flex;align-items:center;gap:var(--space-2);min-width:0;font-size:var(--text-base);color:var(--fg)}
+.pref-option__body b .ico{flex:0 0 auto}
+.pref-option__body span{color:var(--muted);font-size:var(--text-sm);overflow-wrap:anywhere}
