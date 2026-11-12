@@ -52,6 +52,8 @@ export type ContentRow = {
   published_at: string | null;
   updated_by?: number | null;
   menu_order?: number;
+  /** Parent page for the Pages hierarchy; posts always leave this empty. */
+  parent_id?: number | null;
   pinned?: number;
   /** Theme template that renders this item; '' means the default for its kind. */
   template?: string;

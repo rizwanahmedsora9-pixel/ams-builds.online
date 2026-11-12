@@ -552,6 +552,10 @@ test('an upgrade path: a database without the Phase 2 tables still works', async
   db.exec('DROP TABLE content_revisions');
   db.exec('DROP TABLE content_lock');
   db.exec("UPDATE settings SET value='2' WHERE key='schema_version'");
+  // Simulate a genuinely old Pages schema too; migration 8 must add the new
+  // nullable parent link while preserving existing rows.
+  db.exec('DROP INDEX IF EXISTS idx_content_parent');
+  db.exec('ALTER TABLE content DROP COLUMN parent_id');
   db.close();
 
   const created = await panel.adminPost('/posts/save', { title: 'Pre Migration Post', body: '<p>Old install.</p>', status: 'draft' });
@@ -578,6 +582,7 @@ test('an upgrade path: a database without the Phase 2 tables still works', async
   assert.equal(run.status, 303);
   const after = await panel.adminPost(`/posts/${id}/autosave`, { title: 'Pre Migration Post', body: '<p>Typed now.</p>' });
   assert.equal(after.status, 200, 'after the update, autosave works');
+  assert.match((await panel.get(`${panel.admin}/pages/new`)).text, /id="page-parent"/, 'the same update adds the parent-page control to old sites');
 });
 
 /* ---------------------------------------------------------------- Phase 3 */
@@ -1017,7 +1022,7 @@ test('phase 4: a page template override is offered in the editor and renders pub
 
   // A template the theme does not have is not stored: the default renders instead.
   const list = (await panel.get(`${panel.admin}/pages`)).text;
-  const id = list.match(/Atlas Landing[\s\S]{0,300}?\/pages\/(\d+)/)?.[1];
+  const id = list.match(/<a class="row-title" href="\/admin-panel\/pages\/(\d+)"[^>]*>Atlas Landing<\/a>/)?.[1];
   assert.ok(id, 'the page is listed');
   await panel.adminPost('/pages/save', {
     id, title: 'Atlas Landing', slug: 'atlas-landing', body: '<p>Wide body</p>', status: 'published', template: 'no-such-template',
@@ -1278,7 +1283,7 @@ test('phase 6: every mutation writes an audit entry a person can read', async ()
 
   // A delete is recorded too: the answer to "who removed that" is in the log.
   const list = (await panel.get(`${panel.admin}/pages`)).text;
-  const id = list.match(/Audit Trail Page[\s\S]{0,400}?\/pages\/(\d+)/)?.[1];
+  const id = list.match(/<a class="row-title" href="\/admin-panel\/pages\/(\d+)"[^>]*>Audit Trail Page<\/a>/)?.[1];
   assert.ok(id, 'the page is listed');
   await panel.adminPost(`/pages/${id}/delete`, {});
   assert.match((await panel.get(`${panel.admin}/tools/audit`)).text, /Deleted page \/audit-trail/);

@@ -15,6 +15,7 @@ import type { ThemeBundle } from '../lib/theme-manifest';
 import { clientIp, cspFor, nonceFor, rateCount, rateHit, safeUrl, sameOrigin, stripTags, type CspMode } from '../lib/security';
 import { landingEnabled, landingPlayShown, landingScreenMarkup, parseLandingAudioIds, type LandingAudioTrack } from '../lib/landing';
 import { titleFor } from '../lib/origin';
+import { publicPageHierarchy, type PublicPageHierarchy } from '../lib/page-hierarchy';
 import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
 import { assetMime, cleanAssetPath, isRefusedAsset } from '../lib/theme-manifest';
 
@@ -78,7 +79,7 @@ site.get('/theme-assets/:slug/:path{.+}', async (c) => {
 /* ------------------------------------------------------------------ pages */
 type Resolved =
   | { redirect: string }
-  | { status: 200 | 404; template: string; meta: PageMeta; data: Record<string, unknown> };
+  | { status: 200 | 404; template: string; meta: PageMeta; data: Record<string, unknown>; pageHierarchy?: PublicPageHierarchy };
 
 const SLUG = '[a-z0-9]+(?:-[a-z0-9]+)*';
 
@@ -112,6 +113,7 @@ async function resolve(c: Ctx, settings: Settings, path: string, preview: boolea
         description: page?.seo_description || settings.tagline || undefined, canonical: '/',
       },
       data: { page: page ?? null, posts: await toViews(env, rows, settings), is_home: true },
+      pageHierarchy: row ? await publicPageHierarchy(env, row.id, settings.home_page_id) : undefined,
     };
   }
 
@@ -150,7 +152,10 @@ async function resolve(c: Ctx, settings: Settings, path: string, preview: boolea
     if (row) {
       if (row.id === homeId) return { redirect: '/' };
       const [page] = await toViews(env, [row], settings);
-      return { status: 200, template: templateFor(row, 'page'), meta: metaFor(page, settings, 'website'), data: { page } };
+      return {
+        status: 200, template: templateFor(row, 'page'), meta: metaFor(page, settings, 'website'), data: { page },
+        pageHierarchy: await publicPageHierarchy(env, row.id, settings.home_page_id),
+      };
     }
   }
 
@@ -386,6 +391,7 @@ site.get('*', async (c) => {
       ? { ...(previewTheme ? await themeValues(c.env, previewTheme.slug) : themeSettings ?? {}), ...unsaved.settings }
       : previewTheme ? await themeValues(c.env, previewTheme.slug) : themeSettings,
     tokenOverrides: unsaved?.tokens,
+    pageHierarchy: result.pageHierarchy,
     data: {
       ...result.data,
       comment_notice: url.searchParams.get('comment') || undefined,

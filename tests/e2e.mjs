@@ -755,6 +755,87 @@ test('12a. menus: pages join the main menu with one tick; reorder, custom links,
   log('tick adds page to header, link follows slug, reorder/rename/custom link saved, unsafe link dropped, footer menu works');
 });
 
+test('12a1. pages: parent/child hierarchy, hidden header children, and public browsing', async () => {
+  const createPage = async (title, slug, parentId, inMenu = false) => {
+    const fields = { title, slug, body: `<p>${title} section.</p>`, status: 'published' };
+    if (parentId) fields.parent_id = String(parentId);
+    if (inMenu) fields.in_menu = '1';
+    const saved = await adminPost('/pages/save', fields);
+    assert.equal(saved.status, 303, `created ${title}`);
+    return idFrom(saved.location);
+  };
+
+  const moviesId = await createPage('Movies', 'movies-directory', null, true);
+  const hollywoodId = await createPage('Hollywood', 'hollywood-directory', moviesId);
+  const bollywoodId = await createPage('Bollywood', 'bollywood-directory', moviesId);
+  const azId = await createPage('Browse A to Z', 'movies-a-to-z', hollywoodId);
+
+  const panelPages = await get(`${admin}/pages`);
+  assert.match(panelPages.text, /Page hierarchy/);
+  assert.match(panelPages.text, /Parent: Movies/);
+  assert.match(panelPages.text, /Parent: Hollywood/);
+
+  const hollywoodEditor = await get(`${admin}/pages/${hollywoodId}`);
+  const parentSelect = hollywoodEditor.text.match(/<select id="page-parent"[\s\S]*?<\/select>/)?.[0] || '';
+  assert.match(parentSelect, new RegExp(`<option value="${moviesId}" selected>Movies`), 'the selected parent is shown in the editor');
+  const moviesEditor = await get(`${admin}/pages/${moviesId}`);
+  const moviesParentSelect = moviesEditor.text.match(/<select id="page-parent"[\s\S]*?<\/select>/)?.[0] || '';
+  assert.doesNotMatch(moviesParentSelect, new RegExp(`<option value="${hollywoodId}"`), 'a child cannot be selected as its parent');
+
+  const movieHub = await anon('/movies-directory');
+  assert.equal(movieHub.status, 200);
+  assert.match(movieHub.text, /class="page-children"/);
+  assert.match(movieHub.text, /href="\/hollywood-directory"[^]*Hollywood/);
+  assert.match(movieHub.text, /href="\/bollywood-directory"[^]*Bollywood/);
+  const headerLinks = nav(movieHub.text);
+  assert.ok(headerLinks.includes('Movies=/movies-directory'), 'the parent page is in the header');
+  assert.ok(!headerLinks.some((link) => /Hollywood|Bollywood/.test(link)), 'child pages stay out of the crowded header');
+
+  const hollywood = await anon('/hollywood-directory');
+  assert.match(hollywood.text, /class="page-breadcrumbs"[^]*Movies[^]*Hollywood/);
+  assert.match(hollywood.text, /href="\/movies-a-to-z"[^]*Browse A to Z/);
+  const cycle = await adminPost('/pages/save', {
+    id: String(moviesId), title: 'Movies', slug: 'movies-directory', body: '<p>Movies.</p>', status: 'published',
+    parent_id: String(hollywoodId), in_menu: '1',
+  });
+  assert.match(decodeURIComponent(cycle.location), /cannot be its own parent or a child/);
+
+  // Choosing an existing child as the site home page also detaches it from its
+  // former parent, while preserving the rest of the settings and playlist.
+  const settingsDump = JSON.parse((await get(`${admin}/tools/export/download`)).text);
+  const savedSettings = settingsDump.settings;
+  const originalHomeId = Number(savedSettings.home_page_id);
+  assert.ok(originalHomeId, 'an original home page is configured');
+  const settingsFields = {
+    site_title: savedSettings.site_title, tagline: savedSettings.tagline || '',
+    timezone: savedSettings.timezone, primary_domain: settingsDump.site.hostname,
+    domains: savedSettings.domains || settingsDump.site.hostname, admin_slug: admin.slice(1),
+    home_page_id: String(hollywoodId), favicon: savedSettings.favicon || '',
+    permalink_style: savedSettings.permalink_style, posts_per_page: savedSettings.posts_per_page,
+    default_editor: savedSettings.default_editor, comments_enabled: savedSettings.comments_enabled,
+    comments_require_approval: savedSettings.comments_require_approval, csp: savedSettings.csp,
+    landing_audio_ids: JSON.parse(savedSettings.landing_audio_ids || '[]'),
+  };
+  assert.match((await adminPost('/settings', settingsFields)).location, /ok=/);
+  assert.doesNotMatch((await anon('/')).text, /class="page-breadcrumbs"/, 'selecting a child as home detaches it from its former parent');
+  assert.match((await get(`${admin}/pages/${hollywoodId}`)).text, /home page stays at the top level/);
+  await adminPost('/settings', { ...settingsFields, home_page_id: String(originalHomeId) });
+  const detachedEditor = await get(`${admin}/pages/${hollywoodId}`);
+  const detachedParentSelect = detachedEditor.text.match(/<select id="page-parent"[\s\S]*?<\/select>/)?.[0] || '';
+  assert.ok(detachedParentSelect, 'the former home page has a parent selector again');
+  assert.doesNotMatch(detachedParentSelect, /<option value="\d+" selected>/, 'the former child stays top-level after another page is restored as home');
+
+  // Removing a parent safely detaches its children instead of leaving broken links.
+  await adminPost(`/pages/${hollywoodId}/delete`, {});
+  const detached = await anon('/movies-a-to-z');
+  assert.equal(detached.status, 200);
+  assert.doesNotMatch(detached.text, /class="page-breadcrumbs"/);
+  await adminPost(`/pages/${moviesId}/delete`, {});
+  await adminPost(`/pages/${azId}/delete`, {});
+  await adminPost(`/pages/${bollywoodId}/delete`, {});
+  log('page tree, parent picker, cycle guard, automatic child cards, breadcrumbs, and menu hiding work');
+});
+
 test('12b. themes: upload JSON and zip, activate, replace, download, delete', async () => {
   const bad = [
     ['not json', 'nope.json', 'not valid JSON'],
@@ -1070,17 +1151,49 @@ test('12g. tools: redirects, export/import, backups, health and cache', async ()
   assert.equal(moved.location, '/blog');
   assert.match((await adminPost('/tools/redirects', { from_path: 'bad path', to_url: '/blog' })).location, /err=/);
 
+  const hierarchyParent = idFrom((await adminPost('/pages/save', {
+    title: 'Import Hierarchy Parent', slug: 'import-hierarchy-parent', body: '<p>Import parent.</p>', status: 'published',
+  })).location);
+  const hierarchyChild = idFrom((await adminPost('/pages/save', {
+    title: 'Import Hierarchy Child', slug: 'import-hierarchy-child', body: '<p>Import child.</p>', status: 'published', parent_id: String(hierarchyParent),
+  })).location);
   const exported = await get(`${admin}/tools/export/download`);
   const bundle = JSON.parse(exported.text);
   assert.equal(bundle.format, 'edge-cms-backup');
   assert.ok(bundle.content.length >= 2, 'pages and posts are in the export');
   assert.ok(bundle.users.every((u) => !('password_hash' in u)), 'passwords never leave the database');
 
+  // A backup's database IDs need not match this install. Exercise ID remapping,
+  // restoring a parent after all pages are merged, and the home-page top-level rule.
+  const importParent = bundle.content.find((row) => row.slug === 'import-hierarchy-parent');
+  const importChild = bundle.content.find((row) => row.slug === 'import-hierarchy-child');
+  const homePageId = Number(bundle.settings.home_page_id);
+  const importHome = bundle.content.find((row) => Number(row.id) === homePageId);
+  assert.ok(importParent && importChild && importHome, 'parent, child, and configured home page are exported');
+  const sourceParentId = 9000001;
+  const sourceChildId = 9000002;
+  const sourceHomeId = 9000003;
+  importParent.id = sourceParentId;
+  importChild.id = sourceChildId;
+  importChild.parent_id = sourceParentId;
+  importHome.id = sourceHomeId;
+  importHome.parent_id = sourceParentId;
+  await adminPost('/pages/save', {
+    id: String(hierarchyChild), title: 'Import Hierarchy Child', slug: 'import-hierarchy-child',
+    body: '<p>Import child.</p>', status: 'published', parent_id: '',
+  });
+
   const body = new FormData();
   body.set('_csrf', await csrf());
-  body.set('file', new File([exported.text], 'export.json', { type: 'application/json' }));
+  body.set('file', new File([JSON.stringify(bundle)], 'export.json', { type: 'application/json' }));
   const imported = await request(`${admin}/tools/import`, { method: 'POST', body });
   assert.match(imported.location, /ok=Imported/);
+  const childEditor = await get(`${admin}/pages/${hierarchyChild}`);
+  assert.match(childEditor.text, new RegExp(`<option value="${hierarchyParent}" selected>Import Hierarchy Parent`), 'import remaps and restores child links');
+  const homeEditor = await get(`${admin}/pages/${homePageId}`);
+  assert.match(homeEditor.text, /name="parent_id" value=""[^]*home page stays at the top level/i, 'the configured home page has no parent control');
+  assert.doesNotMatch((await anon('/')).text, /class="page-breadcrumbs"/, 'import keeps the configured home page top-level');
+  assert.match((await anon('/import-hierarchy-child')).text, /class="page-breadcrumbs"[^]*Import Hierarchy Parent[^]*Import Hierarchy Child/);
   const postText = (await anon(currentPostUrl())).text;
   assert.equal((postText.match(/Thanks for reading!/g) || []).length, 1, 'importing twice does not duplicate comments');
 

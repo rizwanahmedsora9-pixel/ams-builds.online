@@ -108,8 +108,7 @@ empty leftovers, so the stored markup is as clean as the writing.
 - **Fast fixes from the list.** Each row has Edit · Quick edit · Duplicate · History · View · Pin ·
   Preview in theme. *Quick edit* changes title, slug, status, date, categories and tags in place;
   *Duplicate* makes a draft copy; *Pin* floats a row to the top.
-- **Page order.** The Pages screen has an *Order* panel. The same order reaches themes through
-  `{{#each pages}}`, so a menu built from pages matches what you set.
+- **Page hierarchy and order.** In the page editor, **Parent page** nests a page under another page; the Pages screen shows the resulting tree. A parent page automatically lists its published children as linked cards, and child pages show breadcrumbs back up the tree. Keep child pages out of the header by leaving **Show in the main menu** unchecked. Page URLs stay at their existing `/<slug>` addresses when you move them, so links do not break. The *Page order* panel sets sibling order and the same ordering reaches themes through `{{#each pages}}`.
 - **Fixed first-visit landing screen.** The welcome screen is built into the site and cannot be
   replaced by a CMS Page or sample content. It takes the company name from **Settings → Site title**,
   the welcome line from **Settings → Tagline**, and an optional image from **Appearance → Identity**.
@@ -145,7 +144,7 @@ blank 500.
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
 | Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; the full editor (formatting bar, links, images with caption/alt/link, page breaks, word count), excerpt, featured image, SEO, draft/published/scheduled |
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). Images are compressed to WebP in the browser before upload, in every common format (JPG/JFIF, PNG/APNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, JXL, ICO, SVG). The editor's media picker uses the same library and has two tabs: **Library** and **Upload from device** |
-| Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; a tick adds a page to the header menu |
+| Pages | Same list pattern as Posts, plus a **Page hierarchy** tree, **Parent page** selector and **Page order** panel; published children become linked cards with breadcrumbs; status/date filters and bulk publish/draft/delete; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes**, **Templates**, **Menus**, **Widgets** (the areas the theme declares), **Identity** (logo, favicon, social image) |
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
