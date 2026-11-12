@@ -113,3 +113,4 @@ img { max-width: 100%; height: auto; display: block; }
   :root { --p-bg: var(--bg, #f6f7f9); --p-ink: var(--text, #0e1116); --p-soft: var(--text-muted, #5a6472); --p-line: var(--line, #dfe3e9); }
   .button, .comments button { color: #0e1116; }
 }
+.prose figure.image-block{margin:1.5em auto;max-width:100%}.prose figure.image-block img{width:100%}.prose figure.image-block figcaption{font-size:.88rem;text-align:center;margin-top:.4rem;opacity:.7}.prose .align-left{float:left;margin:.3em 1.2em 1em 0}.prose .align-right{float:right;margin:.3em 0 1em 1.2em}.prose .align-center{margin-left:auto;margin-right:auto}@media(max-width:640px){.prose .align-left,.prose .align-right{float:none;margin-left:auto;margin-right:auto}}

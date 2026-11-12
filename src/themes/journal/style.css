@@ -123,3 +123,4 @@ img { max-width: 100%; height: auto; display: block; }
 @media (prefers-color-scheme: dark) {
   :root { --j-bg: var(--bg, #17150f); --j-ink: var(--text, #ece7dc); --j-soft: var(--text-muted, #a49b8b); --j-line: var(--line, #322d24); }
 }
+.content figure.image-block{margin:1.5em auto;max-width:100%}.content figure.image-block img{width:100%}.content figure.image-block figcaption{color:var(--muted,#666);font-size:.88rem;text-align:center;margin-top:.4rem}.content .align-left{float:left;margin:.3em 1.2em 1em 0}.content .align-right{float:right;margin:.3em 0 1em 1.2em}.content .align-center{margin-left:auto;margin-right:auto}@media(max-width:640px){.content .align-left,.content .align-right{float:none;margin-left:auto;margin-right:auto}}

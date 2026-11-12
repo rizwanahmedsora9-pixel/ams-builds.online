@@ -706,8 +706,12 @@ const EDITOR_CSS = `<style>
 .ams-editor .toolbar{margin-bottom:.4rem}
 .ams-editor textarea.code,.ams-editor .visual-editor{min-height:22rem;margin:0}
 .ams-editor-status{margin:.35rem 0 0;color:var(--muted);font-size:.78rem;min-height:1.1em}
-/* Classic: compact WP-style chrome — small square buttons over a plain box. */
-.ams-editor.is-classic .ams-editor-bar{display:none}
+/* Classic: compact WP-style chrome — small square buttons over a plain box.
+   The bar stays visible: it holds the Classic/Modern switch itself, so hiding
+   it (the old rule) stranded the user in Classic with no way back. */
+.ams-editor.is-classic .ams-editor-bar{display:flex;margin-bottom:.3rem}
+.ams-editor.is-classic .ams-editor-bar .hint{display:none}
+.ams-editor.is-classic .ams-editor-switch button{padding:.2rem .55rem;font-size:.78rem}
 .ams-editor.is-classic .toolbar{gap:.15rem;margin:0;padding:.35rem;border:1px solid var(--line);border-bottom:0;border-radius:.35rem .35rem 0 0;background:var(--bg)}
 .ams-editor.is-classic .toolbar button{padding:.2rem .45rem;font-size:.8rem;border-radius:.2rem;background:var(--card)}
 .ams-editor.is-classic textarea.code,.ams-editor.is-classic .visual-editor{border-radius:0 0 .35rem .35rem;min-height:24rem}
@@ -722,6 +726,32 @@ const EDITOR_CSS = `<style>
 .ams-mode-dialog .ams-mode-option b{display:block;font-size:.95rem;margin:0 0 .2rem}
 .ams-mode-dialog .ams-mode-option span{display:block;color:var(--muted);font-size:.82rem;font-weight:400}
 .ams-mode-dialog .ams-mode-note{display:flex;align-items:center;gap:.5rem;font-weight:400;font-size:.85rem;color:var(--muted);margin:.2rem 0 0}
+/* Images: inserted at a sane 50% (never full-bleed by default), click to select,
+   then size with the bar, the % slider or by dragging a corner anchor. The width
+   and alignment are saved as inline style/class, so the public page matches. */
+.ams-editor{position:relative}
+.visual-editor figure.image-block{margin:1em auto;max-width:100%}
+.visual-editor figure.image-block img,.visual-editor img.is-selected{max-width:100%}
+.visual-editor figure.image-block img{width:100%;height:auto;display:block}
+.visual-editor figure.image-block figcaption{font-size:.85rem;color:var(--muted);text-align:center;padding:.35rem}
+.visual-editor .align-left{float:left;margin:.3em 1em 1em 0}
+.visual-editor .align-right{float:right;margin:.3em 0 1em 1em}
+.visual-editor .align-center{margin-left:auto;margin-right:auto}
+.visual-editor img.is-selected,.visual-editor figure.image-block.is-selected{outline:2px solid var(--accent);outline-offset:2px}
+.image-tools{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.4rem 0;padding:.4rem .5rem;border:1px solid var(--accent);border-radius:.45rem;background:var(--bg);font-size:.82rem}
+.image-tools[hidden]{display:none!important}
+.image-tools b{margin-right:.15rem}
+.image-tools button{padding:.22rem .55rem;border:1px solid var(--line);border-radius:.3rem;background:var(--card);color:var(--fg);font:inherit;font-size:.8rem;cursor:pointer}
+.image-tools button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.image-tools input[type=range]{width:7rem;accent-color:var(--accent)}
+.image-tools output{min-width:3ch;font-variant-numeric:tabular-nums}
+.img-overlay{position:absolute;z-index:30;pointer-events:none;border:2px solid var(--accent);box-sizing:border-box}
+.img-overlay[hidden]{display:none!important}
+.img-overlay span{position:absolute;width:12px;height:12px;margin:-7px 0 0 -7px;border:2px solid var(--accent);border-radius:2px;background:var(--card);pointer-events:auto;touch-action:none}
+.img-overlay span[data-handle=nw]{left:0;top:0;cursor:nwse-resize}
+.img-overlay span[data-handle=ne]{left:100%;top:0;cursor:nesw-resize}
+.img-overlay span[data-handle=sw]{left:0;top:100%;cursor:nesw-resize}
+.img-overlay span[data-handle=se]{left:100%;top:100%;cursor:nwse-resize}
 </style>`;
 
 /**
@@ -817,6 +847,14 @@ const EDITOR_JS = `<script>
     setTimeout(function(){delete status.dataset.locked;syncMode()},4000);
   }
 
+  // Editor-only state (the selected-image outline) must never be saved.
+  function serializeVisual(){
+    var clone=visual.cloneNode(true);
+    clone.querySelectorAll('.is-selected').forEach(function(el){el.classList.remove('is-selected')});
+    clone.querySelectorAll('img[draggable]').forEach(function(el){el.removeAttribute('draggable')});
+    return clone.innerHTML;
+  }
+
   // Both panes hold the same document at all times: the textarea is the
   // source of truth for HTML, the contenteditable mirrors it when visible.
   function toText(){
@@ -830,7 +868,8 @@ const EDITOR_JS = `<script>
     visual.scrollTop=ta.scrollTop;
   }
   function toHtml(){
-    ta.value=visual.innerHTML;
+    ta.value=serializeVisual();
+    clearImageSelection();
     mode='html';
     visual.hidden=true;ta.hidden=false;
     syncMode();
@@ -1012,12 +1051,12 @@ const EDITOR_JS = `<script>
     var remembered=preferred;
     try{remembered=remembered||localStorage.getItem(SKIN_KEY)||''}catch(e){}
     if(remembered==='classic'||remembered==='modern')applySkin(remembered);
-    else modeDialog.showModal();
+    else if(isNew)modeDialog.showModal();
   }
 
   /* ----------------------------------------------------------- submit */
   form.addEventListener('submit',function(){
-    if(mode==='text')ta.value=visual.innerHTML;
+    if(mode==='text')ta.value=serializeVisual();
     // A real save supersedes any autosave: stop nagging on the way out.
     dirty=false;
     clearInterval(timer);
@@ -1031,7 +1070,7 @@ const EDITOR_JS = `<script>
   var autosaveStatus=document.querySelector('[data-autosave-status]');
   var dirty=false,inflight=false,lastSaved=null,timer=null,unloadArmed=false;
 
-  function currentBody(){return mode==='text'?visual.innerHTML:ta.value}
+  function currentBody(){return mode==='text'?serializeVisual():ta.value}
   function markDirty(){
     dirty=true;
     if(!unloadArmed){
@@ -1143,11 +1182,133 @@ const EDITOR_JS = `<script>
       if(!picker)return;
       picker.open({onPick:function(item){
         var alt=escapeHtml(item.alt||'');
-        insertSnippet('<figure class="image-block"><img src="'+escapeHtml(item.url)+'" alt="'+alt+'" loading="lazy">'+
+        insertSnippet('<figure class="image-block align-center" style="width:50%"><img src="'+escapeHtml(item.url)+'" alt="'+alt+'" loading="lazy">'+
           (alt?'<figcaption>'+alt+'</figcaption>':'')+'</figure>\\n<p></p>');
+        // Anchors only exist in the visual (Text) pane: a new post starts in
+        // HTML mode, so switch over or the just-inserted image can never be
+        // selected or resized. Raw <style>/<script> content stays in HTML.
+        if(mode==='html'&&!hasRawBlock(ta.value))toText();
+        // Select the image just inserted so its size/align anchors are right there.
+        setTimeout(function(){
+          var figs=visual.querySelectorAll('figure.image-block img');
+          for(var i=figs.length-1;i>=0;i--){if(figs[i].getAttribute('src')===item.url){selectImage(figs[i]);break}}
+        },0);
       }});
     });
   }
+
+  /* ------------------------------------------- image size & anchors */
+  // Click an image in Text mode: it gets an outline, four corner anchors you
+  // can drag, and a size/align bar. Width is stored as width:% on the figure
+  // (or the bare <img>), alignment as align-left/center/right — both survive
+  // saving (the sanitizer keeps exactly those) so the page matches the editor.
+  var imageTools=document.getElementById('image-tools');
+  var imgOverlay=document.getElementById('img-overlay');
+  var imgWidth=document.getElementById('img-width'),imgWidthOut=document.getElementById('img-width-out');
+  var selectedImg=null,selectedBlock=null;
+
+  function imageBlockOf(img){var f=img.closest?img.closest('figure'):null;return f||img}
+  function imageWidthPct(){
+    if(!selectedBlock)return 50;
+    var inline=parseFloat((selectedBlock.style&&selectedBlock.style.width)||'');
+    if(inline)return Math.round(inline);
+    var w=selectedImg.getBoundingClientRect().width,host=visual.clientWidth||1;
+    return Math.max(10,Math.min(100,Math.round(w/host*100)));
+  }
+  function syncImageTools(){
+    if(!imageTools||!selectedImg)return;
+    var pct=imageWidthPct();
+    if(imgWidth)imgWidth.value=String(pct);
+    if(imgWidthOut)imgWidthOut.textContent=pct+'%';
+    imageTools.querySelectorAll('[data-img-size]').forEach(function(b){b.setAttribute('aria-pressed',String(Number(b.dataset.imgSize)===pct))});
+    var align=selectedBlock.classList.contains('align-left')?'left':selectedBlock.classList.contains('align-right')?'right':'center';
+    imageTools.querySelectorAll('[data-img-align]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.imgAlign===align))});
+  }
+  function positionOverlay(){
+    if(!imgOverlay||!selectedImg||mode!=='text'){if(imgOverlay)imgOverlay.hidden=true;return}
+    var r=selectedImg.getBoundingClientRect(),b=box.getBoundingClientRect();
+    imgOverlay.hidden=false;
+    imgOverlay.style.left=(r.left-b.left)+'px';
+    imgOverlay.style.top=(r.top-b.top)+'px';
+    imgOverlay.style.width=r.width+'px';
+    imgOverlay.style.height=r.height+'px';
+  }
+  function selectImage(img){
+    clearImageSelection();
+    selectedImg=img;selectedBlock=imageBlockOf(img);
+    selectedBlock.classList.add('is-selected');
+    if(selectedBlock===img)img.classList.add('is-selected');
+    img.setAttribute('draggable','false');
+    if(imageTools)imageTools.hidden=false;
+    syncImageTools();positionOverlay();
+  }
+  function clearImageSelection(){
+    if(selectedBlock)selectedBlock.classList.remove('is-selected');
+    if(selectedImg)selectedImg.classList.remove('is-selected');
+    selectedImg=null;selectedBlock=null;
+    if(imageTools)imageTools.hidden=true;
+    if(imgOverlay)imgOverlay.hidden=true;
+  }
+  function applyImageWidth(pct){
+    if(!selectedBlock)return;
+    pct=Math.max(10,Math.min(100,Math.round(pct)||50));
+    selectedBlock.style.width=pct+'%';
+    if(selectedBlock!==selectedImg)selectedImg.style.width='100%';
+    if(typeof markDirty==='function')markDirty();
+    syncImageTools();positionOverlay();
+  }
+  function applyImageAlign(align){
+    if(!selectedBlock)return;
+    selectedBlock.classList.remove('align-left','align-center','align-right');
+    selectedBlock.classList.add('align-'+align);
+    if(selectedBlock.tagName==='FIGURE'||selectedBlock===selectedImg){/* width keeps the float honest */}
+    if(typeof markDirty==='function')markDirty();
+    syncImageTools();positionOverlay();
+  }
+  if(visual){
+    visual.addEventListener('click',function(e){
+      var img=e.target&&e.target.closest?e.target.closest('img'):null;
+      if(img&&visual.contains(img)){selectImage(img)}
+      else if(e.target===visual||(e.target.closest&&!e.target.closest('figure.image-block')))clearImageSelection();
+    });
+    visual.addEventListener('scroll',positionOverlay);
+    // Typing above the image, or the image finishing loading, moves it: keep
+    // the corner anchors glued to it instead of leaving them floating stale.
+    visual.addEventListener('input',positionOverlay);
+    visual.addEventListener('load',function(e){if(e.target&&e.target.tagName==='IMG')positionOverlay()},true);
+    window.addEventListener('resize',positionOverlay);
+  }
+  if(imageTools){
+    // Keep the editor selection alive when a button is pressed, but let the
+    // width slider receive its own pointer events so it can actually drag.
+    imageTools.addEventListener('mousedown',function(e){if(e.target.closest&&e.target.closest('button'))e.preventDefault()});
+    imageTools.querySelectorAll('[data-img-size]').forEach(function(b){b.addEventListener('click',function(){applyImageWidth(Number(b.dataset.imgSize))})});
+    imageTools.querySelectorAll('[data-img-align]').forEach(function(b){b.addEventListener('click',function(){applyImageAlign(b.dataset.imgAlign)})});
+    var removeBtn=imageTools.querySelector('[data-img-remove]');
+    if(removeBtn)removeBtn.addEventListener('click',function(){
+      if(!selectedBlock)return;
+      var block=selectedBlock;clearImageSelection();block.remove();
+      if(typeof markDirty==='function')markDirty();
+      visual.focus();
+    });
+  }
+  if(imgWidth)imgWidth.addEventListener('input',function(){applyImageWidth(Number(imgWidth.value))});
+  // Drag any corner anchor: horizontal distance becomes the new width.
+  if(imgOverlay)imgOverlay.querySelectorAll('[data-handle]').forEach(function(handle){
+    handle.addEventListener('pointerdown',function(e){
+      if(!selectedImg)return;
+      e.preventDefault();e.stopPropagation();
+      var west=handle.dataset.handle.indexOf('w')!==-1;
+      var startX=e.clientX,startW=selectedImg.getBoundingClientRect().width,host=visual.clientWidth||1;
+      try{handle.setPointerCapture(e.pointerId)}catch(err){/* capture is a nicety; window-level drag still works without it */}
+      function move(ev){applyImageWidth((startW+(west?startX-ev.clientX:ev.clientX-startX))/host*100)}
+      function up(){window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',up)}
+      // On window, not just the 12px handle: a fast drag leaves the handle.
+      window.addEventListener('pointermove',move);
+      window.addEventListener('pointerup',up);
+      window.addEventListener('pointercancel',up);
+    });
+  });
 
   /* ------------------------------------------------------------- boot */
   visual.innerHTML=ta.value;
@@ -1155,7 +1316,9 @@ const EDITOR_JS = `<script>
   // Existing content opens in the visual editor; a new post has nothing to
   // preview yet, so it starts on the HTML tab with the cursor in the source.
   if(!isNew&&!hasRawBlock(ta.value))toText();else syncMode();
-  applySkin(initial);
+  // The skin variable already holds the remembered/dialog choice from the
+  // chooser above; re-applying initial here used to undo it before display.
+  applySkin(skin);
 
   /* -------------------------------------------- title, slug, publish */
   var title=document.getElementById('title'),slug=document.getElementById('slug');
@@ -1272,7 +1435,7 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
         <button type="button" data-editor-mode="html" aria-pressed="true">HTML</button>
       </div>
     </div>
-    <div class="ams-editor is-modern" id="content-editor" data-skin="${initialSkin}">
+    <div class="ams-editor is-${initialSkin}" id="content-editor" data-skin="${initialSkin}">
       <div class="ams-editor-bar">
         <div class="ams-editor-switch" role="group" aria-label="Editor style">
           <button type="button" data-editor-skin-set="classic" aria-pressed="${initialSkin === 'classic' ? 'true' : 'false'}">Classic</button>
@@ -1295,6 +1458,19 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
         <button type="button" id="add-html-block" title="Insert a custom HTML block">&lt;/&gt; HTML block</button>
         <button type="button" id="add-youtube" title="Embed a YouTube video">&#9654; YouTube</button>
       </div>
+      <div id="image-tools" class="image-tools" hidden role="group" aria-label="Selected image size and alignment">
+        <b>Image</b>
+        <button type="button" data-img-size="25">S 25%</button>
+        <button type="button" data-img-size="50">M 50%</button>
+        <button type="button" data-img-size="75">L 75%</button>
+        <button type="button" data-img-size="100">Full 100%</button>
+        <label>Width <input type="range" id="img-width" min="10" max="100" step="1" value="50"> <output id="img-width-out" for="img-width">50%</output></label>
+        <button type="button" data-img-align="left">Left</button>
+        <button type="button" data-img-align="center" aria-pressed="true">Center</button>
+        <button type="button" data-img-align="right">Right</button>
+        <button type="button" data-img-remove>Remove</button>
+      </div>
+      <div id="img-overlay" class="img-overlay" hidden aria-hidden="true"><span data-handle="nw"></span><span data-handle="ne"></span><span data-handle="sw"></span><span data-handle="se"></span></div>
       <div id="visual-editor" class="visual-editor ams-editor-pane" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="content-label" data-placeholder="Write your content here…" hidden></div>
       <textarea id="body" name="body" class="code ams-editor-pane" spellcheck="true">${row?.body ?? ''}</textarea>
       <p class="ams-editor-status" id="editor-status" role="status" aria-live="polite"></p>
