@@ -5,6 +5,7 @@ import { SCHEMA_VERSION } from '../db/migrations';
 import { hashPassword, randomToken } from '../lib/auth';
 import { markInstalled, saveConfig, validAdminSlug } from '../lib/config';
 import { cleanDomain, sameOrigin } from '../lib/security';
+import { displayTitle, siteNameFromHost } from '../lib/origin';
 import { html, raw, shell, type Raw } from '../lib/ui';
 import { defaultTheme } from '../themes/default';
 
@@ -41,6 +42,7 @@ function wizard(v: Values, errors: string[] = []): string {
       <h2>2. Site</h2>
       <label for="title">Site title</label>
       <input type="text" id="title" name="title" value="${v.title}" required maxlength="120">
+      <p class="hint">Leave this as it is to take the name from your domain, whatever domain the site is opened on.</p>
       <label for="domain">Primary domain</label>
       <input type="text" id="domain" name="domain" value="${v.domain}" required autocapitalize="none">
       <p class="hint">Without https://. The site also keeps answering on any other domain routed to this Worker.</p>
@@ -83,7 +85,10 @@ install.get('/', async (c) => {
     return c.redirect('/', 302);
   }
   const host = new URL(c.req.url).host;
-  return c.html(wizard({ username: '', email: '', title: 'My Site', domain: host, slug: 'admin-panel' }), 200, { 'Cache-Control': 'no-store' });
+  // Start from the domain's own name, so a fresh install is already called
+  // something recognisable and keeps following the domain until it is renamed.
+  const suggested = siteNameFromHost(host) || 'My Site';
+  return c.html(wizard({ username: '', email: '', title: suggested, domain: host, slug: 'admin-panel' }), 200, { 'Cache-Control': 'no-store' });
 });
 
 install.post('/', async (c) => {
@@ -109,6 +114,11 @@ install.post('/', async (c) => {
 
   const now = new Date().toISOString();
   const host = new URL(c.req.url).host;
+  // '' means "follow the domain": the public site derives the title per request,
+  // so the same install names itself correctly on a custom domain, on a platform
+  // address, or after being deployed again somewhere else.
+  const titleStored = v.title === siteNameFromHost(host) ? '' : v.title;
+  const shownTitle = displayTitle(titleStored, host);
   const cfg: Config = {
     adminSlug: v.slug,
     secret: randomToken(48),
@@ -128,10 +138,10 @@ install.post('/', async (c) => {
   await putFile(c.env, `themes/${defaultTheme.slug}/style.css`,
     new TextEncoder().encode(defaultTheme.css).buffer as ArrayBuffer, 'text/css; charset=utf-8');
   const setting = db.prepare('INSERT OR REPLACE INTO settings (site_id,key,value) VALUES (1,?,?)');
-  const homeBody = `<h1>Welcome to ${v.title.replace(/[<>&]/g, '')}</h1>\n<p>This is your sample home page. Sign in to the admin panel to edit it, write your first post and upload media.</p>`;
+  const homeBody = `<h1>Welcome to ${shownTitle.replace(/[<>&]/g, '')}</h1>\n<p>This is your sample home page. Sign in to the admin panel to edit it, write your first post and upload media.</p>`;
   await db.batch([
     db.prepare("INSERT INTO users (username,email,password_hash,role,created_at) VALUES (?,?,?,'admin',?)").bind(v.username, v.email, await hashPassword(password), now),
-    db.prepare('INSERT OR REPLACE INTO sites (id,hostname,name,created_at) VALUES (1,?,?,?)').bind(v.domain, v.title, now),
+    db.prepare('INSERT OR REPLACE INTO sites (id,hostname,name,created_at) VALUES (1,?,?,?)').bind(v.domain, shownTitle, now),
     db.prepare('INSERT OR REPLACE INTO themes (slug,name,version,templates,partials,css,manifest,active,created_at) VALUES (?,?,?,?,?,?,?,1,?)')
       .bind(defaultTheme.slug, defaultTheme.name, defaultTheme.version, JSON.stringify(defaultTheme.templates),
         JSON.stringify(defaultTheme.partials), defaultTheme.css, JSON.stringify(defaultTheme.manifest), now),
@@ -140,7 +150,7 @@ install.post('/', async (c) => {
     db.prepare("INSERT INTO content (site_id,type,title,slug,body,status,author_id,published_at,created_at,updated_at) VALUES (1,'page','Home','home',?,'published',1,?,?,?)").bind(homeBody, now, now, now),
     db.prepare("INSERT INTO menus (id,site_id,name,location) VALUES (1,1,'Primary','primary')"),
     db.prepare("INSERT INTO menu_items (menu_id,label,url,position) VALUES (1,'Home','/',0),(1,'Blog','/blog',1)"),
-    setting.bind('site_title', v.title),
+    setting.bind('site_title', titleStored),
     setting.bind('tagline', ''),
     setting.bind('domains', cfg.domains.join('\n')),
     setting.bind('favicon', ''),

@@ -1,6 +1,7 @@
 import type { Ctx } from '../types';
 import { ADMIN_CSS, assetLinks } from '../admin/bundles';
 import { APP_JS } from '../admin/components';
+import { titleFor } from './origin';
 import { icon, iconSprite } from '../admin/icons';
 import { commandsFor } from '../admin/search';
 import { PALETTE_JS, paletteConfig } from '../admin/palette';
@@ -311,7 +312,7 @@ export async function layout(c: Ctx, title: string, body: Raw, _active = '', opt
   const groups = navGroups(user, pending);
   let siteTitle = '';
   try {
-    siteTitle = (await getSettings(c.env)).site_title || '';
+    siteTitle = titleFor((await getSettings(c.env)).site_title || '', new URL(c.req.url));
   } catch {
     /* settings not readable yet */
   }
@@ -362,9 +363,14 @@ export const errorPage = (c: Ctx, status: 400 | 403 | 404, message: string): Res
 /** Redirect inside the admin with a flash message. */
 export const go = (c: Ctx, path: string, msg?: { ok?: string; err?: string }): Response => {
   const q = msg?.ok ? `ok=${encodeURIComponent(msg.ok)}` : msg?.err ? `err=${encodeURIComponent(msg.err)}` : '';
-  // Works for a path that already carries a query string, e.g. "/posts?status=draft".
-  if (!q) return c.redirect(c.var.base + path, 303);
-  return c.redirect(c.var.base + path + (path.includes('?') ? '&' : '?') + q, 303);
+  // Works for a path that already carries a query string ("/posts?status=draft")
+  // and for one that names a section ("/settings#landing"), where the flash has
+  // to go before the hash or the browser never sends it.
+  const hashAt = path.indexOf('#');
+  const hash = hashAt >= 0 ? path.slice(hashAt) : '';
+  const bare = hashAt >= 0 ? path.slice(0, hashAt) : path;
+  if (!q) return c.redirect(c.var.base + bare + hash, 303);
+  return c.redirect(c.var.base + bare + (bare.includes('?') ? '&' : '?') + q + hash, 303);
 };
 
 /**

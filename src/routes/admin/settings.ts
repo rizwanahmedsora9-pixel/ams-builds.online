@@ -2,10 +2,13 @@ import { Hono } from 'hono';
 import { audit } from '../../lib/audit';
 import type { AppEnv, Ctx } from '../../types';
 import { can, randomToken } from '../../lib/auth';
-import { getSettings, saveConfig, setSettings, validAdminSlug } from '../../lib/config';
+import { bumpCache, getSettings, saveConfig, setSettings, validAdminSlug } from '../../lib/config';
+import { mediaUrl } from '../../lib/content';
 import { MAX_FILE_BYTES, deleteFile, putFile } from '../../lib/files';
 import { FILE_TYPES } from '../../lib/media-types';
 import { parseLandingAudioIds } from '../../lib/landing';
+import { LANDING_UPLOAD_JS } from '../../admin/landing-upload';
+import { titleFor } from '../../lib/origin';
 import { cleanDomain, safeUrl, slugify } from '../../lib/security';
 import { validTimezone } from '../../lib/time';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
@@ -39,14 +42,18 @@ settings.get('/settings', async (c) => {
   const sel = (on: boolean) => (on ? raw(' selected') : '');
   const style = s.permalink_style || 'blog';
   const extra = cfg.domains.filter((d) => d !== cfg.primaryDomain).join('\n');
+  // What visitors see right now: the stored title is still the installer's
+  // guess, so the name follows the domain in the address bar instead.
+  const shownTitle = titleFor(s.site_title, new URL(c.req.url));
   return layout(c, 'Settings', html`
 <div class="row between" style="margin-bottom:1rem"><h1 style="margin:0">Settings</h1><a href="${c.var.base}/appearance">Customize CSS and code</a></div>
-<form method="post" action="${c.var.base}/settings" enctype="multipart/form-data">
+<form method="post" action="${c.var.base}/settings" enctype="multipart/form-data" id="settings-form" data-upload-endpoint="${c.var.base}/settings/landing-audio">
   ${csrfField(c)}
   <div class="card" id="site">
     <h2>Site</h2>
     <label for="site_title" style="margin-top:0">Site title</label>
     <input type="text" id="site_title" name="site_title" value="${s.site_title ?? ''}" required maxlength="120">
+    <p class="hint">Shown in the browser tab, the panel header and the landing screen. Leave it as it is to follow the domain automatically (<b>${shownTitle}</b> on this address). Type a name to use it everywhere instead.</p>
     <label for="tagline">Tagline</label>
     <input type="text" id="tagline" name="tagline" value="${s.tagline ?? ''}" maxlength="200">
     <label for="favicon">Favicon URL</label>
@@ -89,10 +96,14 @@ settings.get('/settings', async (c) => {
       <option value="">Disabled — open the home page directly</option>
       ${pages.map((p) => html`<option value="${p.id}"${sel(String(p.id) === landingPageId)}>${p.title}${p.status === 'published' ? '' : ' — draft (not visible publicly)'}</option>`)}
     </select>
-    <p class="hint">Only a published page is shown to visitors. You can also set or clear the landing page from the Pages list.</p>
+    <p class="hint">Only a published page is shown to visitors. Saving this form applies the choice immediately.</p>
+    ${landingPageId ? html`<p class="hint">Live now: <b>${pages.find((p) => String(p.id) === landingPageId)?.title ?? 'the selected page'}</b>. <button class="linkish" type="submit" formaction="${c.var.base}/settings/landing-page" formnovalidate>Turn the landing screen off</button></p>` : ''}
     <label for="landing_audio_files">Add soundtrack files</label>
     <input type="file" id="landing_audio_files" name="landing_audio_files" accept="${audioAccept}" multiple>
-    <p class="hint">MP3, OGG, WAV, M4A, AAC, FLAC or Opus. Up to 20 MB per file and 20 tracks in the playlist. Audio starts only after the visitor presses Play, then plays in order and loops.</p>
+    <p class="hint">MP3, OGG, WAV, M4A, AAC, FLAC or Opus. Up to 20 MB per file and 20 tracks in the playlist. Files upload as soon as you pick them, one at a time, so a slow connection only has to carry one track. Audio starts only after the visitor presses Play, then plays in order and loops.</p>
+    <p class="hint landing-upload-note" id="landing-upload-note" role="status" aria-live="polite"></p>
+    <div class="landing-upload-queue" id="landing-upload-queue" hidden></div>
+    <noscript><p class="hint">JavaScript is off, so the files upload together with Save settings. Keep the tab open until it reloads.</p></noscript>
     <fieldset class="landing-audio-fieldset">
       <legend>Soundtrack playlist</legend>
       ${playlist.length ? html`<div class="landing-audio-list">
@@ -109,6 +120,7 @@ settings.get('/settings', async (c) => {
       <p class="hint">Select the tracks you want and set their order. New uploads are appended to the end of the selected playlist.</p>
     </fieldset>
   </div>
+  ${raw(LANDING_UPLOAD_JS)}
   <div class="card" id="discussion">
     <h2>Discussion</h2>
     <label class="check" style="margin-top:0"><input type="checkbox" name="comments_enabled" value="1"${s.comments_enabled !== '0' ? raw(' checked') : ''}> Allow comments on posts</label>
@@ -162,6 +174,56 @@ async function storeLandingAudio(c: Ctx, file: File, now: Date): Promise<{ id: n
   }
 }
 
+/**
+ * One soundtrack file per request, from the Settings screen's queue. The name
+ * arrives in the multipart headers, so the extension check runs before a single
+ * byte is written; a refused file answers JSON instead of a redirect, so the
+ * page can say which track failed and why.
+ */
+/**
+ * Switch the landing screen off from Settings without touching the rest of the
+ * form. The page's content is kept; only the pointer is cleared, so turning it
+ * back on costs one dropdown.
+ */
+settings.post('/settings/landing-page', async (c) => {
+  await setSettings(c.env, { landing_page_id: '' });
+  await bumpCache(c.env, c.var.cfg);
+  await audit(c, 'settings', 'setting', 'Turned the landing screen off');
+  return go(c, '/settings', { ok: 'The landing screen is off. Visitors go straight to the home page.' });
+});
+
+settings.post('/settings/landing-audio', async (c) => {
+  const files = [
+    ...c.var.form.getAll('audio'),
+    ...c.var.form.getAll('landing_audio_files'),
+  ].filter((value): value is File => typeof value !== 'string' && value.size > 0);
+  if (!files.length) return c.json({ ok: false, error: 'Choose an audio file first.' }, 400, { 'Cache-Control': 'no-store' });
+  if (files.length > 1) return c.json({ ok: false, error: 'Upload one track per request.' }, 400, { 'Cache-Control': 'no-store' });
+
+  let stored: { id: number; key: string };
+  try {
+    stored = await storeLandingAudio(c, files[0], new Date());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not save that file.';
+    return c.json({ ok: false, error: message.slice(0, 200) }, 415, { 'Cache-Control': 'no-store' });
+  }
+
+  // Straight into the selected playlist: a visitor hears the new track without
+  // a second trip to Settings.
+  const settingsRow = await getSettings(c.env);
+  const ids = parseLandingAudioIds(settingsRow.landing_audio_ids);
+  if (!ids.includes(stored.id)) ids.push(stored.id);
+  await setSettings(c.env, { landing_audio_ids: JSON.stringify(ids.slice(0, 20)) });
+  await bumpCache(c.env);
+  const { results } = await c.env.DB.prepare('SELECT filename, mime, size FROM media WHERE id=? AND site_id=1')
+    .bind(stored.id).all<{ filename: string; mime: string; size: number }>();
+  return c.json({
+    ok: true,
+    item: { id: stored.id, url: mediaUrl(stored.key), filename: results[0]?.filename || files[0].name, mime: results[0]?.mime || 'audio/mpeg', size: results[0]?.size || files[0].size },
+    tracks: ids.length,
+  }, 200, { 'Cache-Control': 'no-store' });
+});
+
 settings.post('/settings', async (c) => {
   const f = c.var.form;
   const str = (k: string) => String(f.get(k) ?? '').trim();
@@ -194,12 +256,24 @@ settings.post('/settings', async (c) => {
   if (submittedAudioIds.length > 20) return go(c, '/settings', { err: 'Choose no more than 20 soundtrack tracks.' });
   const audioFiles = f.getAll('landing_audio_files').filter((value): value is File => typeof value !== 'string' && value.size > 0);
   if (audioFiles.length > 20) return go(c, '/settings', { err: 'Upload no more than 20 audio files at a time.' });
-  for (const file of audioFiles) {
+  // A file this form cannot take (wrong type, too large) is left out and named in
+  // the notice. Everything else in the form — the title, the landing page, the
+  // playlist — still saves, because losing all of it is far worse than losing a
+  // file the admin can pick again.
+  const refusedAudio: string[] = [];
+  const acceptedAudio = audioFiles.filter((file) => {
     const dot = file.name.lastIndexOf('.');
     const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : '';
-    if (!FILE_TYPES[ext]?.startsWith('audio/')) return go(c, '/settings', { err: `Unsupported audio file: ${file.name}` });
-    if (file.size > MAX_FILE_BYTES) return go(c, '/settings', { err: `${file.name} is larger than 20 MB.` });
-  }
+    if (!FILE_TYPES[ext]?.startsWith('audio/')) {
+      refusedAudio.push(`${file.name} is not an audio file`);
+      return false;
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      refusedAudio.push(`${file.name} is larger than 20 MB`);
+      return false;
+    }
+    return true;
+  });
 
   const validAudioIds = new Set<number>();
   if (submittedAudioIds.length) {
@@ -217,18 +291,18 @@ settings.post('/settings', async (c) => {
     .filter((item) => validAudioIds.has(item.id))
     .sort((a, b) => a.order - b.order || a.index - b.index)
     .map((item) => item.id);
-  if (orderedAudioIds.length + audioFiles.length > 20) return go(c, '/settings', { err: 'The playlist can contain no more than 20 tracks.' });
+  if (orderedAudioIds.length + acceptedAudio.length > 20) return go(c, '/settings', { err: 'The playlist can contain no more than 20 tracks.' });
 
+  // Each file stands on its own: a storage hiccup on one track is reported and
+  // the rest of the batch (and the rest of the form) still goes through.
   const addedAudio: { id: number; key: string }[] = [];
-  try {
-    for (const file of audioFiles) addedAudio.push(await storeLandingAudio(c, file, new Date()));
-  } catch (error) {
-    for (const item of addedAudio) {
-      await c.env.DB.prepare('DELETE FROM media WHERE id=? AND site_id=1').bind(item.id).run().catch(() => {});
-      await deleteFile(c.env, item.key).catch(() => {});
+  for (const file of acceptedAudio) {
+    try {
+      addedAudio.push(await storeLandingAudio(c, file, new Date()));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'could not be saved';
+      refusedAudio.push(`${file.name} ${message.slice(0, 160)}`);
     }
-    const message = error instanceof Error ? error.message : 'Could not save the audio files.';
-    return go(c, '/settings', { err: message.slice(0, 240) });
   }
 
   const style = ['blog', 'plain', 'dated'].includes(str('permalink_style')) ? str('permalink_style') : 'blog';
@@ -259,6 +333,11 @@ settings.post('/settings', async (c) => {
   cfg.cacheV = Date.now();
   await saveConfig(c.env, cfg);
   await audit(c, 'settings', 'setting', `Saved site settings (title “${siteTitle}”)`);
+  if (refusedAudio.length) {
+    return go(c, '/settings#landing', {
+      err: `Settings saved, but ${refusedAudio.length === 1 ? 'one soundtrack file was' : `${refusedAudio.length} soundtrack files were`} not: ${refusedAudio.join('; ')}.`,
+    });
+  }
   return c.redirect(`/${slug}/settings?ok=${encodeURIComponent('Settings saved.')}`, 303);
 });
 

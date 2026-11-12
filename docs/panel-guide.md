@@ -117,6 +117,12 @@ empty leftovers, so the stored markup is as clean as the writing.
   Enter stops playback and reveals the regular home page. The welcome screen stays dismissed in that
   tab until the tab is closed. Browsers require a visitor gesture for audible playback, so audio does
   not start automatically on page load.
+
+  Soundtrack files upload one at a time as soon as you pick them, each with its own progress row, so a
+  large MP3 on a slow connection cannot take the rest of the settings down with it. A file the server
+  refuses (wrong type, over 20 MB) is named in place and everything else still saves. Without
+  JavaScript the files travel with **Save settings** as before. The landing page can also be switched
+  off from Settings without touching the dropdown.
 - **Preview in any theme.** `?preview=1&theme=<slug>` renders the post with any installed theme,
   for signed-in users only and never cached.
 
@@ -138,7 +144,7 @@ blank 500.
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects (301/302), JSON import/export, server-stored backups, site health, page-cache reset |
-| Settings | Site identity and favicon, reading, a customizable first-visit landing screen with an ordered looping audio playlist, discussion, domains and the admin URL |
+| Settings | Site identity and favicon (the title follows the domain until you rename it), reading, a customizable first-visit landing screen with an ordered looping soundtrack uploaded one track at a time, discussion, domains and the admin URL |
 
 ## Who changed what
 

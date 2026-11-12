@@ -525,6 +525,76 @@ test('10b. landing screen: choose a page, upload a looping soundtrack and enter 
   log('Pages assignment, in-Settings upload/playlist, first-visit splash, responsive Play/mute/Enter, session reset and audio storage work');
 });
 
+test('10c. landing soundtrack: one file per request, and a bad file never costs the rest of the form', async () => {
+  const uploadAudio = async (name, bytes, type = 'audio/mpeg') => {
+    const body = new FormData();
+    body.set('_csrf', await csrf());
+    body.append('audio', new File([bytes], name, { type }));
+    return request(`${admin}/settings/landing-audio`, { method: 'POST', body });
+  };
+
+  // The panel posts tracks one at a time, so this is the path a real upload takes.
+  const one = await uploadAudio('Night Drive.MP3', new Uint8Array(4096));
+  assert.equal(one.status, 200);
+  const saved = JSON.parse(one.text);
+  assert.equal(saved.ok, true);
+  assert.match(saved.item.url, /^\/media\/\d{4}\/\d{2}\/.+night-drive\.mp3$/);
+  assert.equal((await anon(saved.item.url)).headers.get('content-type'), 'audio/mpeg');
+  assert.match((await get(`${admin}/settings`)).text, /name="landing_audio_ids"[^>]*checked/, 'a newly uploaded track joins the playlist');
+
+  // The page wires that endpoint into the form: files go up as soon as they are
+  // picked, one request each, and the form still works without JavaScript.
+  const panel = (await get(`${admin}/settings`)).text;
+  assert.match(panel, /id="settings-form"[^>]*data-upload-endpoint="[^"]*\/settings\/landing-audio"/);
+  assert.match(panel, /id="landing-upload-queue"/);
+  assert.match(panel, /landing-upload-note[^>]*role="status"/);
+  assert.match(panel, /<noscript>/);
+  assert.match(panel, /fetch\(ENDPOINT, \{ method: 'POST'/);
+
+  const wrongType = await uploadAudio('notes.txt', new Uint8Array(10), 'text/plain');
+  assert.equal(wrongType.status, 415);
+  assert.match(wrongType.text, /not an audio file|Unsupported audio file/);
+  const tooBig = await uploadAudio('huge.mp3', new Uint8Array(20 * 1024 * 1024 + 1));
+  assert.equal(tooBig.status, 415);
+  assert.match(tooBig.text, /larger than 20 MB/);
+
+  // The whole form: settings must still save when one of the attachments is refused.
+  const mixed = new FormData();
+  mixed.set('_csrf', await csrf());
+  for (const [key, value] of Object.entries({ ...SITE_SETTINGS, site_title: 'Saved Despite A Bad File' })) mixed.set(key, String(value));
+  mixed.append('landing_audio_files', new File([new Uint8Array(10)], 'bad.txt', { type: 'text/plain' }));
+  mixed.append('landing_audio_files', new File([new Uint8Array(2048)], 'Second Track.mp3', { type: 'audio/mpeg' }));
+  const combined = await request(`${admin}/settings`, { method: 'POST', body: mixed });
+  assert.equal(combined.status, 303);
+  assert.match(combined.location, /err=/, 'the refused file is reported');
+  assert.doesNotMatch(combined.location, /req\.err|undefined/, 'the flash survives the redirect');
+  const after = await get(`${admin}/settings`);
+  assert.match(after.text, /value="Saved Despite A Bad File"/, 'the rest of the form was saved anyway');
+  assert.match(after.text, /second-track\.mp3/, 'the good track in the same batch was stored');
+  log('per-file soundtrack upload, refused files reported individually, settings saved regardless');
+});
+
+test('10d. an explicit site title reaches the panel and the public page; the default follows the host', async () => {
+  // On an IP host there is no domain name to derive from, so this walks the
+  // other half of the rule: a derived name is used when there is one, and a
+  // title typed by an admin always wins. tests/origin.test.mjs covers the hosts.
+  await adminPost('/settings', { ...SITE_SETTINGS, site_title: 'AMS Builds' });
+  assert.match((await get(admin)).text, /topbar__title">AMS Builds</);
+  assert.ok((await anon('/')).text.includes('<title>AMS Builds'), 'the public page uses the saved title');
+
+  // Back to the installer's default. This test server runs on an IP, which has
+  // no domain name to take a title from, so the stored value is the fallback;
+  // tests/origin.test.mjs pins the rule for real hostnames. Either way the
+  // header and the page always carry a name.
+  await adminPost('/settings', { ...SITE_SETTINGS, site_title: 'My Site' });
+  assert.ok((await anon('/')).text.includes('<title>'), 'the page always has a title');
+  assert.match((await get(admin)).text, /topbar__title">[^<]+</);
+
+  // Later theme tests read the site name off the page, so leave a real one behind.
+  await adminPost('/settings', { ...SITE_SETTINGS, site_title: 'Renamed Site' });
+  log('saved title wins in the panel and the page, the installer default follows the host');
+});
+
 test('11. profile: password change keeps this session and old password stops working', async () => {
   const wrong = await adminPost('/profile', { email: ADMIN.email, new_password: 'another long password', current_password: 'not it' });
   assert.match(wrong.location, /err=Current password/);
