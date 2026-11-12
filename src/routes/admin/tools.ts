@@ -8,6 +8,7 @@ import { safeUrl, slugify } from '../../lib/security';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 import { APP_VERSION } from '../../lib/version';
 import { hasColumn } from '../../lib/schema';
+import { dbLockState } from '../../lib/dblock';
 import { MAX_PAGE_DEPTH } from '../../lib/page-hierarchy';
 import { BUDGETS, kb } from '../../lib/budgets';
 import measured from '../../lib/budget-report.json';
@@ -120,6 +121,8 @@ tools.get('/tools', async (c) => {
   <h2>Danger zone</h2>
   <p class="hint" style="margin-top:0">Deleting the cache does not touch content. Pages are rebuilt on the next visit.</p>
   <form method="post" action="${base}/tools/cache">${csrfField(c)}<button class="btn ghost small" type="submit">Delete page cache</button></form>
+  <p class="hint" style="margin:1.2rem 0 .5rem">${t('reset.danger_hint')}</p>
+  <p style="margin:0"><a class="btn danger small" href="${base}/tools/reset">${t('reset.danger')}</a></p>
 </div>`, '/tools');
 });
 
@@ -511,6 +514,12 @@ tools.get('/tools/health', async (c) => {
   ]);
   const dbVersion = Number(settings.schema_version || 1);
   const runtime = typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers' ? 'Cloudflare Workers' : 'Node.js';
+  // A SQLite file has no password of its own; this is the one the deployment
+  // gives it (DB_PASSWORD, enforced before the Node server listens). On D1 there
+  // is nothing to present, so the row says so instead of implying a gap.
+  const dbPassword = c.env.FILES
+    ? (await dbLockState(c.env) === 'set' ? t('health.db_password_set') : t('health.db_password_unset'))
+    : t('health.db_password_na');
   const base = c.var.base;
   return layout(c, 'Site Health', html`
 <div class="row between" style="margin-bottom:1rem"><h1 style="margin:0">Site Health</h1><a href="${base}/tools">&larr; Tools</a></div>
@@ -526,6 +535,7 @@ tools.get('/tools/health', async (c) => {
     <dt>CMS version</dt><dd>${APP_VERSION}</dd>
     <dt>Database schema</dt><dd>${dbVersion} ${dbVersion === SCHEMA_VERSION ? '(up to date)' : `(latest is ${SCHEMA_VERSION} — open <a href="${base}/updates">Updates</a>)`}</dd>
     <dt>Runtime</dt><dd>${runtime}</dd>
+    <dt>${t('health.db_password')}</dt><dd>${dbPassword}</dd>
     <dt>Timezone</dt><dd>${settings.timezone || 'UTC'}</dd>
     <dt>Installed</dt><dd>${(settings.installed_at || '').slice(0, 10) || 'unknown'}</dd>
     <dt>Cache generation</dt><dd>${new Date(c.var.cfg.cacheV).toISOString().replace('T', ' ').slice(0, 19)} UTC</dd>

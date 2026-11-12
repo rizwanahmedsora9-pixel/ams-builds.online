@@ -11,6 +11,12 @@ export type FileStore = {
   put(key: string, data: ArrayBuffer, contentType: string): Promise<void>;
   get(key: string): Promise<{ body: ReadableStream | ArrayBuffer; contentType: string; etag: string } | null>;
   delete(key: string): Promise<void>;
+  /**
+   * Delete every stored file. Optional because only the disk-backed store can
+   * enumerate what it holds; on Cloudflare the same job is a KV purge, which
+   * lib/reset.ts does itself.
+   */
+  clear?(): Promise<void>;
 };
 
 /** Stored in KV under "config". Read on every request, so keep it tiny. */

@@ -92,12 +92,45 @@ Everything the site stores lives in `data/`. Back up that folder and you have ba
 | `HOST` | `0.0.0.0` | address to bind |
 | `DATA_DIR` | `./data` | database and uploads |
 | `TRUST_PROXY` | off | set to `1` behind nginx, Caddy or a PaaS router, so HTTPS, the real hostname and visitor IPs are detected. Leave off when the port is exposed directly. |
+| `DB_PASSWORD` | none | the password of the database in `DATA_DIR`. The first start that carries it locks the database to it, and every later start must present the same one or the server refuses to open. At least 8 characters. See [The database password](#the-database-password). |
+| `DB_PASSWORD_UNLOCK` | off | set to `1` for one start to remove a database password you no longer have. Nothing else is changed. |
 
 **Docker:**
 
 ```bash
 docker compose up -d     # http://localhost:8787, data in the cms-data volume
 ```
+
+### The database password
+
+The database is a file, not a server: there is no account to authenticate and no
+port to firewall, and `node:sqlite` has no cipher to switch on. Two things stand
+in for a password here, and both are real:
+
+- **Permissions.** `data/`, `data/cms.sqlite` (with its WAL sidecars) and
+  `data/media/` are created owner-only (`0700` and `0600`), so no other account
+  on the machine can read the site.
+- **`DB_PASSWORD`.** The first start that carries it stores a PBKDF2 hash of it
+  next to the data and locks the database to it. From then on a server started
+  without that password - a copied `data/` folder, a restored volume, a second
+  deployment pointed at the same disk - exits before it listens, so it never
+  serves one request from a database it may not open:
+
+  ```bash
+  DB_PASSWORD='a long secret' npm start
+  ```
+
+  Lost the password? One start with `DB_PASSWORD_UNLOCK=1` removes the check and
+  leaves every row alone. That costs no security: whoever can set environment
+  variables for the process could read `cms.sqlite` directly anyway.
+
+This is an access check, not encryption at rest. If the disk itself has to be
+unreadable, encrypt the volume (LUKS, an encrypted Docker volume, an encrypted
+managed disk) and keep `DB_PASSWORD` on top of it.
+
+**Tools → Site Health** reports which of the two you have. On Cloudflare the same
+row says the database is D1, reached only through the Worker binding, so there is
+no password to present.
 
 **Behind a reverse proxy** (gives you HTTPS). Caddy needs two lines:
 
@@ -125,7 +158,9 @@ npm start            # Node runtime (state in data/)
 npm run typecheck
 ```
 
-Delete `.wrangler/` or `data/` to start again from the installer.
+Delete `.wrangler/` or `data/` to start again from the installer - or, from inside
+a running panel, use **Tools → Danger zone → Reset the panel**, which empties the
+database and the media store and reopens the installer without a restart.
 
 ## Tests
 
@@ -140,6 +175,15 @@ npm run check:assets  # panel CSS/token budgets only (fast)
 product over HTTP. `tests/helpers.mjs` holds the shared harness (server lifecycle,
 cookie jar, CSRF, install-and-login helper), so a new test starts from a working
 panel in three lines.
+
+`tests/system.test.mjs` (8 cases) covers starting over and the database that holds
+it all: a factory reset from inside the panel (what the confirmation screen counts,
+a wrong word, a wrong password, an author refused by capability, the wipe itself,
+the installer coming back, and a second install under a new admin URL with none of
+the old content), and `DB_PASSWORD` (locking a database on first start, refusing to
+boot without it or with a wrong one, opening it again with the right one, the
+`DB_PASSWORD_UNLOCK=1` escape hatch, a too-short password, and owner-only
+permissions on the data folder).
 
 `tests/origin.test.mjs` (5 cases) covers the site-name rule: the domain a request
 arrived on becomes a readable name, an admin's own title always wins, and an IP or
@@ -421,14 +465,24 @@ under [Appearance](#appearance).
 - **Backups** — the same JSON stored on the server (KV on Cloudflare, `data/media/backups/`
   on Node) and downloadable from the panel. The public `/media/` route never serves them.
 - **Site Health** — database, key-value store and media checks, versions, schema,
-  cache generation, content counts and the **performance budgets** (what this build
-  measured against the limit, see below).
+  cache generation, content counts, whether the database is password-protected and
+  the **performance budgets** (what this build measured against the limit, see below).
 - **Audit log** — every change made in the panel: who, what, where, when. Filters
   by person, action, area and free text are GET parameters, so a view is a link.
   Entries are kept 90 days and pruned by the cron trigger.
 - **Updates** — the CMS version, the database schema and pending migrations, theme
   updates from the store, plugin states, and buttons to run migrations or install a
   theme update.
+- **Reset the panel** — the factory reset, under *Danger zone* on the Tools overview
+  and in the command palette. It counts what it is about to destroy, offers the
+  export first, and then asks for your panel password and the typed word `RESET`
+  (admin-only, CSRF-checked, and it works with JavaScript off). Every CMS table is
+  dropped and the runtime's own tables are emptied, the media folder (Node) or every
+  stored key (Cloudflare) goes with them, and so does the install lock — which is
+  what makes the next request redirect to `/install`, so the site can be set up
+  again from zero: a new admin account, title, domain and admin URL. The audit log
+  is deleted by the reset it would have recorded, so the lasting record is a line in
+  the server log.
 
 ## Appearance
 
@@ -516,7 +570,8 @@ downloads.
 
 ## How it works
 
-- **Install lock** – KV key `installed`. Without it every request redirects to `/install`; with it `/install` is a 404. The installer also checks D1 for an existing user, so it cannot run twice while KV is still propagating.
+- **Install lock** – KV key `installed`. Without it every request redirects to `/install`; with it `/install` is a 404. The installer also checks D1 for an existing user, so it cannot run twice while KV is still propagating. A factory reset (`src/lib/reset.ts`) deletes that flag *and* every user, and clears the per-isolate memo that caches it, which is what lets the installer come back inside a running process.
+- **Database password** – `DB_PASSWORD` locks the Node database to a password that every start must present (`src/node/dbpassword.ts`, PBKDF2 hash stored next to the data), and the data folder, database file and media folder are owner-only. It is an access check rather than encryption at rest, and D1 has no password to present, so on Cloudflare the check does not apply.
 - **Admin URL** – the slug lives in the KV `config` key and can be changed in Settings. The admin panel is not linked from the public site.
 - **Security** – PBKDF2-SHA256 passwords (100,000 iterations, the Workers maximum), HMAC-signed session cookies that are invalidated by a password change, CSRF tokens plus an Origin check on every POST, and 5 failed logins per IP per 15 minutes.
 - **Content** – admins save raw HTML. Editors and authors go through an allow-list sanitizer (`src/lib/security.ts`). Authors can only edit their own posts.
@@ -539,6 +594,7 @@ tests/e2e.mjs              end-to-end tests for both runtimes
 tests/panel.test.mjs       the panel itself, over HTTP
 tests/origin.test.mjs      the site-name-from-domain rule
 tests/template.test.mjs    the template engine, directly
+tests/system.test.mjs      factory reset and the database password
 docs/panel-guide.md        every admin screen
 docs/theme-developer-guide.md  the manifest, tags, assets, settings
 docs/panel-overhaul-roadmap.md what was built in which release
@@ -583,12 +639,15 @@ src/
       users.ts               accounts and roles
       plugins.ts             built-in plugins and code snippets
       tools.ts               redirects, import/export v2, backups, health, audit log
+      system.ts              the factory reset screen (Tools -> Danger zone)
       updates.ts             versions, migrations, theme updates
       appearance.ts          customize (CSS/code) and footer widgets
       terms.ts               categories and tags
   node/
-    server.ts              Node.js entry point (PORT, DATA_DIR, TRUST_PROXY)
-    storage.ts             SQLite + disk versions of D1, KV and file storage
+    server.ts              Node.js entry point (PORT, DATA_DIR, TRUST_PROXY, DB_PASSWORD)
+    dbpassword.ts          the DB_PASSWORD check, run before the server listens
+    storage.ts             SQLite + disk versions of D1, KV and file storage,
+                           owner-only permissions, and the store-wide clear()
   db/
     schema.sql
     index.ts               schema runner
@@ -607,6 +666,8 @@ src/
     plugins.ts             built-in plugin list and hook points
     version.ts             app version shown in Updates
     schema.ts              cached "does this table/column exist" probes for upgrade safety
+    reset.ts               factory reset: drop every table, clear the files, reopen the installer
+    dblock.ts              the database password: set, verify, clear
     template.ts            template engine v2: expressions, filters, partials, layouts
     theme-manifest.ts      theme.json v2: validation, zip reading, inheritance, settings
     theme-store.ts         theme rows, assets, version snapshots, layout rendering

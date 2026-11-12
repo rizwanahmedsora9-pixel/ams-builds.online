@@ -31,9 +31,17 @@ export function createHarness() {
     s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); });
   });
 
-  /** Boots the server. Call again with the same data directory to test a restart. */
-  async function start() {
-    dataDir = dataDir || mkdtempSync(join(tmpdir(), 'edge-cms-e2e-'));
+  /**
+   * Boots the server. Call again with the same data directory to test a restart.
+   *
+   * `opts.env` adds environment variables for this start only - a null value
+   * removes one - and `opts.dataDir` points the server at a specific folder
+   * instead of the temporary one. Together they let a test boot the same data
+   * twice with a different configuration, which is how the database password and
+   * the factory reset are exercised.
+   */
+  async function start(opts = {}) {
+    dataDir = opts.dataDir || dataDir || mkdtempSync(join(tmpdir(), 'edge-cms-e2e-'));
     if (port) {
       // A restart: wait until the previous process has really let the port go.
       for (let i = 0; i < 100; i++) {
@@ -50,6 +58,10 @@ export function createHarness() {
     }
     base = `http://127.0.0.1:${port}`;
     const env = { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dataDir, TRUST_PROXY: '0' };
+    for (const [key, value] of Object.entries(opts.env || {})) {
+      if (value === undefined || value === null) delete env[key];
+      else env[key] = String(value);
+    }
     const args = TARGET === 'node'
       ? ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs')]
       : [join(ROOT, 'node_modules', 'wrangler', 'bin', 'wrangler.js'), 'dev', '--ip', '127.0.0.1', '--port', String(port),

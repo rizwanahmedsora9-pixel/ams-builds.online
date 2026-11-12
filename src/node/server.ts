@@ -6,10 +6,17 @@
  *   DATA_DIR     default ./data   (SQLite database + uploaded media)
  *   TRUST_PROXY  set to 1 when behind nginx/Caddy/a PaaS router so that
  *                X-Forwarded-Proto/-Host/-For are honoured
+ *   DB_PASSWORD  the password of the database in DATA_DIR. The first start that
+ *                carries it locks the database to it; every later start has to
+ *                present the same one or the server refuses to open (see
+ *                node/dbpassword.ts).
+ *   DB_PASSWORD_UNLOCK  set to 1 once to remove a database password you no
+ *                longer have. Changes nothing else.
  */
 import { serve } from '@hono/node-server';
 import worker from '../index';
 import { openStorage } from './storage';
+import { checkDbPassword } from './dbpassword';
 
 const PORT = Number(process.env.PORT) || 8787;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -26,6 +33,21 @@ const ctx = {
 } as unknown as ExecutionContext;
 
 const firstValue = (v: string | null) => (v ? v.split(',')[0].trim() : '');
+
+// The database password is settled before anything listens: a server that may not
+// open this database must never answer a request from it. Top-level await keeps
+// the rest of the startup in the order it reads.
+const lock = await checkDbPassword(env, {
+  password: process.env.DB_PASSWORD,
+  unlock: process.env.DB_PASSWORD_UNLOCK,
+  dataDir: DATA_DIR,
+});
+if (!lock.start) {
+  console.error(lock.message);
+  close();
+  process.exit(1);
+}
+console.log(lock.message);
 
 const server = serve(
   {

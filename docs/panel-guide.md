@@ -324,13 +324,77 @@ same behaviour: admin-only, added verbatim to every page, stamped with the page'
 | Redirects | path → target, 301 or 302, applied before the page cache |
 | Import / Export | one JSON file (format version 2) with content, terms, menus, comments, redirects, settings, themes with their templates and stylesheets, per-theme settings, revisions, and users without passwords |
 | Backups | the same file stored server-side, downloadable, deletable |
-| Site Health | database, KV, media, versions, schema, cache, content counts and the performance budgets |
+| Site Health | database, KV, media, versions, schema, cache, content counts, whether the database is password-protected, and the performance budgets |
 | Audit log | who changed what, for 90 days |
+| Reset the panel | delete everything and reopen the installer - the "we built this wrong" button, under Danger zone |
 
 Import merges by type and slug, so running the same file twice is safe. Themes in the file are validated
 individually and installed; one broken theme is skipped with a warning and the rest of the file still lands.
 Theme image and font assets are not in the JSON — they stay in the file store — so a restore brings back
 templates and stylesheets, and the export names the assets it saw.
+
+### Starting over: the factory reset
+
+**Tools → Danger zone → Reset the panel** is for the site that was built wrong: a
+test install, a domain entered badly, a theme imported over the top of everything,
+or a panel somebody else started and left half-finished. It puts the installation
+back to the moment before the installer ran, without a restart and without shell
+access.
+
+The screen is deliberately slow. It counts what it is about to destroy - pages,
+posts, media files, comments, panel accounts, themes, menus, redirects and server
+backups - and lists what has no count: the audit log, every setting, the admin URL,
+the secret that keeps people signed in, the cached pages and the database password.
+It offers the export first, because that JSON file is the only way to get anything
+back afterwards. Then it asks for two things:
+
+1. **your panel password**, so a browser left signed in on a shared machine cannot
+   wipe the site;
+2. **the typed word `RESET`**, which no autofill and no restored form will produce
+   by accident. With JavaScript on the submit button stays disabled until the word
+   matches and a dialog asks once more; with JavaScript off the server checks both
+   all the same.
+
+Only an admin can reach it, every submission carries the CSRF token and an Origin
+check, and a wrong word or a wrong password sends you back with the site intact.
+
+What the reset does (`src/lib/reset.ts`):
+
+- drops every CMS table, so the installer's schema runner rebuilds them from
+  `schema.sql` at the current version;
+- empties the runtime's own tables (`_kv`, `_files` on Node) instead of dropping
+  them, because the open database handle was built around them;
+- deletes the uploads - the whole media folder on Node, every stored key on
+  Cloudflare, which takes the page cache and the `media:*` values with it;
+- deletes the install lock and the config, and clears the two caches that would
+  otherwise keep describing the old site (the schema probes and the per-isolate
+  "installed" memo).
+
+You are signed out and redirected to `/install`. From there the site is installed
+again exactly as it was the first time: new admin account, site title, domain and
+admin URL, one sample home page, the default theme, empty library. On Cloudflare,
+key-value deletion is eventually consistent, so the installer can take a few
+seconds to appear in every region.
+
+The audit log is deleted by the reset it would have recorded. The lasting record is
+a line in the server log naming who did it and how much went.
+
+### The database password
+
+Site Health reports it, and the environment sets it. On a Node server the database
+is a SQLite file with no user list and no cipher to switch on, so protection comes
+from two places: the data folder, database file and media folder are created
+owner-only, and `DB_PASSWORD` locks the database to a password that every start
+must present. The first start carrying it records the hash; a later start without
+it exits before it listens rather than serving a database it may not open, and
+`DB_PASSWORD_UNLOCK=1` is the one-start escape hatch for a password nobody has any
+more. On Cloudflare the same row says the database is D1, reached only through the
+Worker binding, so there is nothing to present. The README's
+[*The database password*](../README.md#the-database-password) has the commands.
+
+A factory reset clears the stored password with everything else; a server that
+still has `DB_PASSWORD` in its environment locks the new database again on its next
+start.
 
 ### Performance budgets
 
