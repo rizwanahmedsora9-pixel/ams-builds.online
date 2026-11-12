@@ -25,10 +25,10 @@ settings.get('/settings', async (c) => {
   const style = s.permalink_style || 'blog';
   const extra = cfg.domains.filter((d) => d !== cfg.primaryDomain).join('\n');
   return layout(c, 'Settings', html`
-<h1>Settings</h1>
+<div class="row between" style="margin-bottom:1rem"><h1 style="margin:0">Settings</h1><a href="${c.var.base}/appearance">Customize CSS and code</a></div>
 <form method="post" action="${c.var.base}/settings">
   ${csrfField(c)}
-  <div class="card">
+  <div class="card" id="site">
     <h2>Site</h2>
     <label for="site_title" style="margin-top:0">Site title</label>
     <input type="text" id="site_title" name="site_title" value="${s.site_title ?? ''}" required maxlength="120">
@@ -42,7 +42,7 @@ settings.get('/settings', async (c) => {
     <datalist id="zones">${COMMON_ZONES.map((z) => html`<option value="${z}">`)}</datalist>
     <p class="hint">IANA name, e.g. Asia/Karachi. Used for post dates and scheduling.</p>
   </div>
-  <div class="card">
+  <div class="card" id="reading">
     <h2>Reading</h2>
     <label for="home_page_id" style="margin-top:0">Home page</label>
     <select id="home_page_id" name="home_page_id">
@@ -57,8 +57,15 @@ settings.get('/settings', async (c) => {
       <option value="plain"${sel(style === 'plain')}>/post-name</option>
       <option value="dated"${sel(style === 'dated')}>/2026/01/post-name</option>
     </select>
+    <p class="hint">Old post URLs redirect automatically when you change this.</p>
   </div>
-  <div class="card">
+  <div class="card" id="discussion">
+    <h2>Discussion</h2>
+    <label class="check" style="margin-top:0"><input type="checkbox" name="comments_enabled" value="1"${s.comments_enabled !== '0' ? raw(' checked') : ''}> Allow comments on posts</label>
+    <label class="check"><input type="checkbox" name="comments_require_approval" value="1"${s.comments_require_approval !== '0' ? raw(' checked') : ''}> Hold new comments for moderation</label>
+    <p class="hint">Visitors can comment with a name and email; the email is never published. Moderate everything under <a href="${c.var.base}/comments">Comments</a>.</p>
+  </div>
+  <div class="card" id="domains">
     <h2>Domains &amp; admin URL</h2>
     <label for="primary_domain" style="margin-top:0">Primary domain</label>
     <input type="text" id="primary_domain" name="primary_domain" value="${cfg.primaryDomain}" required autocapitalize="none">
@@ -105,6 +112,8 @@ settings.post('/settings', async (c) => {
     posts_per_page: String(Math.min(50, Math.max(1, Number(str('posts_per_page')) || 10))),
     permalink_style: style,
     domains: domains.join('\n'),
+    comments_enabled: str('comments_enabled') === '1' ? '1' : '0',
+    comments_require_approval: str('comments_require_approval') === '1' ? '1' : '0',
   });
   await c.env.DB.prepare('UPDATE sites SET hostname=?, name=? WHERE id=1').bind(primary, siteTitle).run();
 

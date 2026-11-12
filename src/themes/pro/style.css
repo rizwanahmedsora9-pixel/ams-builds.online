@@ -81,3 +81,35 @@ h1{font-size:clamp(1.8rem,5vw,2.6rem);margin:0}
 .ftr nav a{display:block;color:inherit;text-decoration:none;padding:.18rem 0}
 .ftr nav a:hover{color:#fff}
 .ftr-bottom{border-top:1px solid #1e293b;padding-top:1rem;padding-bottom:1.2rem;font-size:.84rem;color:#8391a7}
+
+/* Comments and footer widgets (shared by every bundled theme) */
+.comments{margin-top:2.4rem;padding-top:1.4rem;border-top:1px solid var(--line)}
+.comments h2{font-size:1.25rem;margin:0 0 .9rem}
+.comments h3{font-size:1rem;margin:1.2rem 0 .3rem}
+.comment-none,.comment-note,.comment-closed{color:var(--muted);font-size:.9rem}
+.comment-note{margin:.2rem 0 .8rem}
+.comment-list{list-style:none;margin:0;padding:0}
+.comment-list .children{list-style:none;margin:.7rem 0 0;padding-left:1rem;border-left:2px solid var(--line)}
+.comment{background:var(--card,var(--soft));border:1px solid var(--line);border-radius:.6rem;padding:.85rem 1rem;margin:0 0 .7rem}
+.comment-meta{display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;font-size:.82rem;color:var(--muted);margin-bottom:.3rem}
+.comment-meta strong{color:var(--fg);font-size:.95rem}
+.comment-staff{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent,var(--gold,#2457d6));border:1px solid currentColor;border-radius:1rem;padding:0 .4rem}
+.comment-body{overflow-wrap:anywhere}
+.comment-body p{margin:.25rem 0}
+.comment-reply-link{display:inline-block;margin-top:.35rem;font-size:.8rem;text-decoration:none}
+.comment-notice{padding:.55rem .8rem;border-radius:.4rem;font-size:.88rem;border:1px solid var(--line);margin:0 0 .8rem}
+.comment-notice.ok{color:var(--accent,var(--gold,#2457d6));border-color:currentColor}
+.comment-notice.err{color:#b0362c;border-color:currentColor}
+.comment-form{margin-top:.8rem;border:1px solid var(--line);border-radius:.7rem;padding:1rem;background:var(--card,var(--soft))}
+.comment-form p{margin:.55rem 0}
+.comment-form label{display:block;font-size:.84rem;font-weight:600;margin-bottom:.25rem}
+.comment-form input[type=text],.comment-form input[type=email],.comment-form textarea{width:100%;padding:.6rem .7rem;border:1px solid var(--line);border-radius:.45rem;background:var(--bg);color:var(--fg);font:inherit}
+.comment-form textarea{min-height:7rem;resize:vertical}
+.comment-form button{padding:.6rem 1.1rem;border:1px solid var(--accent,var(--gold,#2457d6));border-radius:.45rem;background:var(--accent,var(--gold,#2457d6));color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.comment-form button:hover{filter:brightness(1.06)}
+.comment-form .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.site-widgets{border-top:1px solid var(--line);background:var(--soft);padding:1.6rem 0}
+.site-widgets-grid{display:grid;gap:1.2rem;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))}
+.site-widget{font-size:.92rem;color:var(--muted)}
+.site-widget .widget-title,.site-widget h2{font-size:.95rem;margin:0 0 .4rem;color:var(--fg)}
+.site-widget p{margin:.3rem 0}

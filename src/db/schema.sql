@@ -122,6 +122,25 @@ CREATE TABLE IF NOT EXISTS hooks (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_id INTEGER NOT NULL DEFAULT 1,
+  content_id INTEGER NOT NULL,
+  parent_id INTEGER,
+  author_name TEXT NOT NULL DEFAULT '',
+  author_email TEXT NOT NULL DEFAULT '',
+  author_url TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','spam','trash')),
+  user_id INTEGER,
+  ip TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_comments_list ON comments (site_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_comments_content ON comments (content_id, status);
+
 CREATE TABLE IF NOT EXISTS backups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   r2_key TEXT NOT NULL UNIQUE,

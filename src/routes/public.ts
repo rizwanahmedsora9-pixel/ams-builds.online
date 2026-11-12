@@ -2,10 +2,13 @@ import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import type { AppEnv, Ctx } from '../types';
 import { SESSION_COOKIE, sessionUser } from '../lib/auth';
-import { cfgFor, getConfig, getSettings, type Settings } from '../lib/config';
+import { bumpCache, cfgFor, getConfig, getSettings, type Settings } from '../lib/config';
 import { findContent, listPosts, permalinkStyle, postUrl, toViews, type ContentView } from '../lib/content';
+import { commentsEnabled, commentsModerated, validCommentToken } from '../lib/comments';
 import { getFile } from '../lib/files';
+import { pluginOn } from '../lib/plugins';
 import { PAGE_CACHE_TTL, cacheKey, renderTheme, type PageMeta } from '../lib/render';
+import { clientIp, rateCount, rateHit, sameOrigin, stripTags } from '../lib/security';
 
 const site = new Hono<AppEnv>();
 
@@ -134,15 +137,155 @@ const notFound = (siteTitle: string): Resolved => ({
   status: 404, template: '404', meta: { title: `Page not found – ${siteTitle}`, noindex: true }, data: {},
 });
 
+/* --------------------------------------------------------------- comments */
+// Public comment form. Protected by a signed form token, an origin check, a
+// honeypot field and a per-IP rate limit; new comments wait for moderation
+// unless an admin turns that off in Settings -> Discussion.
+site.post('/comments', async (c) => {
+  if (!sameOrigin(c.req.raw)) return c.text('Bad origin', 403);
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.text('Bad request', 400);
+  }
+  const settings = await getSettings(c.env);
+  const id = Number(form.get('content_id')) || 0;
+  const post = id ? await findContent(c.env, { type: 'post', id }) : null;
+  if (!post) return c.text('That post no longer accepts comments.', 404);
+  const style = permalinkStyle(settings);
+  const back = (code: string) => c.redirect(`${postUrl(post, style)}?comment=${code}#comments`, 303);
+
+  if (!commentsEnabled(settings)) return back('closed');
+  if (String(form.get('website') ?? '').trim()) return back('failed'); // honeypot
+  if (!(await validCommentToken(c.var.cfg.secret, post.id, String(form.get('token') ?? '')))) return back('failed');
+
+  const ip = clientIp(c.req.raw);
+  const rlKey = 'comment:' + ip;
+  if ((await rateCount(c.env, rlKey)) >= 5) return back('rate');
+
+  const name = String(form.get('name') ?? '').trim().slice(0, 80);
+  const email = String(form.get('email') ?? '').trim().slice(0, 160);
+  const body = String(form.get('body') ?? '').trim().slice(0, 4000);
+  if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || body.length < 2) return back('invalid');
+
+  // Replies only attach to an approved comment on the same post.
+  let parentId: number | null = null;
+  const wantedParent = Number(form.get('parent_id')) || 0;
+  if (wantedParent) {
+    const parent = await c.env.DB.prepare("SELECT id FROM comments WHERE id=? AND site_id=1 AND content_id=? AND status='approved'")
+      .bind(wantedParent, post.id).first<{ id: number }>();
+    if (parent) parentId = parent.id;
+  }
+
+  const status = commentsModerated(settings) ? 'pending' : 'approved';
+  const now = new Date().toISOString();
+  try {
+    await c.env.DB.prepare(
+      'INSERT INTO comments (site_id,content_id,parent_id,author_name,author_email,body,status,ip,user_agent,created_at,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?,?)',
+    ).bind(post.id, parentId, name, email, body, status, ip, (c.req.header('user-agent') || '').slice(0, 200), now, now).run();
+  } catch {
+    return back('failed');
+  }
+  await rateHit(c.env, rlKey, 10 * 60);
+  if (status === 'approved') await bumpCache(c.env, c.var.cfg);
+  return back(status === 'approved' ? 'published' : 'pending');
+});
+
+/* ---------------------------------------------- sitemap, robots, RSS feed */
+const xmlEsc = (v: unknown): string =>
+  String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[ch]!);
+
+site.get('/sitemap.xml', async (c) => {
+  const settings = await getSettings(c.env);
+  if (!pluginOn(settings, 'sitemap')) return c.notFound();
+  const origin = new URL(c.req.url).origin;
+  const style = permalinkStyle(settings);
+  const homeId = Number(settings.home_page_id) || 0;
+  const [{ results: content }, { results: terms }] = await Promise.all([
+    c.env.DB.prepare("SELECT id, type, slug, published_at, created_at, updated_at FROM content WHERE site_id=1 AND status='published' ORDER BY updated_at DESC")
+      .all<{ id: number; type: string; slug: string; published_at: string | null; created_at: string; updated_at: string }>(),
+    c.env.DB.prepare('SELECT taxonomy, slug, name FROM terms WHERE site_id=1 ORDER BY name')
+      .all<{ taxonomy: string; slug: string; name: string }>(),
+  ]);
+  const urls: string[] = [];
+  const push = (loc: string, lastmod: string, priority: string) => {
+    urls.push(`<url><loc>${xmlEsc(origin + loc)}</loc><lastmod>${xmlEsc(lastmod.slice(0, 10))}</lastmod><priority>${priority}</priority></url>`);
+  };
+  push('/', new Date().toISOString(), '1.0');
+  for (const row of content) {
+    if (row.type === 'page') {
+      if (row.id === homeId) continue;
+      push('/' + row.slug, row.updated_at, '0.7');
+    } else {
+      push(postUrl(row, style), row.updated_at, '0.8');
+    }
+  }
+  for (const t of terms) push(`/${t.taxonomy}/${t.slug}`, new Date().toISOString(), '0.4');
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>`;
+  return new Response(xml, { headers: { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'public, max-age=600' } });
+});
+
+site.get('/robots.txt', async (c) => {
+  const settings = await getSettings(c.env);
+  if (!pluginOn(settings, 'robots')) return c.notFound();
+  const origin = new URL(c.req.url).origin;
+  const lines = ['User-agent: *', 'Allow: /', 'Disallow: /media/backups/'];
+  if (pluginOn(settings, 'sitemap')) lines.push('', `Sitemap: ${origin}/sitemap.xml`);
+  return new Response(lines.join('\n') + '\n', { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=600' } });
+});
+
+site.get('/feed.xml', async (c) => {
+  const settings = await getSettings(c.env);
+  if (!pluginOn(settings, 'rss')) return c.notFound();
+  const { results } = await c.env.DB.prepare(
+    "SELECT slug, title, excerpt, body, published_at, created_at FROM content WHERE site_id=1 AND type='post' AND status='published' ORDER BY published_at DESC LIMIT 20",
+  ).all<{ slug: string; title: string; excerpt: string; body: string; published_at: string | null; created_at: string }>();
+  const origin = new URL(c.req.url).origin;
+  const style = permalinkStyle(settings);
+  const items = results.map((p) => {
+    const date = p.published_at || p.created_at;
+    const plain = (p.excerpt || stripTags(p.body)).slice(0, 400);
+    return `<item>
+<title>${xmlEsc(p.title)}</title>
+<link>${xmlEsc(origin + postUrl(p, style))}</link>
+<guid isPermaLink="true">${xmlEsc(origin + postUrl(p, style))}</guid>
+<pubDate>${new Date(date).toUTCString()}</pubDate>
+<description>${xmlEsc(plain)}</description>
+</item>`;
+  });
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+<title>${xmlEsc(settings.site_title || '')}</title>
+<link>${xmlEsc(origin)}</link>
+<description>${xmlEsc(settings.tagline || settings.site_title || '')}</description>
+<language>en</language>
+<lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+${items.join('\n')}
+</channel></rss>`;
+  return new Response(xml, { headers: { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'public, max-age=600' } });
+});
+
+site.get('/feed', (c) => c.redirect('/feed.xml', 301));
+
 site.get('*', async (c) => {
   const url = new URL(c.req.url);
   let path = url.pathname;
   if (path.length > 1 && path.endsWith('/')) return c.redirect(path.replace(/\/+$/, '') + url.search, 301);
 
+  // Redirects created under Admin -> Tools -> Redirects.
+  try {
+    const hit = await c.env.DB.prepare('SELECT to_url, status FROM redirects WHERE site_id=1 AND from_path=?')
+      .bind(path).first<{ to_url: string; status: number }>();
+    if (hit) return c.redirect(hit.to_url, hit.status === 302 ? 302 : 301);
+  } catch {
+    /* table missing on an old database */
+  }
+
   // Signed-in users always get fresh pages; ?preview=1 additionally shows drafts to them.
   const hasSession = !!getCookie(c, SESSION_COOKIE);
   const preview = hasSession && url.searchParams.has('preview') && !!(await sessionUser(c, c.var.cfg));
-  const cacheable = !hasSession && path.length <= 200;
+  const cacheable = !hasSession && path.length <= 200 && !url.searchParams.has('comment') && !url.searchParams.has('reply_to');
   const key = cacheKey(c.var.cfg, url);
   const headers = { 'Cache-Control': hasSession ? 'private, no-store' : 'public, max-age=0, must-revalidate' };
 
@@ -156,7 +299,18 @@ site.get('*', async (c) => {
   if ('redirect' in result) return preview ? c.redirect(result.redirect + '?preview=1', 302) : c.redirect(result.redirect, 301);
   if (preview) result.meta.noindex = true;
 
-  const body = await renderTheme(c.env, { settings, url, template: result.template, meta: result.meta, data: result.data });
+  const body = await renderTheme(c.env, {
+    cfg: c.var.cfg,
+    settings,
+    url,
+    template: result.template,
+    meta: result.meta,
+    data: {
+      ...result.data,
+      comment_notice: url.searchParams.get('comment') || undefined,
+      reply_to: url.searchParams.get('reply_to') || undefined,
+    },
+  });
   if (cacheable && result.status === 200) {
     c.executionCtx.waitUntil(c.env.KV.put(key, body, { expirationTtl: PAGE_CACHE_TTL }));
   }

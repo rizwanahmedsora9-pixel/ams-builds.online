@@ -1,5 +1,6 @@
 import type { Config, Env } from '../types';
 import type { Settings } from './config';
+import { commentToken, commentsEnabled, approvedComments, renderCommentsHtml, type CommentRow } from './comments';
 import { esc } from './security';
 import { defaultTheme, type ThemeBundle } from '../themes/default';
 
@@ -137,7 +138,7 @@ export type PageMeta = {
   noindex?: boolean;
 };
 
-function buildHead(meta: PageMeta, settings: Settings, origin: string): string {
+function buildHead(meta: PageMeta, settings: Settings, origin: string, extra = ''): string {
   const tags = [`<title>${esc(meta.title)}</title>`];
   if (meta.description) tags.push(`<meta name="description" content="${esc(meta.description)}">`);
   if (meta.noindex) tags.push('<meta name="robots" content="noindex">');
@@ -147,39 +148,102 @@ function buildHead(meta: PageMeta, settings: Settings, origin: string): string {
   if (meta.image) tags.push(`<meta property="og:image" content="${esc(meta.image.startsWith('/') ? origin + meta.image : meta.image)}">`);
   if (settings.favicon) tags.push(`<link rel="icon" href="${esc(settings.favicon)}">`);
   // Admin-only custom code (Settings are writable by admins only), injected raw by design.
+  // Feed autodiscovery (the RSS plugin can be switched off under Plugins).
+  if (settings.plugin_rss !== '0') tags.push(`<link rel="alternate" type="application/rss+xml" title="${esc(settings.site_title || 'RSS')}" href="${esc(origin)}/feed.xml">`);
   if (settings.custom_css) tags.push(`<style>${settings.custom_css.replace(/<\/style/gi, '<\\/style')}</style>`);
   if (settings.custom_head) tags.push(settings.custom_head);
+  if (extra) tags.push(extra);
   return tags.join('\n');
 }
 
-function buildFooter(settings: Settings): string {
+function buildFooter(settings: Settings, extra = ''): string {
   const parts: string[] = [];
   if (settings.custom_footer) parts.push(settings.custom_footer);
+  if (extra) parts.push(extra);
+  const widgets = widgetAreas(settings);
+  if (widgets) parts.push(widgets);
   if (settings.custom_js) parts.push(`<script>${settings.custom_js.replace(/<\/script/gi, '<\\/script')}</script>`);
   return parts.join('\n');
+}
+
+/** Footer widget slots (Admin -> Appearance -> Widgets). Titles are escaped, bodies are admin HTML. */
+function widgetAreas(settings: Settings): string {
+  const slots: string[] = [];
+  for (const n of [1, 2, 3]) {
+    const body = (settings[`widget_footer_${n}_body`] || '').trim();
+    if (!body) continue;
+    const title = (settings[`widget_footer_${n}_title`] || '').trim();
+    slots.push(`<div class="widget site-widget">${title ? `<h2 class="widget-title">${esc(title)}</h2>` : ''}${body}</div>`);
+  }
+  return slots.length ? `<div class="site-widgets"><div class="wrap"><div class="site-widgets-grid">${slots.join('')}</div></div></div>` : '';
+}
+
+/** Snippet hooks saved under Admin -> Plugins (raw code, admin only). */
+async function loadHooks(env: Env): Promise<Record<'head' | 'footer', string[]>> {
+  const out: Record<'head' | 'footer', string[]> = { head: [], footer: [] };
+  try {
+    const { results } = await env.DB.prepare("SELECT hook, code FROM hooks WHERE site_id=1 AND enabled=1 AND hook IN ('head','footer') ORDER BY id")
+      .all<{ hook: 'head' | 'footer'; code: string }>();
+    for (const r of results) out[r.hook].push(r.code);
+  } catch {
+    /* table missing on an old database */
+  }
+  return out;
 }
 
 /** Renders `template` inside the active theme's base layout and returns the full HTML document. */
 export async function renderTheme(
   env: Env,
-  opts: { settings: Settings; url: URL; template: string; meta: PageMeta; data: Record<string, unknown> },
+  opts: { cfg: Config; settings: Settings; url: URL; template: string; meta: PageMeta; data: Record<string, unknown> },
 ): Promise<string> {
   const { settings, url } = opts;
-  const [theme, menu] = await Promise.all([activeTheme(env), loadMenus(env, url.pathname)]);
+  const [theme, menu, hooks] = await Promise.all([activeTheme(env), loadMenus(env, url.pathname), loadHooks(env)]);
+
+  // Comments: rendered for posts that have them, in any theme.
+  let commentRows: CommentRow[] = [];
+  let commentsHtml = '';
+  const post = opts.template === 'post' ? (opts.data.post as { id: number } | undefined) : undefined;
+  if (post) {
+    commentRows = await approvedComments(env, post.id);
+    const open = commentsEnabled(settings);
+    if (commentRows.length || open) {
+      commentsHtml = renderCommentsHtml({
+        comments: commentRows,
+        count: commentRows.length,
+        tz: settings.timezone || 'UTC',
+        contentId: post.id,
+        token: open ? await commentToken(opts.cfg.secret, post.id) : '',
+        open,
+        notice: opts.data.comment_notice as string | undefined,
+        replyTo: Number(opts.data.reply_to) || 0,
+      });
+    }
+  }
+
   const shared = {
     site: { title: settings.site_title || '', tagline: settings.tagline || '', url: url.origin },
     menu,
     year: new Date().getUTCFullYear(),
     body_class: `tpl-${opts.template}`,
+    comments: commentRows.map((c) => ({ id: c.id, name: c.author_name, body: c.body, date: c.created_at })),
+    comments_count: commentRows.length,
+    comments_open: commentsEnabled(settings),
+    comments_html: commentsHtml,
     ...opts.data,
   };
-  const inner = renderTemplate(theme.templates[opts.template] ?? theme.templates.page ?? '', shared);
+  const source = theme.templates[opts.template] ?? theme.templates.page ?? '';
+  let inner = renderTemplate(source, shared);
+  // A theme that does not use {{{comments_html}}} still gets its comments, after the content.
+  if (commentsHtml && !/\{\{\{?\s*comments_html\s*\}?\}\}/.test(source)) {
+    inner += `\n<div class="comments-fallback">${commentsHtml}</div>`;
+  }
   return renderTemplate(theme.templates.base, {
     ...shared,
+    comments_html: commentsHtml,
     content: inner,
     theme_css: theme.css.replace(/<\/style/gi, '<\\/style'),
-    head: buildHead(opts.meta, settings, url.origin),
-    footer: buildFooter(settings),
+    head: buildHead(opts.meta, settings, url.origin, hooks.head.join('\n')),
+    footer: buildFooter(settings, hooks.footer.join('\n')),
   });
 }
 

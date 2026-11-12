@@ -9,4 +9,5 @@
   {{#if post.featured_image}}<img class="featured" src="{{post.featured_image}}" alt="{{post.featured_alt}}">{{/if}}
   <div class="content">{{{post.content}}}</div>
   {{#if post.tags}}<p class="tags">{{#each post.tags}}<a href="{{url}}">#{{name}}</a>{{/each}}</p>{{/if}}
+  {{{comments_html}}}
 </article>

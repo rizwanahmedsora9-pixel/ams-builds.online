@@ -5,11 +5,37 @@ import type { Env } from '../../types';
  * by the installer; each entry here upgrades an already-installed database.
  * Append new entries with the next version number - never edit old ones.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
-export const migrations: { version: number; statements: string[] }[] = [
-  // { version: 2, statements: ["ALTER TABLE content ADD COLUMN template TEXT NOT NULL DEFAULT ''"] },
+const COMMENTS = [
+  `CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id INTEGER NOT NULL DEFAULT 1,
+    content_id INTEGER NOT NULL,
+    parent_id INTEGER,
+    author_name TEXT NOT NULL DEFAULT '',
+    author_email TEXT NOT NULL DEFAULT '',
+    author_url TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','spam','trash')),
+    user_id INTEGER,
+    ip TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_comments_list ON comments (site_id, status, created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_comments_content ON comments (content_id, status)',
 ];
+
+export const migrations: { version: number; name: string; statements: string[] }[] = [
+  { version: 2, name: 'Comments', statements: COMMENTS },
+];
+
+/** Migration entries newer than the installed schema. */
+export function pendingMigrations(current: number): { version: number; name: string }[] {
+  return migrations.filter((m) => m.version > current).map((m) => ({ version: m.version, name: m.name }));
+}
 
 /** Applies pending migrations. Called from the cron trigger; cheap when up to date. */
 export async function migrate(env: Env): Promise<number> {
@@ -23,4 +49,10 @@ export async function migrate(env: Env): Promise<number> {
     current = m.version;
   }
   return current;
+}
+
+/** The version recorded in the database (1 for installs that predate migrations). */
+export async function installedSchemaVersion(env: Env): Promise<number> {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE site_id=1 AND key='schema_version'").first<{ value: string }>();
+  return Number(row?.value || 1);
 }

@@ -1,14 +1,23 @@
 import { Hono } from 'hono';
-import type { AppEnv } from '../../types';
+import type { AppEnv, Ctx } from '../../types';
 import { can, csrfToken, endSession, hashPassword, sessionUser, startSession, verifyPassword } from '../../lib/auth';
 import { cfgFor, getConfig, getSettings } from '../../lib/config';
 import { clientIp, rateCount, rateHit, rateReset, sameOrigin, timingSafeEqual } from '../../lib/security';
 import { csrfField, errorPage, flash, go, html, layout, shell } from '../../lib/ui';
+import { SCHEMA_VERSION, installedSchemaVersion, pendingMigrations } from '../../db/migrations';
+import { APP_VERSION } from '../../lib/version';
 import content from './content';
 import media from './media';
 import settings from './settings';
 import menus from './menus';
 import themes from './themes';
+import comments from './comments';
+import users from './users';
+import plugins from './plugins';
+import tools from './tools';
+import updates from './updates';
+import appearance from './appearance';
+import terms from './terms';
 
 /**
  * Admin panel. Mounted by the root app under "/{admin-slug}" with that prefix
@@ -99,36 +108,99 @@ admin.post('/logout', (c) => {
 });
 
 /* --------------------------------------------------------------- dashboard */
-admin.get('/', async (c) => {
-  const [counts, recent, settingsMap] = await Promise.all([
-    c.env.DB.prepare(
+const EMPTY_STATS = { pages: 0, posts: 0, media: 0, users: 0, pending: 0, approved: 0 };
+type Stats = typeof EMPTY_STATS;
+
+async function dashboardStats(c: Ctx): Promise<Stats> {
+  try {
+    const row = await c.env.DB.prepare(
       `SELECT (SELECT COUNT(*) FROM content WHERE site_id=1 AND type='page') AS pages,
               (SELECT COUNT(*) FROM content WHERE site_id=1 AND type='post') AS posts,
-              (SELECT COUNT(*) FROM media WHERE site_id=1) AS media`,
-    ).first<{ pages: number; posts: number; media: number }>(),
+              (SELECT COUNT(*) FROM media WHERE site_id=1) AS media,
+              (SELECT COUNT(*) FROM users) AS users,
+              (SELECT COUNT(*) FROM comments WHERE site_id=1 AND status='pending') AS pending,
+              (SELECT COUNT(*) FROM comments WHERE site_id=1 AND status='approved') AS approved`,
+    ).first<Stats>();
+    return row ?? EMPTY_STATS;
+  } catch {
+    // A database that has not run the comments migration yet.
+    try {
+      const row = await c.env.DB.prepare(
+        `SELECT (SELECT COUNT(*) FROM content WHERE site_id=1 AND type='page') AS pages,
+                (SELECT COUNT(*) FROM content WHERE site_id=1 AND type='post') AS posts,
+                (SELECT COUNT(*) FROM media WHERE site_id=1) AS media,
+                (SELECT COUNT(*) FROM users) AS users`,
+      ).first<Stats>();
+      return { ...EMPTY_STATS, ...row };
+    } catch {
+      return EMPTY_STATS;
+    }
+  }
+}
+
+admin.get('/', async (c) => {
+  const base = c.var.base;
+  const [counts, recent, recentComments, settingsMap, theme, schema] = await Promise.all([
+    dashboardStats(c),
     c.env.DB.prepare('SELECT id, type, title, status, updated_at FROM content WHERE site_id=1 ORDER BY updated_at DESC LIMIT 6')
       .all<{ id: number; type: string; title: string; status: string; updated_at: string }>(),
+    can(c.var.user, 'editor')
+      ? c.env.DB.prepare(
+        `SELECT cm.id, cm.author_name, cm.body, cm.status, cm.created_at, c.title AS post
+         FROM comments cm JOIN content c ON c.id=cm.content_id WHERE cm.site_id=1
+         ORDER BY cm.created_at DESC, cm.id DESC LIMIT 4`,
+      ).all<{ id: number; author_name: string; body: string; status: string; created_at: string; post: string }>()
+        .catch(() => ({ results: [] as { id: number; author_name: string; body: string; status: string; created_at: string; post: string }[] }))
+      : Promise.resolve({ results: [] as { id: number; author_name: string; body: string; status: string; created_at: string; post: string }[] }),
     getSettings(c.env),
+    c.env.DB.prepare('SELECT name, version FROM themes WHERE active=1 LIMIT 1').first<{ name: string; version: string }>().catch(() => null),
+    installedSchemaVersion(c.env).catch(() => 1),
   ]);
-  const base = c.var.base;
+  const pendingUpdates = pendingMigrations(schema).length;
+  const moderated = settingsMap.comments_enabled !== '0' && settingsMap.comments_require_approval !== '0';
+
   return layout(c, settingsMap.site_title || 'Dashboard', html`
 <h1>Dashboard</h1>
 <div class="stats">
-  <a class="stat" href="${base}/pages"><b>${counts?.pages ?? 0}</b><span>Pages</span></a>
-  <a class="stat" href="${base}/posts"><b>${counts?.posts ?? 0}</b><span>Posts</span></a>
-  <a class="stat" href="${base}/media"><b>${counts?.media ?? 0}</b><span>Media</span></a>
+  ${can(c.var.user, 'editor') ? html`<a class="stat" href="${base}/pages"><b>${counts.pages}</b><span>Pages</span></a>` : ''}
+  <a class="stat" href="${base}/posts"><b>${counts.posts}</b><span>Posts</span></a>
+  <a class="stat" href="${base}/media"><b>${counts.media}</b><span>Media</span></a>
+  ${can(c.var.user, 'editor') ? html`<a class="stat" href="${base}/comments?status=pending"><b>${counts.pending}</b><span>Comments to review</span></a>` : ''}
+  ${can(c.var.user, 'admin') ? html`<a class="stat" href="${base}/users"><b>${counts.users}</b><span>Users</span></a>` : ''}
 </div>
 <div class="row" style="margin-bottom:1rem">
   <a class="btn" href="${base}/posts/new">New post</a>
   ${can(c.var.user, 'editor') ? html`<a class="btn ghost" href="${base}/pages/new">New page</a>` : ''}
-  <a class="btn ghost" href="${base}/media">Upload media</a>
+  <a class="btn ghost" href="${base}/media#upload">Upload media</a>
+  ${can(c.var.user, 'editor') ? html`<a class="btn ghost" href="${base}/comments">Moderate comments</a>` : ''}
 </div>
-<div class="card">
-  <h2>Recently edited</h2>
-  <ul class="list">
-    ${recent.results.map((r) => html`<li><div class="t"><a href="${base}/${r.type}s/${r.id}">${r.title}</a><small>${r.type} · ${r.updated_at.slice(0, 10)}</small></div><span class="badge ${r.status}">${r.status}</span></li>`)}
-    ${recent.results.length ? '' : html`<li class="muted">Nothing yet.</li>`}
-  </ul>
+<div class="grid2">
+  <div class="card">
+    <h2>Recently edited</h2>
+    <ul class="list">
+      ${recent.results.map((r) => html`<li><div class="t"><a href="${base}/${r.type}s/${r.id}">${r.title}</a><small>${r.type} · ${r.updated_at.slice(0, 10)}</small></div><span class="badge ${r.status}">${r.status}</span></li>`)}
+      ${recent.results.length ? '' : html`<li class="muted">Nothing yet.</li>`}
+    </ul>
+  </div>
+  <div>
+    <div class="card">
+      <h2>At a glance</h2>
+      <dl class="kv" style="font-size:.88rem">
+        <dt>Version</dt><dd>${APP_VERSION}</dd>
+        <dt>Schema</dt><dd>${schema}${pendingUpdates ? html` · <a href="${base}/updates">${pendingUpdates} update${pendingUpdates === 1 ? '' : 's'}</a>` : ''}</dd>
+        <dt>Theme</dt><dd>${theme ? `${theme.name} v${theme.version}` : 'AMS Base'}</dd>
+        <dt>Comments</dt><dd>${counts.pending} pending · ${counts.approved} approved</dd>
+        <dt>Moderation</dt><dd>${moderated ? 'New comments wait for you' : 'Comments appear immediately'}</dd>
+      </dl>
+    </div>
+    ${can(c.var.user, 'editor') ? html`<div class="card">
+      <h2>Latest comments</h2>
+      ${recentComments.results.length ? html`<ul class="list">
+        ${recentComments.results.map((cm) => html`<li class="wrap"><div class="t"><b>${cm.author_name}</b> <small class="muted">on ${cm.post}</small><div class="comment-body-preview">${cm.body.slice(0, 120)}</div></div><span class="badge ${cm.status}">${cm.status}</span></li>`)}
+      </ul>` : html`<p class="muted" style="margin:0">No comments yet.</p>`}
+      <p class="hint" style="margin-bottom:0"><a href="${base}/comments">All comments</a></p>
+    </div>` : ''}
+  </div>
 </div>`, '');
 });
 
@@ -171,6 +243,13 @@ admin.route('/', media);
 admin.route('/', settings);
 admin.route('/', menus);
 admin.route('/', themes);
+admin.route('/', comments);
+admin.route('/', users);
+admin.route('/', plugins);
+admin.route('/', tools);
+admin.route('/', updates);
+admin.route('/', appearance);
+admin.route('/', terms);
 
 admin.notFound((c) => errorPage(c, 404, 'That admin page does not exist.'));
 

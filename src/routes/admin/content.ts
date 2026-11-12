@@ -408,6 +408,7 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/delete', async (c) => {
   if (!mayEdit(c, row)) return errorPage(c, 403, 'You can only delete your own posts.');
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM content_terms WHERE content_id=?').bind(id),
+    c.env.DB.prepare('DELETE FROM comments WHERE content_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM content WHERE id=?').bind(id),
     c.env.DB.prepare("DELETE FROM settings WHERE site_id=1 AND key='home_page_id' AND value=?").bind(String(id)),
   ]);

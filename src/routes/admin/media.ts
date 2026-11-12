@@ -30,7 +30,7 @@ media.get('/media', async (c) => {
   const base = c.var.base;
   return layout(c, 'Media', html`
 <h1>Media</h1>
-<form method="post" action="${base}/media/upload" enctype="multipart/form-data" class="card">
+<form method="post" action="${base}/media/upload" enctype="multipart/form-data" class="card" id="upload">
   ${csrfField(c)}
   <label for="files" style="margin-top:0">Upload files</label>
   <input type="file" id="files" name="files" multiple required accept="${Object.keys(TYPES).map((e) => '.' + e).join(',')}">
