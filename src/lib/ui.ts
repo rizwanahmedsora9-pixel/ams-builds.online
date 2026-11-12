@@ -342,8 +342,10 @@ export const errorPage = (c: Ctx, status: 400 | 403 | 404, message: string): Res
 
 /** Redirect inside the admin with a flash message. */
 export const go = (c: Ctx, path: string, msg?: { ok?: string; err?: string }): Response => {
-  const q = msg?.ok ? `?ok=${encodeURIComponent(msg.ok)}` : msg?.err ? `?err=${encodeURIComponent(msg.err)}` : '';
-  return c.redirect(c.var.base + path + q, 303);
+  const q = msg?.ok ? `ok=${encodeURIComponent(msg.ok)}` : msg?.err ? `err=${encodeURIComponent(msg.err)}` : '';
+  // Works for a path that already carries a query string, e.g. "/posts?status=draft".
+  if (!q) return c.redirect(c.var.base + path, 303);
+  return c.redirect(c.var.base + path + (path.includes('?') ? '&' : '?') + q, 303);
 };
 
 /**

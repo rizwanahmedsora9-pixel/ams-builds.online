@@ -3,6 +3,40 @@ import type { Settings } from './config';
 import { stripTags } from './security';
 import { formatDate } from './time';
 
+/**
+ * Pages for navigation (`{{#each pages}}` in a theme), in the order the editor
+ * set under Pages -> Order. Falls back to alphabetical on databases that
+ * predate the menu_order column.
+ */
+export async function listPages(env: Env, opts: { limit?: number } = {}): Promise<ContentRow[]> {
+  const limit = Math.min(200, Math.max(1, opts.limit || 100));
+  // Setting `pages_order` picks the default: the order set in the Pages screen
+  // ('menu_order') or plain alphabetical ('title'). Themes can rely on either.
+  let setting = 'menu_order';
+  try {
+    const row = await env.DB.prepare("SELECT value FROM settings WHERE site_id=1 AND key='pages_order'").first<{ value: string }>();
+    if (row?.value === 'title') setting = 'title';
+  } catch { /* settings table missing on a fresh install: keep the default */ }
+  if (setting === 'title') {
+    const { results } = await env.DB.prepare(
+      `${SELECT} WHERE c.site_id=1 AND c.type='page' AND c.status='published' ORDER BY c.title COLLATE NOCASE ASC LIMIT ?`,
+    ).bind(limit).all<ContentRow>();
+    return results;
+  }
+  try {
+    const { results } = await env.DB.prepare(
+      `${SELECT} WHERE c.site_id=1 AND c.type='page' AND c.status='published'
+       ORDER BY c.menu_order ASC, c.title COLLATE NOCASE ASC LIMIT ?`,
+    ).bind(limit).all<ContentRow>();
+    return results;
+  } catch {
+    const { results } = await env.DB.prepare(
+      `${SELECT} WHERE c.site_id=1 AND c.type='page' AND c.status='published' ORDER BY c.title COLLATE NOCASE ASC LIMIT ?`,
+    ).bind(limit).all<ContentRow>();
+    return results;
+  }
+}
+
 /** Visible to the public: published, or scheduled and already due (cron flips the status later). */
 export const VISIBLE = "(c.status='published' OR (c.status='scheduled' AND c.published_at<=?))";
 

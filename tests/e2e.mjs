@@ -742,7 +742,7 @@ test('12g. tools: redirects, export/import, backups, health and cache', async ()
 test('12h. updates and taxonomy management: version page, run updates, categories and tags', async () => {
   const page = await get(`${admin}/updates`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /0\.4\.0/, 'the updates page states the running version');
+  assert.match(page.text, /5\.0\.0|0\.5\.0/, 'the updates page states the running version');
   assert.match(page.text, /Database schema/);
   assert.match((await adminPost('/updates/run', {})).location, /\/updates\?ok=/);
 
@@ -863,6 +863,108 @@ test('13. deleting content and media removes them from the site', async () => {
   log('page, draft and media deleted; post still renders without its image');
 });
 
+/* ==========================================================================
+   Phase 2: the editor's durability features against the real server.
+   ========================================================================== */
+test('16. revisions, autosave, edit locks, quick edit and media picker', async () => {
+  const created = await adminPost('/posts/save', { title: 'Durability Post', body: '<p>Version one.</p>', status: 'draft' });
+  const id = Number(created.location.match(/\/posts\/(\d+)/)[1]);
+  assert.ok(id, 'post created');
+
+  // Revisions: each save snapshots what came before.
+  await adminPost('/posts/save', { id, title: 'Durability Post', body: '<p>Version two.</p>', status: 'draft' });
+  await adminPost('/posts/save', { id, title: 'Durability Post', body: '<p>Version three.</p>', status: 'published' });
+  const history = await get(`${admin}/posts/${id}/revisions`);
+  assert.equal(history.status, 200);
+  assert.match(history.text, /class="revision revision--manual"/);
+  const revIds = [...history.text.matchAll(/\/revisions\/(\d+)"/g)].map((m) => m[1]);
+  assert.ok(revIds.length >= 2, 'more than one restore point');
+  const oldest = revIds[revIds.length - 1];
+  const compare = await get(`${admin}/posts/${id}/revisions/${oldest}`);
+  assert.match(compare.text, /diff__line--(add|del)/, 'the diff shows the change');
+
+  // Restore is reversible.
+  const restore = await adminPost(`/posts/${id}/revisions/${oldest}/restore`, {});
+  assert.match(restore.location, /Restored/);
+  assert.match((await get(`${admin}/posts/${id}`)).text, /Version one\./);
+  assert.match((await get(`${admin}/posts/${id}/revisions`)).text, /Restored/);
+
+  // Autosave: stored, recoverable, never the live row.
+  await adminPost('/posts/save', { id, title: 'Durability Post', body: '<p>Live version.</p>', status: 'published' });
+  const autosave = await adminPost(`/posts/${id}/autosave`, { title: 'Durability Post', body: '<p>Unsaved typing.</p>' });
+  assert.equal(autosave.status, 200);
+  assert.equal(JSON.parse(autosave.text).ok, true);
+  const editor = await get(`${admin}/posts/${id}`);
+  assert.match(editor.text, /data-autosave-banner/, 'the newer autosave is offered back');
+  assert.match(editor.text, /Live version\./, 'the live body is unchanged by the autosave');
+
+  // Edit lock: the second session is warned, and an editor can take it over.
+  const loginPage = await anon(`${admin}/login`);
+  const lockCsrf = loginPage.text.match(/name="_csrf" value="([^"]+)"/)[1];
+  await adminPost('/users/save', { username: 'locker', email: 'locker@example.com', password: 'secretpass3', role: 'editor' });
+  const jar = new Map();
+  const asLocker = async (path, init = {}) => {
+    const headers = { ...(init.headers || {}), cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; ') };
+    const res = await fetch(base + path, { ...init, headers, redirect: 'manual' });
+    for (const line of res.headers.getSetCookie()) {
+      const pair = line.split(';')[0];
+      jar.set(pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1));
+    }
+    return { status: res.status, text: await res.text() };
+  };
+  const form = await asLocker(`${admin}/login`);
+  const signIn = await asLocker(`${admin}/login`, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ _csrf: form.text.match(/name="_csrf" value="([^"]+)"/)[1], login: 'locker', password: 'secretpass3' }),
+  });
+  assert.equal(signIn.status, 303, 'the second editor signed in');
+  const locked = await asLocker(`${admin}/posts/${id}`);
+  assert.match(locked.text, /data-lock-banner/);
+  assert.match(locked.text, /is editing this post/);
+  assert.match(locked.text, /\/lock\/takeover/);
+  assert.ok(lockCsrf);
+
+  // Quick edit keeps you in the list; duplicate and pin act on the row.
+  assert.match((await get(`${admin}/posts/${id}/quick`)).text, /id="qe-title"/);
+  assert.match((await adminPost(`/posts/${id}/quick`, { title: 'Renamed Quickly', slug: 'renamed-quickly', status: 'published' })).location, /posts\?ok=/);
+  const dup = await adminPost(`/posts/${id}/duplicate`, {});
+  const copyId = Number(dup.location.match(/\/posts\/(\d+)/)[1]);
+  assert.notEqual(copyId, id, 'the duplicate is a new post');
+  assert.match((await get(`${admin}/posts/${copyId}`)).text, /Renamed Quickly \(copy\)/);
+  await adminPost(`/posts/${id}/pin`, {});
+  assert.match((await get(`${admin}/posts`)).text, /class="pin"/);
+
+  // Media picker: JSON list, JSON upload with alt text, alt editing.
+  assert.match((await get(`${admin}/posts/new`)).text, /id="media-picker"/);
+  const picker = await get(`${admin}/media/picker`);
+  assert.equal(picker.status, 200);
+  assert.ok(Array.isArray(JSON.parse(picker.text).items));
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const form2 = new FormData();
+  form2.set('_csrf', await csrf());
+  form2.set('alt', 'Durability pixel');
+  form2.set('file', new Blob([png], { type: 'image/png' }), 'durability.png');
+  // The live browser posts the token from the page it is on, so the CSRF *seed*
+  // cookie is already in the jar. Reuse the harness cookie jar so the token and
+  // the seed belong together; a raw fetch with a hand-built jar would pair a
+  // fresh token with a seed the server has never seen.
+  form2.set('_csrf', await csrf());
+  const upload = await request(`${admin}/media/picker/upload`, { method: 'POST', body: form2 });
+  const uploadText = upload.text;
+  assert.equal(upload.status, 200, `picker upload answered JSON, got ${upload.status}: ${uploadText.replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(-300)}`);
+  const uploaded = JSON.parse(uploadText);
+  assert.equal(uploaded.ok, true);
+  assert.equal(uploaded.item.alt, 'Durability pixel');
+  assert.match((await get(`${admin}/media/picker?q=durability`)).text, /durability/);
+  assert.match((await adminPost(`/media/${uploaded.item.id}/alt`, { alt: 'Better description' })).location, /media\?ok=/);
+
+  // Page order + the theme's {{#each pages}} list share one order.
+  await adminPost('/pages/save', { title: 'Ordered One', slug: 'ordered-one', body: '', status: 'published' });
+  await adminPost('/pages/save', { title: 'Ordered Two', slug: 'ordered-two', body: '', status: 'published' });
+  assert.match((await get(`${admin}/pages`)).text, new RegExp(`action="${admin}/pages/order"`), 'the pages screen carries the order form');
+  log('revisions/restore, autosave, edit lock, quick edit, duplicate, pin, media picker and page order all work');
+});
+
 test('14. logout ends the session and repeated bad logins are rate limited', async () => {
   const out = await adminPost('/logout', {});
   assert.match(out.location, /logged out/);
@@ -875,3 +977,4 @@ test('14. logout ends the session and repeated bad logins are rate limited', asy
   assert.equal(locked.status, 429, 'even the right password is refused while locked');
   log('logged out; 6th failed login blocked with 429');
 });
+

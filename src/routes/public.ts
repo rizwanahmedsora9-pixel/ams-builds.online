@@ -7,7 +7,8 @@ import { findContent, listPosts, permalinkStyle, postUrl, toViews, type ContentV
 import { commentsEnabled, commentsModerated, validCommentToken } from '../lib/comments';
 import { getFile } from '../lib/files';
 import { pluginOn } from '../lib/plugins';
-import { PAGE_CACHE_TTL, cacheKey, renderTheme, type PageMeta } from '../lib/render';
+import { PAGE_CACHE_TTL, cacheKey, renderTheme, themeBySlug, type PageMeta } from '../lib/render';
+import type { ThemeBundle } from '../themes/default';
 import { clientIp, rateCount, rateHit, sameOrigin, stripTags } from '../lib/security';
 
 const site = new Hono<AppEnv>();
@@ -282,9 +283,15 @@ site.get('*', async (c) => {
     /* table missing on an old database */
   }
 
-  // Signed-in users always get fresh pages; ?preview=1 additionally shows drafts to them.
+  // Signed-in users always get fresh pages; ?preview=1 additionally shows drafts
+  // to them, and &theme=slug renders the page with any installed theme (the
+  // editor's "Preview in theme" menu and the theme store use this).
   const hasSession = !!getCookie(c, SESSION_COOKIE);
-  const preview = hasSession && url.searchParams.has('preview') && !!(await sessionUser(c, c.var.cfg));
+  const signedIn = hasSession ? await sessionUser(c, c.var.cfg) : null;
+  const preview = hasSession && url.searchParams.has('preview') && !!signedIn;
+  let previewTheme: ThemeBundle | undefined;
+  const wantedTheme = url.searchParams.get('theme');
+  if (preview && wantedTheme) previewTheme = (await themeBySlug(c.env, wantedTheme.slice(0, 60))) ?? undefined;
   const cacheable = !hasSession && path.length <= 200 && !url.searchParams.has('comment') && !url.searchParams.has('reply_to');
   const key = cacheKey(c.var.cfg, url);
   const headers = { 'Cache-Control': hasSession ? 'private, no-store' : 'public, max-age=0, must-revalidate' };
@@ -305,6 +312,7 @@ site.get('*', async (c) => {
     url,
     template: result.template,
     meta: result.meta,
+    theme: previewTheme,
     data: {
       ...result.data,
       comment_notice: url.searchParams.get('comment') || undefined,

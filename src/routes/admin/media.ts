@@ -221,6 +221,67 @@ media.get('/media', async (c) => {
 </section>`, '/media');
 });
 
+/* ------------------------------------------------------------ picker API */
+/**
+ * JSON endpoints behind the media-picker dialog. The dialog is used from the
+ * post editor (featured image, insert image) and later the page hero, so it
+ * speaks JSON and never navigates away from what you are writing.
+ */
+media.get('/media/picker', async (c) => {
+  const q = (c.req.query('q') || '').trim().slice(0, 80);
+  const type = c.req.query('type') === 'all' ? '' : " AND m.mime LIKE 'image/%'";
+  const args: (string | number)[] = [];
+  let where = `m.site_id=1${type}`;
+  if (q) {
+    where += ' AND (instr(lower(m.filename),lower(?))>0 OR instr(lower(m.alt),lower(?))>0)';
+    args.push(q, q);
+  }
+  const { results } = await c.env.DB.prepare(
+    `SELECT m.id, m.r2_key, m.filename, m.alt, m.mime FROM media m WHERE ${where} ORDER BY m.id DESC LIMIT 60`,
+  ).bind(...args).all<{ id: number; r2_key: string; filename: string; alt: string; mime: string }>();
+  return c.json(
+    { items: results.map((row) => ({ id: row.id, url: mediaUrl(row.r2_key), filename: row.filename, alt: row.alt || '', mime: row.mime })) },
+    200,
+    { 'Cache-Control': 'no-store' },
+  );
+});
+
+/** Upload from inside the picker, answering JSON so the dialog can refresh itself. */
+media.post('/media/picker/upload', async (c) => {
+  const file = c.var.form.get('file');
+  if (typeof file === 'string' || !file || !file.size) return c.json({ ok: false, error: 'Choose a file first.' }, 400);
+  const alt = String(c.var.form.get('alt') ?? '').trim().slice(0, 200);
+  const dot = file.name.lastIndexOf('.');
+  const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : '';
+  const mime = TYPES[ext];
+  if (!mime) return c.json({ ok: false, error: 'That file type is not allowed.' }, 415);
+  if (file.size > MAX_BYTES) return c.json({ ok: false, error: 'That file is too large.' }, 413);
+  if (ADMIN_ONLY.has(ext) && !can(c.var.user, 'admin')) return c.json({ ok: false, error: 'Only admins can upload that type.' }, 403);
+  const now = new Date();
+  const folder = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const filename = `${slugify(file.name.slice(0, dot)) || 'file'}.${ext}`;
+  const key = `${folder}/${randomToken(6)}-${filename}`;
+  await putFile(c.env, key, await file.arrayBuffer(), mime);
+  const res = await c.env.DB.prepare(
+    'INSERT INTO media (site_id,r2_key,filename,mime,size,alt,uploaded_by,created_at) VALUES (1,?,?,?,?,?,?,?)',
+  ).bind(key, filename, mime.split(';')[0], file.size, alt, c.var.user.id, now.toISOString()).run();
+  return c.json({
+    ok: true,
+    item: { id: Number(res.meta.last_row_id), url: mediaUrl(key), filename, alt, mime: mime.split(';')[0] },
+  }, 200, { 'Cache-Control': 'no-store' });
+});
+
+/** Alt text, edited from the library list without opening anything. */
+media.post('/media/:id{[0-9]+}/alt', async (c) => {
+  const id = Number(c.req.param('id'));
+  const alt = String(c.var.form.get('alt') ?? '').trim().slice(0, 200);
+  const row = await c.env.DB.prepare('SELECT uploaded_by FROM media WHERE id=? AND site_id=1').bind(id).first<{ uploaded_by: number | null }>();
+  if (!row) return errorPage(c, 404, 'That file is not in the library.');
+  if (!can(c.var.user, 'editor') && row.uploaded_by !== c.var.user.id) return errorPage(c, 403, 'You can only edit files you uploaded.');
+  await c.env.DB.prepare('UPDATE media SET alt=? WHERE id=?').bind(alt, id).run();
+  return go(c, '/media', { ok: alt ? 'Alt text saved.' : 'Alt text cleared (the image is now decorative).' });
+});
+
 media.post('/media/upload', async (c) => {
   const files = c.var.form.getAll('files').filter((f): f is File => typeof f !== 'string' && f.size > 0);
   if (!files.length) return go(c, '/media', { err: 'Choose at least one file.' });

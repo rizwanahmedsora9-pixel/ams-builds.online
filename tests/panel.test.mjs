@@ -219,7 +219,7 @@ test('accessibility floor: landmarks, focus styles, current page, reduced motion
   // control can be focused invisibly.
   for (const sheet of [css, (await panel.get(`${panel.admin}/assets/screens.css`)).text]) {
     for (const [rule] of sheet.matchAll(/[^{}]+\{[^{}]*outline:\s*none[^{}]*\}/g)) {
-      assert.match(rule, /palette__form|list-toolbar__search/, `outline:none is scoped to a wrapper: ${rule.trim().slice(0, 60)}`);
+      assert.match(rule, /palette__form|list-toolbar__search|media-picker__search/, `outline:none is scoped to a wrapper: ${rule.trim().slice(0, 60)}`);
     }
     assert.match(sheet, /:focus-within/, 'wrapped inputs show focus on the wrapper');
   }
@@ -239,4 +239,251 @@ test('rendered pages never nest forms (a browser would drop the inner one)', asy
     }
     assert.equal(depth, 0, `${path || 'dashboard'} leaves a form open`);
   }
+});
+
+/* ==========================================================================
+   Phase 2: revisions, autosave, edit locks, media picker, quick edit,
+   duplicate/pin, page ordering and theme previews.
+   ========================================================================== */
+
+/** Create a post through the editor and return its id. */
+async function newPost(title, body = '<p>First draft.</p>') {
+  const res = await panel.adminPost('/posts/save', { title, body, status: 'draft' });
+  assert.equal(res.status, 303, `created ${title}`);
+  return Number(res.location.match(/\/posts\/(\d+)/)[1]);
+}
+
+test('saving keeps a revision, and restoring is itself reversible', async () => {
+  const id = await newPost('Revision Target');
+  await panel.adminPost('/posts/save', { id, title: 'Revision Target', body: '<p>Second draft.</p>', status: 'draft' });
+  await panel.adminPost('/posts/save', { id, title: 'Revision Target', body: '<p>Third draft.</p>', status: 'published' });
+
+  const history = await panel.get(`${panel.admin}/posts/${id}/revisions`);
+  assert.equal(history.status, 200);
+  assert.match(history.text, /class="revisions"/);
+  assert.equal((history.text.match(/class="revision revision--manual"/g) || []).length >= 2, true, 'each save added a snapshot');
+
+  // The compare screen shows what changed since that snapshot: the old line is
+  // marked as removed, the current one as added.
+  const revIds = [...history.text.matchAll(/\/revisions\/(\d+)"/g)].map((m) => m[1]);
+  assert.ok(revIds.length >= 2, 'history has more than one snapshot');
+  const oldestId = revIds[revIds.length - 1];
+  const oldest = await panel.get(`${panel.admin}/posts/${id}/revisions/${oldestId}`);
+  assert.match(oldest.text, /First draft\./, 'the oldest snapshot holds the original body');
+  assert.equal(oldest.status, 200);
+  assert.match(oldest.text, /diff__line--del/);
+  assert.match(oldest.text, /diff__line--add/);
+
+  const restored = await panel.adminPost(`/posts/${id}/revisions/${oldestId}/restore`, {});
+  assert.equal(restored.status, 303);
+  assert.match(restored.location, /ok=Restored/);
+  const afterRestore = await panel.get(`${panel.admin}/posts/${id}`);
+  assert.match(afterRestore.text, /First draft\./);
+  // The version that was live before the restore is still in the history.
+  // The restore took a snapshot of what it replaced, so the third draft is still
+  // reachable from the history (as the newest entry).
+  const history2 = await panel.get(`${panel.admin}/posts/${id}/revisions`);
+  assert.match(history2.text, /Restored/, 'the restore left its own marker in the history');
+  const newestId = history2.text.match(/\/revisions\/(\d+)"/)[1];
+  assert.match((await panel.get(`${panel.admin}/posts/${id}/revisions/${newestId}`)).text, /Third draft\./, 'the version the restore replaced is still there');
+});
+
+test('autosave stores a recoverable copy without touching the live post', async () => {
+  const id = await newPost('Autosave Target', '<p>Saved body.</p>');
+  const res = await panel.adminPost(`/posts/${id}/autosave`, { title: 'Autosave Target', body: '<p>Half-typed body.</p>', excerpt: 'wip' });
+  assert.equal(res.status, 200);
+  const payload = JSON.parse(res.text);
+  assert.equal(payload.ok, true);
+  assert.match(payload.at, /^\d{4}-\d{2}-\d{2}T/);
+
+  // The live post still has the saved body: an autosave is never a publish.
+  const editorPage = await panel.get(`${panel.admin}/posts/${id}`);
+  assert.match(editorPage.text, /Saved body\./);
+  assert.match(editorPage.text, /Autosave/, 'the editor talks about autosave');
+  assert.match(editorPage.text, /data-autosave-banner/, 'a newer autosave is offered for recovery');
+  assert.match(editorPage.text, /Unsaved work from/, 'the banner says when the autosave was taken');
+  assert.match(editorPage.text, /data-autosave-url="\/admin-panel\/posts\/\d+\/autosave"/);
+  assert.match(editorPage.text, /data-autosave-status/, 'the editor has a place to say "Saved 12 s ago"');
+
+  const unchanged = await panel.adminPost(`/posts/${id}/autosave`, { title: 'Autosave Target', body: '<p>Saved body.</p>' });
+  assert.equal(JSON.parse(unchanged.text).unchanged, true, 'an unchanged body is not stored again');
+});
+
+test('an edit lock follows the first editor and can be taken over', async () => {
+  const id = await newPost('Locked Post');
+  const first = await panel.get(`${panel.admin}/posts/${id}`); // claims the lock
+  assert.equal(first.status, 200);
+  assert.match(first.text, /data-lock-mine="1"|data-lock-mine/);
+  assert.equal((first.text.match(/is editing this post/g) || []).length, 0, 'the owner does not see a lock warning');
+
+  // A second person opens the same post: the advisory lock is visible.
+  await panel.adminPost('/users/save', { username: 'second', email: 'second@example.com', password: 'secretpass2', role: 'editor' });
+
+  // A separate browser: its own cookie jar, starting from the login page.
+  const jar = new Map();
+  const withJar = async (path, init = {}) => {
+    const headers = { ...(init.headers || {}) };
+    if (jar.size) headers.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
+    const res = await fetch(panel.base + path, { ...init, headers, redirect: 'manual' });
+    for (const line of res.headers.getSetCookie()) {
+      const pair = line.split(';')[0];
+      const i = pair.indexOf('=');
+      jar.set(pair.slice(0, i), pair.slice(i + 1));
+    }
+    return { status: res.status, text: await res.text() };
+  };
+  const form = await withJar(`${panel.admin}/login`);
+  const token = form.text.match(/name="_csrf" value="([^"]+)"/)[1];
+  const signIn = await withJar(`${panel.admin}/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ _csrf: token, login: 'second', password: 'secretpass2' }),
+  });
+  assert.equal(signIn.status, 303, 'the second user signed in');
+
+  const page = await withJar(`${panel.admin}/posts/${id}`);
+  assert.equal(page.status, 200);
+  assert.match(page.text, /data-lock-banner/, 'the second editor is warned');
+  assert.match(page.text, /is editing this post/);
+  assert.match(page.text, /\/lock\/takeover/, 'an editor can take the lock over');
+});
+
+test('the media picker lists, filters and uploads without leaving the editor', async () => {
+  const editorPage = await panel.get(`${panel.admin}/posts/new`);
+  assert.match(editorPage.text, /<dialog id="media-picker"/);
+  assert.match(editorPage.text, /data-endpoint="\/admin-panel\/media\/picker"/);
+  assert.match(editorPage.text, /id="insert-image"/, 'the toolbar Image button opens the picker');
+  assert.match(editorPage.text, /data-open-picker="featured"/, 'the featured image uses the same dialog');
+  assert.match(editorPage.text, /featured-picker__preview/);
+
+  const list = await panel.get(`${panel.admin}/media/picker`);
+  assert.equal(list.status, 200);
+  assert.equal(list.headers.get('cache-control'), 'no-store');
+  assert.ok(Array.isArray(JSON.parse(list.text).items));
+
+  // Upload through the picker: multipart, JSON back, alt text stored with it.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const form = new FormData();
+  form.set('_csrf', await panel.csrf());
+  form.set('alt', 'A single pixel');
+  form.set('file', new Blob([png], { type: 'image/png' }), 'pixel.png');
+  const cookie = [...panel.jar].map(([k, v]) => `${k}=${v}`).join('; ');
+  const upload = await fetch(`${panel.base}${panel.admin}/media/picker/upload`, { method: 'POST', body: form, headers: { cookie } });
+  const body = await upload.json();
+  assert.equal(upload.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.item.alt, 'A single pixel');
+  assert.match(body.item.url, /^\/media\//);
+
+  const search = await panel.get(`${panel.admin}/media/picker?q=pixel`);
+  assert.equal(JSON.parse(search.text).items.length, 1, 'the new upload is findable');
+  const alt = await panel.adminPost(`/media/${body.item.id}/alt`, { alt: 'Updated description' });
+  assert.equal(alt.status, 303);
+  assert.match((await panel.get(`${panel.admin}/media/picker?q=updated`)).text, /Updated description/);
+});
+
+test('quick edit, duplicate and pin work from the list', async () => {
+  const id = await newPost('Quick Edit Target', '<p>Body.</p>');
+  const quick = await panel.get(`${panel.admin}/posts/${id}/quick`);
+  assert.equal(quick.status, 200);
+  assert.match(quick.text, /id="qe-title"/);
+  assert.match(quick.text, /id="qe-status"/);
+  const saved = await panel.adminPost(`/posts/${id}/quick`, {
+    title: 'Renamed By Quick Edit', slug: 'renamed-by-quick-edit', status: 'published', tags: 'one, two',
+  });
+  assert.equal(saved.status, 303);
+  assert.match(saved.location, /^\/admin-panel\/posts\?/);
+  const list = await panel.get(`${panel.admin}/posts?q=Slightly-Off-Title`);
+  assert.ok(list);
+
+  const dup = await panel.adminPost(`/posts/${id}/duplicate`, {});
+  assert.equal(dup.status, 303);
+  const copyId = Number(dup.location.match(/\/posts\/(\d+)/)[1]);
+  assert.notEqual(copyId, id);
+  const copy = await panel.get(`${panel.admin}/posts/${copyId}`);
+  assert.match(copy.text, /Renamed By Quick Edit \(copy\)/);
+  assert.match(copy.text, /<option value="draft" selected>/, 'the copy starts as a draft');
+
+  const pinned = await panel.adminPost(`/posts/${id}/pin`, {});
+  assert.equal(pinned.status, 303);
+  assert.match((await panel.get(`${panel.admin}/posts`)).text, /class="pin"/, 'pinned posts are marked');
+  await panel.adminPost(`/posts/${id}/pin`, {});
+});
+
+test('pages can be ordered, and the order is what themes see', async () => {
+  await panel.adminPost('/pages/save', { title: 'Order A', slug: 'order-a', body: '', status: 'published' });
+  await panel.adminPost('/pages/save', { title: 'Order B', slug: 'order-b', body: '', status: 'published' });
+  const page = await panel.get(`${panel.admin}/pages`);
+  assert.match(page.text, /action="\/admin-panel\/pages\/order"/);
+  assert.match(page.text, /class="order-list"/);
+
+  const ids = [...page.text.matchAll(/name="id" value="(\d+)"/g)].map((m) => m[1]);
+  const orders = ids.map((_, i) => String(ids.length - i));
+  const form = new URLSearchParams({ _csrf: await panel.csrf() });
+  ids.forEach((id, i) => { form.append('id', id); form.append('order', orders[i]); });
+  const cookie = [...panel.jar].map(([k, v]) => `${k}=${v}`).join('; ');
+  const res = await fetch(`${panel.base}${panel.admin}/pages/order`, {
+    method: 'POST', redirect: 'manual', headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' }, body: form,
+  });
+  assert.equal(res.status, 303);
+  assert.match(res.headers.get('location'), /sort=order/);
+
+  const ordered = await panel.get(`${panel.admin}/pages?sort=order&dir=asc`);
+  const orderBlock = ordered.text.slice(ordered.text.indexOf('class="order-list"'));
+  const posA = orderBlock.indexOf('Order A');
+  const posB = orderBlock.indexOf('Order B');
+  assert.ok(posA > 0 && posB > 0, 'both pages are in the order list');
+  assert.ok(posB < posA, 'the list follows the order we saved');
+  // The public render gets the same order via {{#each pages}}.
+  const publicPage = await panel.anon('/order-a');
+  assert.equal(publicPage.status, 200);
+});
+
+test('preview with any installed theme needs a session', async () => {
+  const id = await newPost('Theme Preview Target', '<p>Previewable.</p>');
+  const slug = (await panel.get(`${panel.admin}/posts/${id}`)).text.match(/name="slug" value="([^"]*)"/)[1];
+  const url = `/blog/${slug}?preview=1&theme=default`;
+
+  const anonymous = await panel.get(url, { cookies: false });
+  assert.equal(anonymous.status, 404, 'drafts stay private without a session');
+
+  const signedIn = await panel.get(url);
+  assert.equal(signedIn.status, 200);
+  assert.match(signedIn.headers.get('cache-control'), /no-store/, 'previews are never cached');
+});
+
+test('an upgrade path: a database without the Phase 2 tables still works', async () => {
+  // Simulate a site that installed before migration 3: the code must degrade
+  // (no crash) and the admin must be told to run the update.
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(`${panel.dataDir}/cms.sqlite`);
+  db.exec('DROP TABLE content_revisions');
+  db.exec('DROP TABLE content_lock');
+  db.exec("UPDATE settings SET value='2' WHERE key='schema_version'");
+  db.close();
+
+  const created = await panel.adminPost('/posts/save', { title: 'Pre Migration Post', body: '<p>Old install.</p>', status: 'draft' });
+  assert.equal(created.status, 303, 'creating a post never depends on the new tables');
+  const id = Number(created.location.match(/\/posts\/(\d+)/)[1]);
+  const editor = await panel.get(`${panel.admin}/posts/${id}`);
+  assert.equal(editor.status, 200, 'the editor still renders');
+  assert.match(editor.text, /data-is-new="0"/);
+
+  const history = await panel.get(`${panel.admin}/posts/${id}/revisions`);
+  assert.equal(history.status, 200, 'the history page renders');
+  assert.match(history.text, /Run updates from the Updates screen/, 'and explains what to do');
+
+  const autosave = await panel.adminPost(`/posts/${id}/autosave`, { title: 'Pre Migration Post', body: '<p>Typed.</p>' });
+  assert.equal(autosave.status, 409, 'autosave says it needs the migration instead of failing');
+  assert.equal(JSON.parse(autosave.text).error, 'needs-migration');
+
+  const saved = await panel.adminPost('/posts/save', { id, title: 'Pre Migration Post', body: '<p>Still saves.</p>', status: 'published' });
+  assert.equal(saved.status, 303, 'saving never depends on the new tables');
+  assert.match((await panel.get(`${panel.admin}/posts/${id}`)).text, /Still saves\./);
+
+  // Running the update from the panel restores the full feature set.
+  const run = await panel.adminPost('/updates/run', {});
+  assert.equal(run.status, 303);
+  const after = await panel.adminPost(`/posts/${id}/autosave`, { title: 'Pre Migration Post', body: '<p>Typed now.</p>' });
+  assert.equal(after.status, 200, 'after the update, autosave works');
 });

@@ -135,13 +135,16 @@ product over HTTP. `tests/helpers.mjs` holds the shared harness (server lifecycl
 cookie jar, CSRF, install-and-login helper), so a new test starts from a working
 panel in three lines.
 
-`tests/panel.test.mjs` (14 cases) covers the panel itself: the shell renders once,
+`tests/panel.test.mjs` (23 cases) covers the panel itself: the shell renders once,
 every screen loads, the palette markup and its live region, global search end to end
 (full page, `partial=1` fragment, session guard, escaped query), the rail / scheme /
 density cookies, the shared list pattern and its empty states, the dashboard's
 priority order, and the accessibility floor - including a rule that every
 `outline: none` in the panel CSS must be paired with a wrapper that draws its own
-focus ring.
+focus ring. The Phase 2 cases cover revisions and restore, autosave recovery, the edit lock
+(two real sessions), the media picker, quick edit/duplicate/pin, page ordering, theme previews and
+the upgrade path (the schema tables are dropped under the running server, the panel must keep
+working and *Run updates* must bring the features back).
 
 ## The admin panel
 
@@ -187,6 +190,30 @@ behave the same and a change lands everywhere at once.
   check fails quietly if the data is not there yet. Below it: site totals, recently edited
   content, latest comments and version/schema/theme at a glance.
 
+### Writing: safe, fast, and never a surprise
+
+- **Nothing is lost.** Every save keeps a snapshot of the previous version, and while you type the
+  editor autosaves every 30 seconds. Autosaves go to the history, not to the live post, so a crash or
+  a closed tab leaves your work recoverable while the published page keeps showing the last real
+  save. The editor tells you when it last saved and warns you before leaving with unsaved changes.
+- **History and restore.** *History* in the editor lists every version (manual saves and autosaves
+  are labelled), shows a line-by-line diff of what changed, and restores any of them in one click —
+  the version you replace is snapshotted first, so a restore is reversible too. The 25 most recent
+  versions are kept per post.
+- **No silent overwrites.** Opening a post puts an advisory lock on it for 2.5 minutes, refreshed
+  while you work. If someone else has it open, you see "Alice is editing this post right now";
+  editors can take it over with *Edit anyway*. Saving never blocks, so a lost connection cannot
+  strand a post.
+- **Media without leaving the page.** The featured image and the editor's *Image* button open the
+  same picker: search the library, set the alt text, or upload a new file right there.
+- **Fast fixes from the list.** Each row has Edit · Quick edit · Duplicate · History · View · Pin ·
+  Preview in theme. *Quick edit* changes title, slug, status, date, categories and tags in place;
+  *Duplicate* makes a draft copy; *Pin* floats a row to the top.
+- **Page order.** The Pages screen has an *Order* panel. The same order reaches themes through
+  `{{#each pages}}`, so a menu built from pages matches what you set.
+- **Preview in any theme.** `?preview=1&theme=<slug>` renders the post with any installed theme,
+  for signed-in users only and never cached.
+
 The account menu (top right) holds Profile, Preferences, colour scheme shortcuts
 (light / dark / match system) and Log out. Rail state, scheme and density are also
 one-click links (`/rail/collapsed`, `/scheme/dark`), so they work with JavaScript off.
@@ -197,9 +224,9 @@ blank 500.
 | --- | --- |
 | Dashboard | Greeting, **Needs attention** checklist (each item links to the fix), site totals, recently edited content, latest comments, version, schema and theme |
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
-| Posts | Shared list pattern: status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
-| Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs and upload images, PDF, audio, video and fonts to KV (Cloudflare) or `data/media/` (Node) |
-| Pages | Same list pattern as Posts with status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
+| Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
+| Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). The media picker in the editor uses the same library |
+| Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (additional CSS, header code, footer code, JavaScript), **Themes**, **Menus**, **Widgets** (three footer areas) |
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
@@ -356,7 +383,7 @@ src/
       assets/tokens.css    design tokens: colour, space, radius, type, schemes
       assets/app.css       shell (top bar, rail, palette) and component kit
       assets/screens/      one file per screen family as it is rebuilt
-                           (dashboard.css, lists.css, legacy.css)
+                           (dashboard.css, lists.css, editor.css, legacy.css)
       components.ts        pageHead, card, table, tabs, emptyState, notice, ...
       icons.ts             inline SVG sprite
       preferences.ts       colour scheme, density, rail state (per browser)
@@ -364,6 +391,9 @@ src/
       search.ts            site-wide search across content, media, comments, users
       palette.ts           command palette script and its endpoint config
       attention.ts         "needs attention" checks for the dashboard
+      revisions.ts         save snapshots, line diff, autosave retention, edit locks
+      editor-views.ts      revision list, diff and editor banners (server-rendered)
+      media-picker.ts      the picker dialog and its client script
       assets.ts            route: GET /{admin}/assets/*.css (immutable, ETagged)
       bundles.ts           CSS bundle registry: tokens, app, screens + ETags
       content.ts           pages and posts
@@ -384,7 +414,7 @@ src/
   db/
     schema.sql
     index.ts               schema runner
-    migrations/index.ts    forward-only migrations
+    migrations/index.ts    forward-only migrations (statement-tolerant; v3 revisions, v4 order)
   lib/
     auth.ts                passwords, sessions, CSRF, roles
     security.ts            escaping, sanitizer, rate limiting
@@ -396,6 +426,7 @@ src/
     comments.ts            comment storage, tokens, public rendering
     plugins.ts             built-in plugin list and hook points
     version.ts             app version shown in Updates
+    schema.ts              cached "does this table/column exist" probes for upgrade safety
     config.ts              KV config, settings
     time.ts                timezone helpers
     ui.ts                  admin HTML helpers and CSS

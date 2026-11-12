@@ -54,11 +54,41 @@ CREATE TABLE IF NOT EXISTS content (
   featured_media_id INTEGER,
   author_id INTEGER,
   published_at TEXT,
+  updated_by INTEGER,
+  menu_order INTEGER NOT NULL DEFAULT 0,
+  pinned INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (site_id, type, slug)
 );
 CREATE INDEX IF NOT EXISTS idx_content_list ON content (site_id, type, status, published_at);
+
+-- Phase 2: an append-only history of every save, so nothing is ever lost.
+CREATE TABLE IF NOT EXISTS content_revisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_id INTEGER NOT NULL DEFAULT 1,
+  content_id INTEGER NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  slug TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  excerpt TEXT NOT NULL DEFAULT '',
+  seo_title TEXT NOT NULL DEFAULT '',
+  seo_description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft',
+  author_id INTEGER,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_revisions_content ON content_revisions (content_id, id DESC);
+
+-- Phase 2: a person currently editing a post, so two sessions cannot silently
+-- overwrite each other. Advisory only: the row expires.
+CREATE TABLE IF NOT EXISTS content_lock (
+  content_id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  username TEXT NOT NULL DEFAULT '',
+  heartbeat_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS terms (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

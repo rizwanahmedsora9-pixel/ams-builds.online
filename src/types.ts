@@ -50,6 +50,9 @@ export type ContentRow = {
   featured_media_id: number | null;
   author_id: number | null;
   published_at: string | null;
+  updated_by?: number | null;
+  menu_order?: number;
+  pinned?: number;
   created_at: string;
   updated_at: string;
   author?: string | null;

@@ -189,9 +189,14 @@ region; per-user rows-per-page; sticky list headers.
 styling lives in cached bundles, largest CSS bundle 29.6 KB raw / 5.7 KB gzip. The ≥ 60 %
 payload target is a whole-panel average and is still open for the screens listed in Phase 1b.
 
-### Phase 2 — Posts & pages workflow (11 d)
+### Phase 2 — Posts & pages workflow (11 d) — ✅ shipped in 0.5.0
 
 The heart of the request. Order matters: durability first, then speed.
+
+*Scope note: the block-model editor rewrite (item 4) is **not** in this release. The existing
+Text/HTML editor gained autosave, locks, revisions, the media picker and a History card; replacing
+`document.execCommand` with a block model is now Phase 2b, because it is the one item that can
+regress what is already working and it deserves its own tests.*
 
 1. **Revisions (P0)** — migration 3:
    `content_revisions(id, content_id, title, body, excerpt, seo_*, status, author_id, created_at, note)`.
@@ -222,6 +227,56 @@ The heart of the request. Order matters: durability first, then speed.
 
 **Acceptance:** kill the browser mid-edit → content recoverable; two sessions editing → second sees the
 lock; image insertion possible without leaving the editor; every new route covered by an e2e test.
+
+Shipped in 0.5.0 (schema version 4):
+
+- **Revisions** — `content_revisions` (migration 3). Every save snapshots the row *as it was before*
+  the save, so nothing is lost; unchanged re-saves are skipped. `GET /{admin}/{kind}/{id}/revisions`
+  lists the history (manual saves and autosaves are labelled separately, 25 + 8 kept per item),
+  `.../revisions/:rev` shows a line diff (LCS, gaps collapsed, `<del>`/`<ins>` for the title) and
+  `POST .../revisions/:rev/restore` restores — writing a snapshot of what it replaces first, so a
+  restore is itself reversible. `src/admin/revisions.ts` holds the logic, `src/admin/editor-views.ts`
+  the fragments.
+- **Autosave** — `POST /{admin}/{kind}/{id}/autosave` every 30 s while dirty, into the revision table
+  with `note='autosave'`, never into the live row: a crashed tab leaves a recoverable copy and the
+  published page keeps serving the last real save. The editor shows "Autosaved 12 s ago", arms a
+  `beforeunload` guard while dirty, and the editor page shows a "Unsaved work from …" banner when a
+  newer autosave exists. JSON in, JSON out, `no-store`; a site without migration 3 answers
+  `409 {error:'needs-migration'}` and says so in the editor instead of failing.
+- **Edit locks** — `content_lock` (advisory, 2.5 min TTL, heartbeat every 45 s). The second person to
+  open a post sees "Alice is editing this post right now" with an editor-only **Edit anyway**
+  (`POST .../lock/takeover`). Saving releases the lock and never blocks, so a lost connection can
+  not strand a post.
+- **Media picker** — one dialog (`src/admin/media-picker.ts`) for the featured image and the
+  editor's Insert image button. `GET /{admin}/media/picker` serves JSON for the grid,
+  `POST /{admin}/media/picker/upload` uploads multipart and answers JSON with the new item (alt text
+  included), and `POST /{admin}/media/{id}/alt` edits alt text from the library. The old `<select>`
+  of filenames is gone.
+- **List v2** — 48 px row thumbnails, pin badge, and a row menu with Edit · Quick edit · Duplicate ·
+  History · View · Pin · Preview in theme… (the menu appears on hover/focus on desktop, always on
+  phones). **Quick edit** (`GET/POST /{admin}/{kind}/{id}/quick`) edits title, slug, status, date,
+  categories and tags without leaving the list; **Duplicate** copies as a draft; **Pin**
+  (`content.pinned`) floats a row to the top.
+- **Page ordering** — `content.menu_order` plus a "Page order" panel on the Pages screen
+  (`POST /{admin}/pages/order`). Themes get `{{#each pages}}` in the shared render data, ordered by
+  `menu_order` (or alphabetically when the `pages_order` setting says `title`), so the site menu and
+  the panel agree.
+- **Preview in any theme** — `?preview=1&theme=slug` renders a post or page with any *installed*
+  theme, admin-session only and never cached. This is the preview engine the theme store will use.
+- **Upgrade safety** — migrations now run statement by statement, tolerating the one error SQLite
+  cannot express idempotently (`ADD COLUMN` on a database that already has it), and
+  `src/lib/schema.ts` probes (cached ~5 s, cleared after a migration) let every new screen degrade
+  instead of throwing. `tests/panel.test.mjs` proves it: drop the Phase 2 tables under a running
+  server and the editor, history and saves still work, then `Updates → Run updates` restores the
+  full feature set. Cron prunes expired locks and autosaves older than 14 days.
+
+**Measured in 0.5.0:** `tests/e2e.mjs` 26 tests, `tests/panel.test.mjs` 23 tests, all green on the
+Node runtime; bundle budgets unchanged (largest CSS 29.6 KB raw / 5.7 KB gzip, `screens/editor.css`
+adds 8.1 KB raw / 2.0 KB gzip).
+
+**Phase 2b (not shipped):** block-model editor (paragraph/H2/H3/list/quote/code/image/embed/HTML
+blocks) replacing the contenteditable command layer; per-user rows-per-page; "last edited by" in the
+editor footer.
 
 ### Phase 3 — Theme platform v2 (9 d)
 
@@ -448,9 +503,10 @@ Every helper is a pure function over data; the engine still cannot execute code.
 
 | Version | Name | Objects |
 |---|---|---|
-| 3 | Revisions & workflow | `content_revisions`, `content_lock`, `content.menu_order`, `content.template`, `content.updated_by` |
-| 4 | Theme platform | `theme_assets`, `theme_settings`, `theme_versions`, `themes.site_id/author/description/screenshot/manifest` |
-| 5 | Governance | `audit_log`, `role_caps`, `user_prefs` |
+| 3 ✅ | Revisions & workflow | `content_revisions`, `content_lock`, `content.updated_by`, `content.menu_order`, `content.pinned` (`content.template` moved to Phase 3) |
+| 4 ✅ | Page ordering default | the `pages_order` setting (a database that ran an early build of v3 lands on a consistent version) |
+| 5 | Theme platform | `theme_assets`, `theme_settings`, `theme_versions`, `themes.site_id/author/description/screenshot/manifest` |
+| 6 | Governance | `audit_log`, `role_caps`, `user_prefs` |
 
 Forward-only, each applied by the existing `migrate()` and surfaced on the Updates screen.
 
