@@ -1,0 +1,11 @@
+<header class="masthead">
+  <div class="measure">
+    <p class="masthead__kicker">{{#if theme.tagline}}{{theme.tagline}}{{else}}{{site.tagline}}{{/if}}</p>
+    <a class="masthead__title" href="/">{{site.title}}</a>
+    {{#if menu.primary}}
+    <nav class="masthead__nav" aria-label="Primary">
+      {{#each menu.primary}}<a href="{{url}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>{{/each}}
+    </nav>
+    {{/if}}
+  </div>
+</header>

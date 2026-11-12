@@ -14,7 +14,7 @@ import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 const plugins = new Hono<AppEnv>();
 
 const guard = async (c: Ctx, next: () => Promise<void>) => {
-  if (!can(c.var.user, 'admin')) return errorPage(c, 403, 'Only admins can manage plugins.');
+  if (!can(c.var.user, 'manage_plugins')) return errorPage(c, 403, 'Only admins can manage plugins.');
   await next();
 };
 plugins.use('/plugins', guard);

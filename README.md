@@ -11,6 +11,11 @@ A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) ser
 | 2 | Comments and moderation, users and roles, custom code, redirects, sitemap.xml, robots.txt, RSS | **done** |
 | 3 | Backups, plugins and hooks, import/export, updates and site health | **done** |
 | 3 | Multi-site | later |
+| 4 | Panel overhaul: design system, lists, dashboard (Phase 0–2 of `docs/panel-overhaul-roadmap.md`) — revisions, autosave, edit locks, media picker, page order | **done (0.5.0)** |
+| 5 | Theme platform: theme packages with assets, template engine v2, manifest v2, inheritance, theme versions and CSP (Phase 3 of the roadmap) | **done (0.6.0)** |
+| 6 | Appearance hub and live Customizer: design tokens, signed-cookie preview, per-theme settings, widget areas, per-page templates, Identity (Phase 4 of the roadmap) | **done (0.7.0)** |
+| 7 | Theme store & lifecycle: screenshots, live preview, in-panel file editor, zip export, rollback, two new bundled themes (Phase 5 of the roadmap) | **done (0.8.0)** |
+| 8 | Governance and performance: audit log, capabilities instead of hard-coded roles, enforced performance budgets, panel strings in one catalogue, export v2 (Phase 6 of the roadmap) | **done (0.8.0)** |
 
 The full database schema is created at install. Existing sites upgrade themselves:
 pending tables and columns are added by the cron trigger, by `npm start`, or from
@@ -123,37 +128,88 @@ Delete `.wrangler/` or `data/` to start again from the installer.
 
 ## Tests
 
-```bash
-npm test                  # end-to-end on the Node.js runtime
-npm run test:cloudflare   # the same steps on the Cloudflare runtime (wrangler dev)
-npm run test:all
+```
+npm test              # asset budgets, then the end-to-end suite on Node.js
+npm run test:cloudflare   # same suite against wrangler dev (D1 + KV)
+npm run test:all      # both
+npm run check:assets  # panel CSS/token budgets only (fast)
 ```
 
-Each run starts a real server on an empty temporary data folder and drives it over HTTP: health check, installer (bad input, success, lock), public site and cache, login and CSRF, pages, media, posts, drafts and scheduling, settings, password change, restart, menus, themes, comments (public form, moderation, approval, replies, spam), users and role limits, plugins and custom code, redirects, import/export, backups, site health, updates, categories and tags, the whole sidebar, deletion, logout and rate limiting. It prints one line per step and removes the folder afterwards.
+`tests/e2e.mjs` boots a real server on an empty data folder and walks the whole
+product over HTTP. `tests/helpers.mjs` holds the shared harness (server lifecycle,
+cookie jar, CSRF, install-and-login helper), so a new test starts from a working
+panel in three lines.
 
-`GET /api/health` reports the runtime, whether the site is installed, and whether the database, key-value store and media storage answer. Use it for uptime monitoring.
+`tests/template.test.mjs` (12 cases) tests the template engine directly — escaping, comparisons,
+loops and their helpers, every filter, date patterns, partials, layout blocks and the parser's
+error messages. It runs against `dist/template.mjs`, the same bundle the server uses.
 
+`tests/panel.test.mjs` (50 cases) covers the panel itself: the shell renders once,
+every screen loads, the palette markup and its live region, global search end to end
+(full page, `partial=1` fragment, session guard, escaped query), the rail / scheme /
+density cookies, the shared list pattern and its empty states, the dashboard's
+priority order, and the accessibility floor - including a rule that every
+`outline: none` in the panel CSS must be paired with a wrapper that draws its own
+focus ring. The Phase 2 cases cover revisions and restore, autosave recovery, the edit lock
+(two real sessions), the media picker, quick edit/duplicate/pin, page ordering, theme previews and
+the upgrade path (the schema tables are dropped under the running server, the panel must keep
+working and *Run updates* must bring the features back). The Phase 3 cases install a zip theme with
+partials, a logo, a font-free stylesheet and three typed settings, then assert what a visitor sees:
+the partial renders, `{{post.date | date "Y-m-d"}}` formats, `{{asset}}` points at a served file, the
+CSS is linked rather than inlined, settings reach the markup, a snapshot can be reverted, a child
+theme inherits from its parent, the validator reports broken templates, and the CSP header matches
+the nonce on the page.
+
+The Phase 4 cases install a theme that declares settings, two widget areas and an extra template, then prove
+the Appearance work: six screens in one sidebar section, one control per token the theme honours (and a list of
+the ones it does not), an unsaved brand colour reaching `/?preview=1&customize=1` through a signed cookie and
+never the query string, the public site unchanged by a preview, a tampered or session-less cookie ignored, a
+save persisting tokens and theme settings while a bad colour is refused by name, generated controls for a
+manifest that needed no code, widget areas rendering where the theme draws them (titles escaped, bodies raw),
+a page rendering its own template on the public site and falling back when the template is gone, Identity
+writing the favicon and `og:image`, and the Customizer still saving without JavaScript.
+
+The Phase 5 cases do the whole lifecycle in the panel: install **AMS Journal** from the store, watch its
+screenshot become a real `background-image` only once installed, preview **AMS Portfolio** in an iframe,
+edit a partial and a stylesheet in the textarea editor (the public site changes at once), validate, roll
+back to the snapshot taken before the edit, export the theme as a zip and upload that same zip back, and
+start a new theme from a blank and from a child template.
+
+The Phase 6 cases read the audit log from the outside: a save, two theme activations and a delete each
+produce a readable entry, filters are linkable GET parameters, and the log is newest-first. A second
+identity signs in as an author in its own cookie jar and is refused pages, themes, settings, users and the
+audit log by capability while the sidebar hides them; the role map is checked directly, and the panel
+strings come from the `en` catalogue (and a separate test greps the source for every `t('…')` key to prove the
+catalogue has them all). The health screen is checked against `src/lib/budget-report.json`,
+and an export is checked to be format version 2 with themes, theme settings and revisions and no password
+material.
 
 ## The admin panel
 
-The sidebar mirrors WordPress: Dashboard, Updates, Posts, Media, Pages, Comments,
-Appearance, Plugins, Users, Tools and Settings, with a **Collapse Menu** control at
-the bottom (remembered in the browser). Sub-menus appear for the section you are in,
-and the pending-comment count is shown as a badge.
+A WordPress-shaped sidebar — Dashboard, Updates, Posts, Media, Pages, Comments, Appearance, Plugins, Users,
+Tools, Settings — over one server-rendered shell. Lists share one pattern (status tabs, filters, sortable
+columns, bulk actions, cards on a phone), the command palette opens with `Ctrl`/`⌘`+`K`, writes are
+autosaved and versioned, and no screen needs JavaScript to work.
+
+- [**Panel Guide**](docs/panel-guide.md) — every screen, how writing and history work, who may change what,
+  and the audit log.
+- [**Theme Developer Guide**](docs/theme-developer-guide.md) — the manifest, template tags, assets, settings,
+  screenshots, zip packages and the CSP.
+- [**Panel overhaul roadmap**](docs/panel-overhaul-roadmap.md) — what was built in which release and why.
 
 | Section | What it does |
 | --- | --- |
-| Dashboard | Counts, quick actions, recently edited content, latest comments, version and moderation status |
+| Dashboard | Greeting, **Needs attention** checklist (each item links to the fix), site totals, recently edited content, latest comments, version, schema and theme |
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
-| Posts | Searchable post table with status, date and category filters, sortable columns and bulk publish/draft/delete; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
-| Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs and upload images, PDF, audio, video and fonts to KV (Cloudflare) or `data/media/` (Node) |
-| Pages | Searchable, sortable page table with status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
+| Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
+| Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). The media picker in the editor uses the same library |
+| Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
-| Appearance | **Customize** (additional CSS, header code, footer code, JavaScript), **Themes**, **Menus**, **Widgets** (three footer areas) |
+| Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes** (store, installed, editor), **Templates**, **Menus**, **Widgets**, **Identity** |
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
-| Tools | Redirects (301/302), JSON import/export, server-stored backups, site health, page-cache reset |
-| Settings | Site identity and favicon, reading (home page, posts per page, permalinks, default editor), discussion (comments and moderation), domains and the admin URL |
+| Tools | Redirects, JSON import/export (v2, includes themes), server-stored backups, site health with performance budgets, audit log, page-cache reset |
+| Settings | Site identity and favicon, reading (home page, posts per page, permalinks, default editor), discussion, domains and the admin URL |
 
 ## Writing posts and pages
 
@@ -210,65 +266,117 @@ content. Comment bodies are stored as plain text and escaped on output.
   every public page — analytics, verification tags, chat widgets. They run after
   the active theme.
 
-**Appearance → Customize** holds site-wide additional CSS, header code, footer code
-and JavaScript. Both screens are admin-only because the code is saved raw, exactly
-like theme code. Everything they save bumps the page cache.
+**Appearance → Customize → Custom code** holds site-wide additional CSS, header code,
+footer code and JavaScript. Both screens are admin-only because the code is saved
+raw, exactly like theme code. Everything they save bumps the page cache. The rest of
+that screen — colours, type, layout and a live preview of the real site — is described
+under [Appearance](#appearance).
 
 ## Tools, backups and updates
 
 - **Redirects** — a path is redirected before the page cache, so changes apply at
   once. 301 or 302, relative or absolute targets.
-- **Import / Export** — one JSON file with content, terms, menus, comments,
-  redirects, settings and the user list (never password hashes). Import merges by
-  type and slug, so running it twice is safe.
+- **Import / Export** — one JSON file (format version 2) with content, terms,
+  menus, comments, redirects, settings, installed themes with their templates,
+  partials and stylesheets, per-theme settings, content revisions and the user
+  list (never password hashes). Theme image and font assets stay in the file store
+  and are named in the export. Import merges by type and slug, survives being run
+  twice, and installs the themes in the file.
 - **Backups** — the same JSON stored on the server (KV on Cloudflare, `data/media/backups/`
   on Node) and downloadable from the panel. The public `/media/` route never serves them.
 - **Site Health** — database, key-value store and media checks, versions, schema,
-  cache generation and content counts.
+  cache generation, content counts and the **performance budgets** (what this build
+  measured against the limit, see below).
+- **Audit log** — every change made in the panel: who, what, where, when. Filters
+  by person, action, area and free text are GET parameters, so a view is a link.
+  Entries are kept 90 days and pruned by the cron trigger.
 - **Updates** — the CMS version, the database schema and pending migrations, theme
   updates from the store, plugin states, and buttons to run migrations or install a
   theme update.
 
+## Appearance
+
+Everything about how the site looks lives under one sidebar section:
+
+```
+Appearance
+├── Customize   tokens · live preview · the theme's own settings · custom code
+├── Themes      store · installed · upload · editor · revisions
+├── Templates   what the active theme offers, and which pages override it
+├── Menus       header and footer links
+├── Widgets     the areas the active theme declares
+└── Identity    logo, favicon, social image, colour scheme default
+```
+
+**Customize is a split pane**: the controls on the left, the real site in an iframe on the right, three
+device widths above it. There is no separate preview renderer — the iframe is the public site, so what you
+see is what a visitor gets.
+
+### Design tokens and the live preview
+
+The Customizer controls a handful of design tokens (brand colour, text, surfaces, radius, type, content
+width, colour scheme). Each one is emitted as a `:root{…}` block after the theme's stylesheet, under whichever
+alias the active theme actually reads — a token the theme cannot honour is listed under **Not offered by
+&lt;theme&gt;** rather than pretending to work, and an unset token emits no CSS at all. Unsaved values reach the
+preview through a signed `HttpOnly` cookie (`POST /appearance/preview`), never the query string, never for
+anyone without a session, never cached.
+
+The mechanics — which control emits which variable, how the preview channel is secured, how a theme's manifest
+becomes controls with no code — are in the [Panel Guide](docs/panel-guide.md#appearance-the-look-live).
+
 ## Themes
 
-**Themes** in the admin panel has a built-in theme store and lets an admin upload, activate, download and delete themes.
+**Themes** in the admin panel has a built-in store, a manager for every installed theme, an uploader and a
+validator. A theme package can ship templates, partials, a stylesheet and binary assets (logo, fonts, one
+`theme.js`), and a theme can inherit from another one.
 
 | Store theme | Look |
 | --- | --- |
 | AMS Base | The standard theme: light and minimal. Installed by default. |
 | AMS Pro | Sticky header with pill-style tab navigation, colour hero, post grid, three-column dark footer. |
-| AMS Premium | Dark header with top bar and underlined tabs, serif headlines, large hero, rich footer. |
+| AMS Premium | Dark header with top bar and underlined tabs, serif headlines, large hero, rich footer. Inherits Pro's page, post and archive templates through `"parent": "ams-pro"`. |
+| AMS Journal | Single column, serif text, a 34rem measure and large images. Header and footer are partials, six settings (measure, serif, accent, rules, byline, drop cap). |
+| AMS Portfolio | A responsive grid with a full-width hero. Eight settings including hero text, grid columns and accent, driven by `--cols` and `--p-*` tokens. |
 
-All three use system fonts, load nothing from other servers, need no JavaScript and follow the visitor's light or dark setting. Store themes live in `src/themes/`; add a folder and list it in `src/themes/index.ts` to ship another.
+All five use system fonts, load nothing from other servers, need no JavaScript and follow the visitor's
+light or dark setting. Each ships a `screenshot.png` that the store card shows (and a palette gradient when
+a theme ships none). Store themes live in `src/themes/`; add a folder and list it in `src/themes/index.ts`
+to ship another.
 
-Download any installed theme to get a working file to edit.
+### Install, preview, customise, roll back
 
-A theme is one JSON file:
+Everything happens in the panel: **Appearance → Themes** lists the store with screenshots, author, version
+and tags; **Preview** opens the real site in an iframe with that theme, before it is installed; one click
+installs and activates. Every install, update and save writes a row to the theme's **history**, so
+**Update available vX → vY** appears with the changelog, and **Roll back** restores any earlier snapshot of
+the templates, partials and stylesheet. Editing an installed theme in the panel (a file tree plus a plain
+textarea, per-file save, validation on save) is snapshotted first, so nothing is lost. Local edits to a
+theme that the store also ships prompt: keep my changes, replace with the store version, or save mine as a
+copy.
 
-```json
-{
-  "name": "My Theme",
-  "version": "1.0.0",
-  "templates": { "base": "...{{{content}}}...", "home": "...", "page": "...", "post": "...", "archive": "...", "404": "..." },
-  "css": "body { ... }"
-}
-```
+**Export** downloads the theme as a zip (`theme.json` naming its files, `*.html`, `partials/*.html`,
+`style.css`, assets); the **Import** box accepts that zip back, or `theme.json` on its own. Templates and CSS
+round-trip byte-for-byte. **New theme from a template** starts from a blank theme or a child of an existing
+one. The full reference is in the [Theme Developer Guide](docs/theme-developer-guide.md).
 
-Only `base` is required and it must contain `{{{content}}}`; missing templates fall back to AMS Base. A `.zip` also works: put `theme.json` next to `base.html`, `home.html`, `page.html`, `post.html`, `archive.html`, `404.html` and `style.css` (the layout of `src/themes/default/`).
+### Who can change what
 
-Template tags: `{{value}}` (escaped), `{{{value}}}` (raw HTML), `{{#if x}}…{{else}}…{{/if}}`, `{{#unless x}}…{{/unless}}`, `{{#each list}}…{{/each}}`.
+Permissions are capabilities, not role names: `read`, `write_posts`, `edit_others_posts`, `manage_pages`,
+`manage_themes`, `manage_users` and so on, listed in `src/lib/capabilities.ts` with the same defaults the
+three roles always had (author: own posts; editor: all content, media, menus, moderation; admin: everything).
+Every route and every sidebar entry asks for a capability, so adding a role later is a one-line change.
+**Tools → Audit log** records who changed what for 90 days; see
+[the Panel Guide](docs/panel-guide.md#who-changed-what).
 
-| Available in | Values |
-| --- | --- |
-| every template | `site.title`, `site.tagline`, `site.url`, `year`, `body_class`, `menu.primary` and `menu.footer` (lists of `label`, `url`, `active`) |
-| `base` only | `{{{head}}}` (title, SEO tags, custom code), `{{{theme_css}}}`, `{{{content}}}`, `{{{footer}}}` (footer code and widgets) |
-| `home` | `page` (the chosen home page, may be empty), `posts` (latest five) |
-| `page` | `page.title`, `{{{page.content}}}` |
-| `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`), `{{{comments_html}}}`, `comments_count`, `comments_open`, `comments` (list of `name`, `body`, `date`) |
-| `archive` | `archive.title`, `posts`, `pagination.prev`, `pagination.next` |
-| each item of `posts` | `title`, `url`, `excerpt`, `date`, `date_iso`, `featured_image`, `featured_alt` |
+## Performance budgets
 
-A theme can contain scripts, so only install themes you trust.
+Sizes are tested, not hoped for. `src/lib/budgets.ts` states the limits and
+`scripts/measure.mjs` measures the built bundles after `npm run build`, writing
+`src/lib/budget-report.json`; `npm run check:budgets` fails CI when a bundle grows
+past its budget, and **Tools → Site Health** shows the same numbers with a bar for
+each. `npm run check:assets` separately guards the panel CSS and token files.
+Every budget is gzipped and excludes media, because that is what a visitor
+downloads.
 
 ## How it works
 
@@ -292,6 +400,12 @@ On Cloudflare, KV allows 1,000 writes a day and 1 GB of storage on the free plan
 wrangler.toml
 Dockerfile, docker-compose.yml
 tests/e2e.mjs              end-to-end tests for both runtimes
+tests/panel.test.mjs       the panel itself, over HTTP
+tests/template.test.mjs    the template engine, directly
+docs/panel-guide.md        every admin screen
+docs/theme-developer-guide.md  the manifest, tags, assets, settings
+docs/panel-overhaul-roadmap.md what was built in which release
+scripts/measure.mjs        performance budgets, run by npm test
 src/
   index.ts                 install gate, admin/public dispatch, cron handler
   types.ts
@@ -300,16 +414,34 @@ src/
     public.ts              themed site, /media/*, KV page cache
     api.ts                 read-only JSON API
     admin/
-      index.ts             CSRF, login, logout, dashboard, profile
+      index.ts             CSRF, login, logout, dashboard, profile, error boundary
+      assets/tokens.css    design tokens: colour, space, radius, type, schemes
+      assets/app.css       shell (top bar, rail, palette) and component kit
+      assets/screens/      one file per screen family as it is rebuilt
+                           (dashboard.css, lists.css, editor.css,
+                           appearance.css, themes.css, legacy.css)
+      components.ts        pageHead, card, table, tabs, emptyState, notice, ...
+      icons.ts             inline SVG sprite
+      preferences.ts       colour scheme, density, rail state (per browser)
+      shell.ts             route: palette search, rail/scheme/density links
+      search.ts            site-wide search across content, media, comments, users
+      palette.ts           command palette script and its endpoint config
+      attention.ts         "needs attention" checks for the dashboard
+      revisions.ts         save snapshots, line diff, autosave retention, edit locks
+      editor-views.ts      revision list, diff and editor banners (server-rendered)
+      media-picker.ts      the picker dialog and its client script
+      assets/screens/editor.css   editor-only styles (History, banners, picker)
+      assets.ts            route: GET /{admin}/assets/*.css (immutable, ETagged)
+      bundles.ts           CSS bundle registry: tokens, app, screens + ETags
       content.ts           pages and posts
       media.ts             media library
       settings.ts
       menus.ts               menu editor
-      themes.ts              theme upload, activate, delete
+      themes.ts              store, preview, editor, install, zip export
       comments.ts            comment moderation and replies
       users.ts               accounts and roles
       plugins.ts             built-in plugins and code snippets
-      tools.ts               redirects, import/export, backups, health
+      tools.ts               redirects, import/export v2, backups, health, audit log
       updates.ts             versions, migrations, theme updates
       appearance.ts          customize (CSS/code) and footer widgets
       terms.ts               categories and tags
@@ -319,18 +451,27 @@ src/
   db/
     schema.sql
     index.ts               schema runner
-    migrations/index.ts    forward-only migrations
+    migrations/index.ts    forward-only migrations (v3 revisions, v4 order, v5 theme assets,
+                           v6 theme versions, v7 audit log)
   lib/
     auth.ts                passwords, sessions, CSRF, roles
     security.ts            escaping, sanitizer, rate limiting
     files.ts               uploaded files: KV on Cloudflare, disk on Node
-    themes.ts, zip.ts      theme bundle reader (JSON or zip)
+    themes.ts, zip.ts      theme bundle reader and zip reader/writer
     menus.ts               page-to-menu sync
     render.ts              template engine, theme rendering
     content.ts             content queries, permalinks
     comments.ts            comment storage, tokens, public rendering
     plugins.ts             built-in plugin list and hook points
     version.ts             app version shown in Updates
+    schema.ts              cached "does this table/column exist" probes for upgrade safety
+    template.ts            template engine v2: expressions, filters, partials, layouts
+    theme-manifest.ts      theme.json v2: validation, zip reading, inheritance, settings
+    theme-store.ts         theme rows, assets, version snapshots, layout rendering
+    capabilities.ts        the capability list, role defaults and can(user, cap)
+    audit.ts               audit_log: one helper, filters, 90-day retention
+    i18n.ts                panel strings: t(key, vars) and the en catalogue
+    budgets.ts             performance limits, checked by scripts/measure.mjs
     config.ts              KV config, settings
     time.ts                timezone helpers
     ui.ts                  admin HTML helpers and CSS
@@ -339,4 +480,6 @@ src/
     default/               AMS Base
     pro/                   AMS Pro
     premium/               AMS Premium
+    journal/               AMS Journal (serif, single column)
+    portfolio/             AMS Portfolio (grid, hero)
 ```

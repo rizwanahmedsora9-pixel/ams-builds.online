@@ -1,0 +1,224 @@
+/* ===========================================================================
+   AMS admin — design tokens
+   ---------------------------------------------------------------------------
+   Layer 1 of 3. tokens.css defines every colour, space, radius, shadow and type
+   step the panel uses. Components (app.css) and screens ({screen}.css) must only
+   ever reference these variables, never a literal colour.
+
+   Schemes: the panel renders <html data-scheme="auto|light|dark">. "auto"
+   follows the operating system; an explicit choice is stored in a cookie and
+   applied server-side so there is no flash of the wrong scheme.
+   =========================================================================== */
+
+:root {
+  /* Neutral ramp — light scheme -------------------------------------------- */
+  --gray-0: #ffffff;
+  --gray-1: #f8fafc;
+  --gray-2: #f1f4f8;
+  --gray-3: #e6ebf2;
+  --gray-4: #d8dfe9;
+  --gray-5: #b9c3d1;
+  --gray-6: #8b97a8;
+  --gray-7: #677386;
+  --gray-8: #414d5f;
+  --gray-9: #232c3a;
+  --gray-10: #131923;
+
+  /* Brand + semantic hues -------------------------------------------------- */
+  --brand-light: #2a63e0;
+  --brand-dark: #7aa2f7;
+  --ok-light: #17723f;
+  --ok-dark: #4cc38a;
+  --warn-light: #8a5a00;
+  --warn-dark: #e0b341;
+  --danger-light: #b3342a;
+  --danger-dark: #f0736a;
+
+  /* Type ------------------------------------------------------------------- */
+  --ui-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono-font: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --text-xs: 0.75rem;    /* 12px — badges, meta */
+  --text-sm: 0.8125rem;  /* 13px — hints, table meta */
+  --text-base: 0.875rem; /* 14px — panel body */
+  --text-md: 1rem;       /* 16px — prose inputs */
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;   /* page titles */
+  --text-2xl: 1.75rem;
+  --leading-tight: 1.25;
+  --leading: 1.5;
+  --leading-prose: 1.65;
+
+  /* Space (4px scale) ------------------------------------------------------ */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* Radius ----------------------------------------------------------------- */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* Layout ----------------------------------------------------------------- */
+  --rail-w: 14rem;
+  --rail-w-collapsed: 3.75rem;
+  --topbar-h: 3.25rem;
+  --content-max: 78rem;
+  --content-pad: var(--space-4);
+  --control-h: 2.25rem;
+  --control-h-sm: 1.875rem;
+
+  /* Motion ----------------------------------------------------------------- */
+  --ease: cubic-bezier(0.2, 0, 0.1, 1);
+  --dur-fast: 110ms;
+  --dur: 180ms;
+
+  /* Scheme-dependent aliases ----------------------------------------------- */
+  --bg: var(--gray-2);
+  --surface: var(--gray-0);
+  --surface-2: var(--gray-1);
+  --surface-3: var(--gray-3);
+  --fg: var(--gray-9);
+  --fg-strong: var(--gray-10);
+  --muted: var(--gray-7);
+  --line: var(--gray-4);
+  --line-strong: var(--gray-5);
+  --accent: var(--brand-light);
+  --accent-fg: #ffffff;
+  --accent-soft: #e8effc;
+  --ok: var(--ok-light);
+  --ok-soft: #e6f5ec;
+  --warn: var(--warn-light);
+  --warn-soft: #fdf4e0;
+  --danger: var(--danger-light);
+  --danger-soft: #fdecea;
+
+  --rail-bg: var(--gray-10);
+  --rail-fg: #e8ecf2;
+  --rail-muted: #9aa5b5;
+  --rail-line: #2b3442;
+  --rail-hover: #222b38;
+  --topbar-bg: var(--gray-0);
+  --topbar-fg: var(--gray-9);
+  --topbar-line: var(--line);
+
+  --on-danger: #ffffff;
+  --scrim: rgba(9, 13, 19, 0.55);
+  --overlay: rgba(36, 87, 214, 0.06);
+  --stripe: rgba(103, 115, 134, 0.055);
+  --neutral-badge: #6c7781;
+  --media-bg: #000000;
+
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow: 0 2px 6px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.18), 0 2px 8px rgba(16, 24, 40, 0.08);
+  /* Backdrop behind modal dialogs; darker in dark mode. */
+  --scrim: rgba(16, 24, 40, 0.45);
+}
+
+/* Dark scheme: explicit choice, or the OS preference in "auto" -------------- */
+:root[data-scheme="dark"] {
+  --bg: #0d1117;
+  --surface: #151b24;
+  --surface-2: #1b222d;
+  --surface-3: #232c39;
+  --fg: #e3e8ef;
+  --fg-strong: #f6f8fb;
+  --muted: #96a1b2;
+  --line: #28313f;
+  --line-strong: #39455694;
+  --accent: var(--brand-dark);
+  --accent-fg: #0d1117;
+  --accent-soft: #1b2740;
+  --ok: var(--ok-dark);
+  --ok-soft: #12291f;
+  --warn: var(--warn-dark);
+  --warn-soft: #2a2313;
+  --danger: var(--danger-dark);
+  --danger-soft: #2c1a19;
+
+  --on-danger: #ffffff;
+  --scrim: rgba(0, 0, 0, 0.65);
+  --overlay: rgba(122, 162, 247, 0.08);
+  --stripe: rgba(255, 255, 255, 0.025);
+  --neutral-badge: #48546a;
+  --media-bg: #000000;
+
+  --rail-bg: #0a0d12;
+  --rail-fg: #dfe5ed;
+  --rail-muted: #8c98a9;
+  --rail-line: #232b37;
+  --rail-hover: #1a212b;
+  --topbar-bg: #131922;
+  --topbar-fg: #e3e8ef;
+  --topbar-line: var(--line);
+
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 14px 36px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --scrim: rgba(0, 0, 0, 0.62);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-scheme="auto"] {
+    --bg: #0d1117;
+    --surface: #151b24;
+    --surface-2: #1b222d;
+    --surface-3: #232c39;
+    --fg: #e3e8ef;
+    --fg-strong: #f6f8fb;
+    --muted: #96a1b2;
+    --line: #28313f;
+    --line-strong: #39455694;
+    --accent: var(--brand-dark);
+    --accent-fg: #0d1117;
+    --accent-soft: #1b2740;
+    --ok: var(--ok-dark);
+    --ok-soft: #12291f;
+    --warn: var(--warn-dark);
+    --warn-soft: #2a2313;
+    --danger: var(--danger-dark);
+    --danger-soft: #2c1a19;
+
+    --rail-bg: #0a0d12;
+    --rail-fg: #dfe5ed;
+    --rail-muted: #8c98a9;
+    --rail-line: #232b37;
+    --rail-hover: #1a212b;
+    --topbar-bg: #131922;
+    --topbar-fg: #e3e8ef;
+    --topbar-line: var(--line);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 14px 36px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --scrim: rgba(0, 0, 0, 0.62);
+  }
+}
+
+/* Density: per-user preference, stored in a cookie ------------------------- */
+:root[data-density="compact"] {
+  --control-h: 1.9rem;
+  --control-h-sm: 1.6rem;
+  --content-pad: var(--space-3);
+  --space-6: 1.15rem;
+  --text-base: 0.8125rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --ease: linear;
+  }
+}

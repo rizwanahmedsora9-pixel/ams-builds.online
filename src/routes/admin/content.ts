@@ -6,7 +6,20 @@ import { mediaUrl, permalinkStyle, postUrl } from '../../lib/content';
 import { sanitizeHtml, slugify } from '../../lib/security';
 import { localToUtc, utcToLocal } from '../../lib/time';
 import { isInPrimaryMenu, removeUrlFromMenus, syncPageMenu } from '../../lib/menus';
-import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
+import {
+  bulkBar, card, emptyRow, listToolbar, notice, pageHead, pagination, table, tabs, LIST_JS,
+} from '../../admin/components';
+import { icon } from '../../admin/icons';
+import { PICKER_JS, mediaPicker } from '../../admin/media-picker';
+import {
+  claimLock, countRevisions, deleteRevisions, getRevision, latestAutosave, listRevisions,
+  pruneLocks, pruneRevisions, readLock, recordRevision, releaseLock, sameContent, type RevisionRow,
+} from '../../admin/revisions';
+import { hasColumn, hasPhase2Schema } from '../../lib/schema';
+import { activeThemeTemplates } from '../../lib/theme-store';
+import { audit } from '../../lib/audit';
+import { lockBanner, restoreBanner, revisionDiff, revisionList } from '../../admin/editor-views';
+import { csrfField, errorPage, go, html, layout, raw, type Raw } from '../../lib/ui';
 
 /** Pages and posts share one table and one editor; posts add terms, featured image and scheduling. */
 const content = new Hono<AppEnv>();
@@ -19,13 +32,13 @@ const kindOf = (c: Ctx): Kind => c.req.param('kind') as Kind;
 content.use('/:kind{(?:pages|posts)}/*', guard);
 content.use('/:kind{(?:pages|posts)}', guard);
 async function guard(c: Ctx, next: () => Promise<void>) {
-  if (kindOf(c) === 'pages' && !can(c.var.user, 'editor')) return errorPage(c, 403, 'Your role cannot manage pages.');
+  if (kindOf(c) === 'pages' && !can(c.var.user, 'manage_pages')) return errorPage(c, 403, 'Your role cannot manage pages.');
   await next();
 }
-const mayEdit = (c: Ctx, row: { author_id: number | null }) => can(c.var.user, 'editor') || row.author_id === c.var.user.id;
+const mayEdit = (c: Ctx, row: { author_id: number | null }) => can(c.var.user, 'edit_others_posts') || row.author_id === c.var.user.id;
 
 type PostStatusFilter = 'all' | 'published' | 'draft' | 'scheduled';
-type PostSort = 'title' | 'author' | 'comments' | 'date';
+type PostSort = 'title' | 'author' | 'comments' | 'date' | 'order';
 type PostListState = {
   status: PostStatusFilter;
   q: string;
@@ -48,6 +61,8 @@ type PostListRow = {
   categories: string | null;
   tags: string | null;
   comment_count: number;
+  pinned: number;
+  thumb_key: string | null;
 };
 
 function postListState(c: Ctx): PostListState {
@@ -63,7 +78,7 @@ function postListState(c: Ctx): PostListState {
     q: (c.req.query('q') || '').trim().slice(0, 120),
     month: /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : '',
     category: /^\d+$/.test(rawCategory) && Number.isSafeInteger(categoryId) && categoryId > 0 ? rawCategory : '',
-    sort: ['title', 'author', 'comments', 'date'].includes(rawSort) ? rawSort as PostSort : 'date',
+    sort: ['title', 'author', 'comments', 'date', 'order'].includes(rawSort) ? rawSort as PostSort : 'date',
     dir: rawDir === 'asc' ? 'asc' : 'desc',
     p: Math.min(100_000, Math.max(1, Math.trunc(rawPage) || 1)),
   };
@@ -110,12 +125,35 @@ function postListRedirect(c: Ctx, state: PostListState, message: string, isError
   return c.redirect(c.var.base + path + join + key + '=' + encodeURIComponent(message), 303);
 }
 
+/**
+ * The row menu under a title: the fast path to everything you do to a post
+ * from the list. Plain links and one small form per verb, so it works without
+ * JavaScript; CSS reveals it on hover/focus on a wide screen.
+ */
+function rowActions(c: Ctx, kind: Kind, row: { id: number; pinned?: number }, preview: string, themes: { slug: string; name: string }[] = []): Raw {
+  const base = c.var.base;
+  const previewMenu = themes.length > 1
+    ? html`<details class="row-menu"><summary>Preview in theme…</summary>
+        <ul>${themes.map((theme) => html`<li><a href="${preview}${preview.includes('?') ? '&' : '?'}theme=${encodeURIComponent(theme.slug)}" target="_blank" rel="noopener">${theme.name}</a></li>`)}</ul>
+      </details>`
+    : '';
+  return html`<span class="row-actions">
+  <a href="${base}/${kind}/${row.id}">Edit</a>
+  <a href="${base}/${kind}/${row.id}/quick">Quick edit</a>
+  <form method="post" action="${base}/${kind}/${row.id}/duplicate" class="inline"><button type="submit" class="linkish">Duplicate</button></form>
+  <a href="${base}/${kind}/${row.id}/revisions">History</a>
+  <a href="${preview}" target="_blank" rel="noopener">View</a>
+  <form method="post" action="${base}/${kind}/${row.id}/pin" class="inline"><button type="submit" class="linkish">${row.pinned ? 'Unpin' : 'Pin'}</button></form>
+  ${previewMenu}
+</span>`;
+}
+
 async function postsList(c: Ctx): Promise<Response> {
   const state = postListState(c);
   const base = c.var.base;
   const settings = await getSettings(c.env);
   const timezone = settings.timezone || 'UTC';
-  const authorOnly = !can(c.var.user, 'editor');
+  const authorOnly = !can(c.var.user, 'edit_others_posts');
   const ownerArgs = authorOnly ? [c.var.user.id] : [];
   const ownerSql = authorOnly ? ' AND author_id=?' : '';
   const per = 30;
@@ -155,18 +193,19 @@ async function postsList(c: Ctx): Promise<Response> {
     author: "COALESCE(u.username,'') COLLATE NOCASE",
     comments: 'comment_count',
     date: 'COALESCE(c.published_at,c.created_at)',
+    order: 'c.menu_order',
   };
   const direction = state.dir === 'asc' ? 'ASC' : 'DESC';
   const queryRows = (withComments: boolean) => c.env.DB.prepare(
     `SELECT c.id, c.title, c.slug, c.status, c.author_id, c.published_at, c.created_at, c.updated_at,
-            u.username AS author,
+            u.username AS author, c.pinned, m.r2_key AS thumb_key,
             (SELECT group_concat(t.name, ', ') FROM content_terms ct JOIN terms t ON t.id=ct.term_id
              WHERE ct.content_id=c.id AND t.site_id=1 AND t.taxonomy='category') AS categories,
             (SELECT group_concat(t.name, ', ') FROM content_terms ct JOIN terms t ON t.id=ct.term_id
              WHERE ct.content_id=c.id AND t.site_id=1 AND t.taxonomy='tag') AS tags,
             ${withComments ? "(SELECT COUNT(*) FROM comments cm WHERE cm.site_id=1 AND cm.content_id=c.id AND cm.status IN ('approved','pending'))" : '0'} AS comment_count
-     FROM content c LEFT JOIN users u ON u.id=c.author_id
-     WHERE ${whereSql} ORDER BY ${sortSql[state.sort]} ${direction}, c.id DESC LIMIT ? OFFSET ?`,
+     FROM content c LEFT JOIN users u ON u.id=c.author_id LEFT JOIN media m ON m.id=c.featured_media_id
+     WHERE ${whereSql} ORDER BY c.pinned DESC, ${sortSql[state.sort]} ${direction}, c.id DESC LIMIT ? OFFSET ?`,
   ).bind(...args, per + 1, (state.p - 1) * per).all<PostListRow>();
 
   let listResult;
@@ -187,6 +226,7 @@ async function postsList(c: Ctx): Promise<Response> {
     ['all', 'All'], ['published', 'Published'], ['draft', 'Draft'], ['scheduled', 'Scheduled'],
   ];
   const statusTabs = statusTabOptions.filter(([key]) => key === 'all' || counts[key] > 0);
+  const installedThemes = (await c.env.DB.prepare('SELECT slug, name FROM themes ORDER BY name').all<{ slug: string; name: string }>().catch(() => ({ results: [] as { slug: string; name: string }[] }))).results;
   const currentUrl = postListHref(state);
   const bulkAction = `${base}/posts/bulk${currentUrl.slice('/posts'.length)}`;
   const selectedCategory = categories.results.find((term) => String(term.id) === state.category);
@@ -194,124 +234,116 @@ async function postsList(c: Ctx): Promise<Response> {
   const categoryOptions = categories.results;
   const rangeStart = total ? (state.p - 1) * per + 1 : 0;
   const rangeEnd = Math.min((state.p - 1) * per + rows.length, total);
-  const sortLink = (label: string, key: PostSort, defaultDir: 'asc' | 'desc' = 'asc') => {
-    const nextDir = state.sort === key ? (state.dir === 'asc' ? 'desc' : 'asc') : defaultDir;
-    const arrow = state.sort === key ? (state.dir === 'asc' ? '↑' : '↓') : '↕';
-    return html`<a class="posts-sort${state.sort === key ? ' active' : ''}" href="${postListHref(state, { sort: key, dir: nextDir, p: 1 })}">${label}<span aria-hidden="true">${arrow}</span></a>`;
+
+  /** Sortable column: clicking toggles the direction of that column. */
+  const sortCol = (label: string, key: PostSort, initial: 'asc' | 'desc', href: (change: { sort: PostSort; dir: 'asc' | 'desc'; p: number }) => string, cls?: string) => {
+    const active = state.sort === key;
+    const dir = active ? state.dir : initial;
+    const next: 'asc' | 'desc' = active ? (state.dir === 'asc' ? 'desc' : 'asc') : initial;
+    return { label, cls, sortHref: href({ sort: key, dir: next, p: 1 }), sortState: active ? dir : undefined };
   };
 
   return layout(c, 'Posts', html`
-<section class="posts-admin" aria-labelledby="posts-title">
-  <form method="post" action="${bulkAction}" id="posts-bulk-form" class="posts-bulk-form">
-    ${csrfField(c)}
-  </form>
-  <div class="posts-heading-row">
-    <h1 id="posts-title">Posts</h1>
-    <a class="btn ghost posts-add" href="${base}/posts/new">Add Post</a>
-  </div>
-  <nav class="posts-status-nav" aria-label="Post status filters">
-    ${statusTabs.map(([key, label]) => html`<a href="${postListHref(state, { status: key, p: 1 })}" class="${state.status === key ? 'current' : ''}"${state.status === key ? raw(' aria-current="page"') : ''}>${label} <b>(${counts[key]})</b></a>`)}
-  </nav>
-  <div class="posts-search-row">
-    <form method="get" action="${base}/posts" class="posts-search" role="search">
-      <input type="hidden" name="status" value="${state.status}">
-      ${state.month ? html`<input type="hidden" name="month" value="${state.month}">` : ''}
-      ${state.category ? html`<input type="hidden" name="category" value="${state.category}">` : ''}
-      ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
-      ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
-      <label class="sr-only" for="post-search">Search posts</label>
-      <input type="text" id="post-search" name="q" value="${state.q}" placeholder="Search posts…" maxlength="120">
-      <button class="btn ghost small" type="submit">Search Posts</button>
-    </form>
-  </div>
-  <div class="posts-controls-row">
-    <div class="posts-bulk-control">
-      <label class="sr-only" for="bulk-action-top">Bulk actions</label>
-      <select id="bulk-action-top" name="action" form="posts-bulk-form">
-        <option value="">Bulk actions</option><option value="publish">Publish</option><option value="draft">Move to draft</option><option value="delete">Delete permanently</option>
-      </select>
-      <button class="btn ghost small" type="submit" form="posts-bulk-form">Apply</button>
-    </div>
-    <form method="get" action="${base}/posts" class="post-filter-form">
-      <input type="hidden" name="status" value="${state.status}">
-      ${state.q ? html`<input type="hidden" name="q" value="${state.q}">` : ''}
-      ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
-      ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
-      <label class="sr-only" for="post-month">Filter by date</label>
-      <select id="post-month" name="month">
-        <option value="">All dates</option>
-        ${state.month && !monthOptions.some((row) => row.month === state.month) ? html`<option value="${state.month}" selected>${formatPostMonth(state.month)}</option>` : ''}
-        ${monthOptions.map((row) => html`<option value="${row.month}"${state.month === row.month ? raw(' selected') : ''}>${formatPostMonth(row.month)}</option>`)}
-      </select>
-      <label class="sr-only" for="post-category">Filter by category</label>
-      <select id="post-category" name="category">
-        <option value="">All Categories</option>
-        ${state.category && !selectedCategory ? html`<option value="${state.category}" selected>Selected category</option>` : ''}
-        ${categoryOptions.map((term) => html`<option value="${term.id}"${state.category === String(term.id) ? raw(' selected') : ''}>${term.name}</option>`)}
-      </select>
-      <button class="btn ghost small" type="submit">Filter</button>
-    </form>
-  </div>
-  <div class="posts-table-wrap">
-    <table class="posts-table">
-      <thead><tr>
-        <th scope="col" class="posts-check-column"><input type="checkbox" id="select-all-posts" aria-label="Select all posts"></th>
-        <th scope="col" aria-sort="${state.sort === 'title' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Title', 'title')}</th>
-        <th scope="col" aria-sort="${state.sort === 'author' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Author', 'author')}</th>
-        <th scope="col">Categories</th>
-        <th scope="col">Tags</th>
-        <th scope="col" class="posts-comments-column" aria-sort="${state.sort === 'comments' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Comments', 'comments', 'desc')}</th>
-        <th scope="col" aria-sort="${state.sort === 'date' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Date', 'date', 'desc')}</th>
-      </tr></thead>
-      <tbody>
-        ${rows.map((row) => {
-          const url = postUrl(row, style);
-          const date = row.status === 'published' ? row.published_at || row.created_at : row.status === 'scheduled' ? row.published_at || row.created_at : row.updated_at;
-          const dateLabel = row.status === 'published' ? 'Published' : row.status === 'scheduled' ? 'Scheduled' : 'Last modified';
-          const preview = url + (row.status === 'published' ? '' : '?preview=1');
-          return html`<tr>
-            <td class="posts-check-column"><input type="checkbox" name="ids" value="${row.id}" form="posts-bulk-form" aria-label="Select ${row.title}"></td>
-            <td class="posts-title-cell">
-              <a class="posts-title-link" href="${base}/posts/${row.id}">${row.title || '(untitled)'}</a>
-              <div class="post-row-actions"><a href="${base}/posts/${row.id}">Edit</a><span aria-hidden="true">·</span><a href="${preview}" target="_blank" rel="noopener">View</a></div>
-            </td>
-            <td>${row.author || '—'}</td>
-            <td>${row.categories || '—'}</td>
-            <td>${row.tags || '—'}</td>
-            <td class="posts-comments-column"><span class="post-comment-count" aria-label="${row.comment_count} comments">${row.comment_count}</span></td>
-            <td class="posts-date-cell"><strong>${dateLabel}</strong><time datetime="${date}">${formatPostDate(date, timezone)}</time></td>
-          </tr>`;
-        })}
-        ${rows.length ? '' : html`<tr><td colspan="7" class="posts-empty">No posts found. ${state.q || state.month || state.category || state.status !== 'all' ? 'Try changing your search or filters.' : html`Start by adding your first post.`}</td></tr>`}
-      </tbody>
-    </table>
-  </div>
-  <div class="posts-table-footer">
-    <div class="posts-bulk-control">
-      <label class="sr-only" for="bulk-action-bottom">Bulk actions</label>
-      <select id="bulk-action-bottom">
-        <option value="">Bulk actions</option><option value="publish">Publish</option><option value="draft">Move to draft</option><option value="delete">Delete permanently</option>
-      </select>
-      <button class="btn ghost small" type="submit" form="posts-bulk-form">Apply</button>
-    </div>
-    <span class="posts-count">${total ? `Showing ${rangeStart}–${rangeEnd} of ${total} posts` : '0 posts'}</span>
-  </div>
-  <div class="posts-pagination">
-    ${state.p > 1 ? html`<a class="btn ghost small" href="${postListHref(state, { p: state.p - 1 })}">&larr; Newer</a>` : ''}
-    ${total > state.p * per ? html`<a class="btn ghost small" href="${postListHref(state, { p: state.p + 1 })}">Older &rarr;</a>` : ''}
-  </div>
-  ${raw(`<script>
-(function(){
-  var top=document.getElementById('bulk-action-top'),bottom=document.getElementById('bulk-action-bottom');
-  if(top&&bottom){top.addEventListener('change',function(){bottom.value=top.value});bottom.addEventListener('change',function(){top.value=bottom.value})}
-  var all=document.getElementById('select-all-posts'),boxes=[].slice.call(document.querySelectorAll('input[name="ids"]'));
-  function updateAll(){if(!all)return;var checked=boxes.filter(function(box){return box.checked}).length;all.checked=boxes.length>0&&checked===boxes.length;all.indeterminate=checked>0&&checked<boxes.length}
-  if(all){all.addEventListener('change',function(){boxes.forEach(function(box){box.checked=all.checked});updateAll()});boxes.forEach(function(box){box.addEventListener('change',updateAll)})}
-  var form=document.getElementById('posts-bulk-form');if(form)form.addEventListener('submit',function(e){
-    if(top&&top.value==='delete'&&!confirm('Permanently delete the selected posts? This cannot be undone.'))e.preventDefault();
-  });
-})();
-</script>`)}
+<section class="list-page" data-list="posts-bulk-form" aria-labelledby="posts-title">
+  <form method="post" action="${bulkAction}" id="posts-bulk-form" class="list-bulk-form">${csrfField(c)}</form>
+  ${pageHead({
+    title: 'Posts',
+    sub: total ? `${total} post${total === 1 ? '' : 's'}${authorOnly ? ' of yours' : ''}` : 'Everything you have written, newest first.',
+    id: 'posts-title',
+    actions: html`<a class="btn" href="${base}/posts/new">${icon('plus', { cls: 'ico--sm' })}Add Post</a>`,
+  })}
+  ${listToolbar({
+    tabs: tabs(statusTabs.map(([key, label]) => ({
+        label: html`${label} <span class="tab-count">${counts[key]}</span>`,
+        href: postListHref(state, { status: key, p: 1 }),
+        current: state.status === key,
+    })), { label: 'Post status' }),
+    search: {
+      action: `${base}/posts`,
+      value: state.q,
+      placeholder: 'Search posts…',
+      label: 'Search posts',
+      button: 'Search Posts',
+      hidden: {
+        status: state.status !== 'all' ? state.status : '',
+        month: state.month,
+        category: state.category,
+        sort: state.sort !== 'date' ? state.sort : '',
+        dir: state.dir !== 'desc' ? state.dir : '',
+      },
+    },
+    filters: html`
+      <form class="list-filters" method="get" action="${base}/posts">
+        <input type="hidden" name="status" value="${state.status}">
+        ${state.q ? html`<input type="hidden" name="q" value="${state.q}">` : ''}
+        ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
+        ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
+        <label class="sr-only" for="post-month">Filter by date</label>
+        <select id="post-month" name="month">
+          <option value="">All dates</option>
+          ${state.month && !monthOptions.some((row) => row.month === state.month) ? html`<option value="${state.month}" selected>${formatPostMonth(state.month)}</option>` : ''}
+          ${monthOptions.map((row) => html`<option value="${row.month}"${state.month === row.month ? raw(' selected') : ''}>${formatPostMonth(row.month)}</option>`)}
+        </select>
+        <label class="sr-only" for="post-category">Filter by category</label>
+        <select id="post-category" name="category">
+          <option value="">All categories</option>
+          ${state.category && !selectedCategory ? html`<option value="${state.category}" selected>Selected category</option>` : ''}
+          ${categoryOptions.map((term) => html`<option value="${term.id}"${state.category === String(term.id) ? raw(' selected') : ''}>${term.name}</option>`)}
+        </select>
+        <button class="btn ghost small" type="submit">Filter</button>
+      </form>`,
+  })}
+  ${bulkBar({ formId: 'posts-bulk-form', id: 'posts-bulk', count: rows.length })}
+  ${rows.length
+    ? table({
+      cls: 'list-table',
+      columns: [
+        { label: html`<input type="checkbox" data-select-all aria-label="Select all posts">`, cls: 'list-check' },
+        sortCol('Title', 'title', 'asc', (change) => postListHref(state, change)),
+        sortCol('Author', 'author', 'asc', (change) => postListHref(state, change), 'col-hide-sm'),
+        { label: 'Categories', cls: 'col-hide-md' },
+        { label: 'Tags', cls: 'col-hide-md' },
+        { ...sortCol('Comments', 'comments', 'desc', (change) => postListHref(state, change), 'list-comments'), align: 'center' as const },
+        sortCol('Date', 'date', 'desc', (change) => postListHref(state, change), 'list-date'),
+      ],
+      rows: rows.map((row) => {
+        const url = postUrl(row, style);
+        const date = row.status === 'published' ? row.published_at || row.created_at : row.status === 'scheduled' ? row.published_at || row.created_at : row.updated_at;
+        const dateLabel = row.status === 'published' ? 'Published' : row.status === 'scheduled' ? 'Scheduled' : 'Last modified';
+        const preview = url + (row.status === 'published' ? '' : '?preview=1');
+        return [
+          html`<input type="checkbox" name="ids" value="${row.id}" form="posts-bulk-form" aria-label="Select ${row.title}">`,
+          html`<div class="row-lead">
+              ${row.thumb_key ? html`<img class="row-thumb" src="${mediaUrl(row.thumb_key)}" alt="" loading="lazy" width="48" height="48">` : html`<span class="row-thumb row-thumb--empty" aria-hidden="true">${icon('file', { cls: 'ico--sm' })}</span>`}
+              <div class="row-lead__body">
+                <a class="row-title" href="${base}/posts/${row.id}">${row.pinned ? html`<span class="pin" title="Pinned">${icon('pin', { cls: 'ico--sm' })}<span class="sr-only">Pinned: </span>` : ''}${row.title || '(untitled)'}</a>
+                <span class="row-meta">${row.status !== 'published' ? html`<span class="badge ${row.status}">${row.status}</span>` : ''}<span class="row-slug">/${row.slug}</span></span>
+                ${rowActions(c, 'posts', row, preview, installedThemes)}
+              </div>
+            </div>`,
+          row.author || '—',
+          row.categories || '—',
+          row.tags || '—',
+          html`<span class="comment-count" aria-label="${row.comment_count} comments">${row.comment_count}</span>`,
+          html`<span class="row-date"><strong>${dateLabel}</strong><time datetime="${date}">${formatPostDate(date, timezone)}</time></span>`,
+        ];
+      }),
+    })
+    : emptyRow(7, {
+      title: 'No posts match',
+      body: state.q || state.month || state.category || state.status !== 'all'
+        ? 'Try a different search or clear the filters.'
+        : 'Your first post is one click away.',
+      action: html`<a class="btn" href="${base}/posts/new">Write a post</a>`,
+    })}
+  ${pagination({
+    prev: state.p > 1 ? postListHref(state, { p: state.p - 1 }) : undefined,
+    next: total > state.p * per ? postListHref(state, { p: state.p + 1 }) : undefined,
+    prevLabel: 'Newer',
+    nextLabel: 'Older',
+    info: total ? `${rangeStart}–${rangeEnd} of ${total}` : '0 posts',
+  })}
+  ${raw(LIST_JS)}
 </section>`, '/posts');
 }
 
@@ -334,6 +366,7 @@ type PageListRow = {
   updated_at: string;
   author: string | null;
   comment_count: number;
+  pinned: number;
 };
 
 function pageListState(c: Ctx): PageListState {
@@ -345,7 +378,7 @@ function pageListState(c: Ctx): PageListState {
     status: ['all', 'published', 'draft'].includes(rawStatus) ? rawStatus as PageStatusFilter : 'all',
     q: (c.req.query('q') || '').trim().slice(0, 120),
     month: /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : '',
-    sort: ['title', 'author', 'comments', 'date'].includes(rawSort) ? rawSort as PostSort : 'date',
+    sort: ['title', 'author', 'comments', 'date', 'order'].includes(rawSort) ? rawSort as PostSort : 'date',
     dir: c.req.query('dir') === 'asc' ? 'asc' : 'desc',
     p: Math.min(100_000, Math.max(1, Math.trunc(rawPage) || 1)),
   };
@@ -401,12 +434,13 @@ async function pagesList(c: Ctx): Promise<Response> {
   const sortSql: Record<PostSort, string> = {
     title: 'c.title COLLATE NOCASE', author: "COALESCE(u.username,'') COLLATE NOCASE",
     comments: 'comment_count', date: 'COALESCE(c.published_at,c.created_at)',
+    order: 'c.menu_order',
   };
   const queryRows = (withComments: boolean) => c.env.DB.prepare(
-    `SELECT c.id, c.title, c.slug, c.status, c.published_at, c.created_at, c.updated_at, u.username AS author,
+    `SELECT c.id, c.title, c.slug, c.status, c.published_at, c.created_at, c.updated_at, c.pinned, u.username AS author,
             ${withComments ? "(SELECT COUNT(*) FROM comments cm WHERE cm.site_id=1 AND cm.content_id=c.id AND cm.status IN ('approved','pending'))" : '0'} AS comment_count
-     FROM content c LEFT JOIN users u ON u.id=c.author_id
-     WHERE ${whereSql} ORDER BY ${sortSql[state.sort]} ${direction}, c.id DESC LIMIT ? OFFSET ?`,
+     FROM content c LEFT JOIN users u ON u.id=c.author_id LEFT JOIN media m ON m.id=c.featured_media_id
+     WHERE ${whereSql} ORDER BY c.pinned DESC, ${sortSql[state.sort]} ${direction}, c.id DESC LIMIT ? OFFSET ?`,
   ).bind(...args, per + 1, (state.p - 1) * per).all<PageListRow>();
   let listResult;
   try {
@@ -419,105 +453,129 @@ async function pagesList(c: Ctx): Promise<Response> {
   const total = Number(totalRow?.n || 0);
   const rows = listResult.results.slice(0, per);
   const statusTabs: [PageStatusFilter, string][] = [['all', 'All'], ['published', 'Published'], ['draft', 'Draft']];
+  const installedThemes = (await c.env.DB.prepare('SELECT slug, name FROM themes ORDER BY name').all<{ slug: string; name: string }>().catch(() => ({ results: [] as { slug: string; name: string }[] }))).results;
+  const allPages = (await c.env.DB.prepare(
+    "SELECT id, title, status, COALESCE(menu_order,0) AS menu_order FROM content WHERE site_id=1 AND type='page' ORDER BY COALESCE(menu_order,0) ASC, title COLLATE NOCASE ASC LIMIT 200",
+  ).all<{ id: number; title: string; status: string; menu_order: number }>().catch(() => ({ results: [] as { id: number; title: string; status: string; menu_order: number }[] }))).results;
   const currentUrl = pageListHref(state);
   const bulkAction = `${base}/pages/bulk${currentUrl.slice('/pages'.length)}`;
   const monthOptions = months.results.filter((row) => /^\d{4}-(0[1-9]|1[0-2])$/.test(row.month));
   const rangeStart = total ? (state.p - 1) * per + 1 : 0;
   const rangeEnd = Math.min((state.p - 1) * per + rows.length, total);
-  const sortLink = (label: string, key: PostSort, defaultDir: 'asc' | 'desc' = 'asc') => {
-    const nextDir = state.sort === key ? (state.dir === 'asc' ? 'desc' : 'asc') : defaultDir;
-    const arrow = state.sort === key ? (state.dir === 'asc' ? '↑' : '↓') : '↕';
-    return html`<a class="posts-sort${state.sort === key ? ' active' : ''}" href="${pageListHref(state, { sort: key, dir: nextDir, p: 1 })}">${label}<span aria-hidden="true">${arrow}</span></a>`;
+
+  /** Sortable column: clicking toggles the direction of that column. */
+  const sortCol = (label: string, key: PostSort, initial: 'asc' | 'desc', href: (change: { sort: PostSort; dir: 'asc' | 'desc'; p: number }) => string, cls?: string) => {
+    const active = state.sort === key;
+    const dir = active ? state.dir : initial;
+    const next: 'asc' | 'desc' = active ? (state.dir === 'asc' ? 'desc' : 'asc') : initial;
+    return { label, cls, sortHref: href({ sort: key, dir: next, p: 1 }), sortState: active ? dir : undefined };
   };
 
   return layout(c, 'Pages', html`
-<section class="posts-admin pages-admin" aria-labelledby="pages-title">
-  <form method="post" action="${bulkAction}" id="pages-bulk-form" class="posts-bulk-form">${csrfField(c)}</form>
-  <div class="posts-heading-row"><h1 id="pages-title">Pages</h1><a class="btn ghost posts-add" href="${base}/pages/new">Add Page</a></div>
-  <nav class="posts-status-nav" aria-label="Page status filters">
-    ${statusTabs.map(([key, label]) => html`<a href="${pageListHref(state, { status: key, p: 1 })}" class="${state.status === key ? 'current' : ''}"${state.status === key ? raw(' aria-current="page"') : ''}>${label} <b>(${counts[key]})</b></a>`)}
-  </nav>
-  <div class="posts-search-row">
-    <form method="get" action="${base}/pages" class="posts-search" role="search">
-      <input type="hidden" name="status" value="${state.status}">
-      ${state.month ? html`<input type="hidden" name="month" value="${state.month}">` : ''}
-      ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
-      ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
-      <label class="sr-only" for="page-search">Search pages</label>
-      <input type="text" id="page-search" name="q" value="${state.q}" placeholder="Search pages…" maxlength="120">
-      <button class="btn ghost small" type="submit">Search Pages</button>
-    </form>
-  </div>
-  <div class="posts-controls-row">
-    <div class="posts-bulk-control">
-      <label class="sr-only" for="pages-bulk-top">Bulk actions</label>
-      <select id="pages-bulk-top" name="action" form="pages-bulk-form">
-        <option value="">Bulk actions</option><option value="publish">Publish</option><option value="draft">Move to draft</option><option value="delete">Delete permanently</option>
-      </select>
-      <button class="btn ghost small" type="submit" form="pages-bulk-form">Apply</button>
-    </div>
-    <form method="get" action="${base}/pages" class="post-filter-form">
-      <input type="hidden" name="status" value="${state.status}">
-      ${state.q ? html`<input type="hidden" name="q" value="${state.q}">` : ''}
-      ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
-      ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
-      <label class="sr-only" for="page-month">Filter by date</label>
-      <select id="page-month" name="month">
-        <option value="">All dates</option>
-        ${state.month && !monthOptions.some((row) => row.month === state.month) ? html`<option value="${state.month}" selected>${formatPostMonth(state.month)}</option>` : ''}
-        ${monthOptions.map((row) => html`<option value="${row.month}"${state.month === row.month ? raw(' selected') : ''}>${formatPostMonth(row.month)}</option>`)}
-      </select>
-      <button class="btn ghost small" type="submit">Filter</button>
-    </form>
-  </div>
-  <div class="posts-table-wrap pages-table-wrap"><table class="posts-table pages-table">
-    <thead><tr>
-      <th scope="col" class="posts-check-column"><input type="checkbox" id="select-all-pages" aria-label="Select all pages"></th>
-      <th scope="col" aria-sort="${state.sort === 'title' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Title', 'title')}</th>
-      <th scope="col" aria-sort="${state.sort === 'author' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Author', 'author')}</th>
-      <th scope="col" class="posts-comments-column" aria-sort="${state.sort === 'comments' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Comments', 'comments', 'desc')}</th>
-      <th scope="col" aria-sort="${state.sort === 'date' ? state.dir === 'asc' ? 'ascending' : 'descending' : 'none'}">${sortLink('Date', 'date', 'desc')}</th>
-    </tr></thead>
-    <tbody>
-      ${rows.map((row) => {
+<section class="list-page" data-list="pages-bulk-form" aria-labelledby="pages-title">
+  <form method="post" action="${bulkAction}" id="pages-bulk-form" class="list-bulk-form">${csrfField(c)}</form>
+  ${pageHead({
+    title: 'Pages',
+    sub: total ? `${total} page${total === 1 ? '' : 's'}` : 'Standalone pages: about, contact, landing pages.',
+    id: 'pages-title',
+    actions: html`<a class="btn" href="${base}/pages/new">${icon('plus', { cls: 'ico--sm' })}Add Page</a>`,
+  })}
+  ${listToolbar({
+    tabs: tabs(statusTabs.map(([key, label]) => ({
+      label: html`${label} <span class="tab-count">${counts[key]}</span>`,
+      href: pageListHref(state, { status: key, p: 1 }),
+      current: state.status === key,
+    })), { label: 'Page status' }),
+    search: {
+      action: `${base}/pages`,
+      value: state.q,
+      placeholder: 'Search pages…',
+      label: 'Search pages',
+      button: 'Search Pages',
+      hidden: {
+        status: state.status !== 'all' ? state.status : '',
+        month: state.month,
+        sort: state.sort !== 'date' ? state.sort : '',
+        dir: state.dir !== 'desc' ? state.dir : '',
+      },
+    },
+    filters: html`
+      <form class="list-filters" method="get" action="${base}/pages">
+        <input type="hidden" name="status" value="${state.status}">
+        ${state.q ? html`<input type="hidden" name="q" value="${state.q}">` : ''}
+        ${state.sort !== 'date' ? html`<input type="hidden" name="sort" value="${state.sort}">` : ''}
+        ${state.dir !== 'desc' ? html`<input type="hidden" name="dir" value="${state.dir}">` : ''}
+        <label class="sr-only" for="page-month">Filter by date</label>
+        <select id="page-month" name="month">
+          <option value="">All dates</option>
+          ${state.month && !monthOptions.some((row) => row.month === state.month) ? html`<option value="${state.month}" selected>${formatPostMonth(state.month)}</option>` : ''}
+          ${monthOptions.map((row) => html`<option value="${row.month}"${state.month === row.month ? raw(' selected') : ''}>${formatPostMonth(row.month)}</option>`)}
+        </select>
+        <button class="btn ghost small" type="submit">Filter</button>
+      </form>`,
+  })}
+  ${bulkBar({ formId: 'pages-bulk-form', id: 'pages-bulk', count: rows.length })}
+  ${rows.length
+    ? table({
+      cls: 'list-table',
+      columns: [
+        { label: html`<input type="checkbox" data-select-all aria-label="Select all pages">`, cls: 'list-check' },
+        sortCol('Title', 'title', 'asc', (change) => pageListHref(state, change)),
+        sortCol('Author', 'author', 'asc', (change) => pageListHref(state, change), 'col-hide-sm'),
+        { ...sortCol('Comments', 'comments', 'desc', (change) => pageListHref(state, change), 'list-comments'), align: 'center' as const },
+        sortCol('Date', 'date', 'desc', (change) => pageListHref(state, change), 'list-date'),
+      ],
+      rows: rows.map((row) => {
         const url = settings.home_page_id === String(row.id) ? '/' : '/' + row.slug;
         const date = row.status === 'published' ? row.published_at || row.created_at : row.updated_at;
-        const dateLabel = row.status === 'published' ? 'Published' : 'Last Modified';
+        const dateLabel = row.status === 'published' ? 'Published' : 'Last modified';
         const preview = url + (row.status === 'published' ? '' : '?preview=1');
-        return html`<tr>
-          <td class="posts-check-column"><input type="checkbox" name="ids" value="${row.id}" form="pages-bulk-form" aria-label="Select ${row.title}"></td>
-          <td class="posts-title-cell"><a class="posts-title-link" href="${base}/pages/${row.id}">${row.title || '(untitled)'}</a>${row.status === 'draft' ? html` <span class="page-draft-label">— Draft</span>` : ''}
-            <div class="post-row-actions"><a href="${base}/pages/${row.id}">Edit</a><span aria-hidden="true">·</span><a href="${preview}" target="_blank" rel="noopener">View</a></div>
-          </td>
-          <td>${row.author || '—'}</td>
-          <td class="posts-comments-column"><span class="post-comment-count" aria-label="${row.comment_count} comments">${row.comment_count}</span></td>
-          <td class="posts-date-cell"><strong>${dateLabel}</strong><time datetime="${date}">${formatPostDate(date, timezone)}</time></td>
-        </tr>`;
-      })}
-      ${rows.length ? '' : html`<tr><td colspan="5" class="posts-empty">No pages found. ${state.q || state.month || state.status !== 'all' ? 'Try changing your search or filters.' : html`Add a page to get started.`}</td></tr>`}
-    </tbody>
-  </table></div>
-  <div class="posts-table-footer">
-    <div class="posts-bulk-control"><label class="sr-only" for="pages-bulk-bottom">Bulk actions</label>
-      <select id="pages-bulk-bottom"><option value="">Bulk actions</option><option value="publish">Publish</option><option value="draft">Move to draft</option><option value="delete">Delete permanently</option></select>
-      <button class="btn ghost small" type="submit" form="pages-bulk-form">Apply</button>
-    </div>
-    <span class="posts-count">${total ? `Showing ${rangeStart}–${rangeEnd} of ${total} pages` : '0 pages'}</span>
-  </div>
-  <div class="posts-pagination">
-    ${state.p > 1 ? html`<a class="btn ghost small" href="${pageListHref(state, { p: state.p - 1 })}">&larr; Newer</a>` : ''}
-    ${total > state.p * per ? html`<a class="btn ghost small" href="${pageListHref(state, { p: state.p + 1 })}">Older &rarr;</a>` : ''}
-  </div>
-  ${raw(`<script>
-(function(){
-  var top=document.getElementById('pages-bulk-top'),bottom=document.getElementById('pages-bulk-bottom');
-  if(top&&bottom){top.addEventListener('change',function(){bottom.value=top.value});bottom.addEventListener('change',function(){top.value=bottom.value})}
-  var all=document.getElementById('select-all-pages'),boxes=[].slice.call(document.querySelectorAll('input[name="ids"][form="pages-bulk-form"]'));
-  function updateAll(){if(!all)return;var checked=boxes.filter(function(box){return box.checked}).length;all.checked=boxes.length>0&&checked===boxes.length;all.indeterminate=checked>0&&checked<boxes.length}
-  if(all){all.addEventListener('change',function(){boxes.forEach(function(box){box.checked=all.checked});updateAll()});boxes.forEach(function(box){box.addEventListener('change',updateAll)})}
-  var form=document.getElementById('pages-bulk-form');if(form)form.addEventListener('submit',function(e){if(top&&top.value==='delete'&&!confirm('Permanently delete the selected pages? This cannot be undone.'))e.preventDefault()});
-})();
-</script>`)}
+        return [
+          html`<input type="checkbox" name="ids" value="${row.id}" form="pages-bulk-form" aria-label="Select ${row.title}">`,
+          html`<div class="row-lead">
+              <span class="row-thumb row-thumb--empty" aria-hidden="true">${icon('file', { cls: 'ico--sm' })}</span>
+              <div class="row-lead__body">
+                <a class="row-title" href="${base}/pages/${row.id}">${row.pinned ? html`<span class="pin" title="Pinned">${icon('pin', { cls: 'ico--sm' })}<span class="sr-only">Pinned: </span>` : ''}${row.title || '(untitled)'}</a>
+                <span class="row-meta">${row.status === 'draft' ? html`<span class="badge draft">draft</span>` : ''}${settings.home_page_id === String(row.id) ? html`<span class="badge published">home page</span>` : ''}<span class="row-slug">/${row.slug}</span></span>
+                ${rowActions(c, 'pages', row, preview, installedThemes)}
+              </div>
+            </div>`,
+          row.author || '—',
+          html`<span class="comment-count" aria-label="${row.comment_count} comments">${row.comment_count}</span>`,
+          html`<span class="row-date"><strong>${dateLabel}</strong><time datetime="${date}">${formatPostDate(date, timezone)}</time></span>`,
+        ];
+      }),
+    })
+    : emptyRow(5, {
+      title: 'No pages match',
+      body: state.q || state.month || state.status !== 'all' ? 'Try a different search or clear the filters.' : 'Add an about page or a landing page.',
+      action: html`<a class="btn" href="${base}/pages/new">Add a page</a>`,
+    })}
+  ${pagination({
+    prev: state.p > 1 ? pageListHref(state, { p: state.p - 1 }) : undefined,
+    next: total > state.p * per ? pageListHref(state, { p: state.p + 1 }) : undefined,
+    prevLabel: 'Newer',
+    nextLabel: 'Older',
+    info: total ? `${rangeStart}–${rangeEnd} of ${total}` : '0 pages',
+  })}
+  ${card({
+    title: 'Page order',
+    body: html`<p class="hint" style="margin-top:0">A lower number comes first. This order drives the <code>{{#each pages}}</code> list in a theme, so a menu built from it follows the same sequence. Leave everything at 0 to fall back to alphabetical.</p>
+    <form method="post" action="${base}/pages/order" class="order-form">
+      ${csrfField(c)}
+      <ol class="order-list">
+        ${allPages.map((page) => html`<li class="order-list__item">
+          <input type="hidden" name="id" value="${page.id}">
+          <label class="sr-only" for="order-${page.id}">Order for ${page.title}</label>
+          <input type="number" id="order-${page.id}" name="order" value="${page.menu_order}" min="0" max="9999" step="1" inputmode="numeric" class="order-input">
+          <a href="${base}/pages/${page.id}">${page.title}</a>
+          <span class="muted">${page.status}</span>
+        </li>`)}
+      </ol>
+      <p class="row" style="margin-bottom:0"><button class="btn small" type="submit">Save order</button></p>
+    </form>`,
+  })}
+  ${raw(LIST_JS)}
 </section>`, '/pages');
 }
 
@@ -589,7 +647,7 @@ content.post('/posts/bulk', async (c) => {
   ids.length = Math.min(ids.length, 100);
   if (!ids.length) return postListRedirect(c, state, 'Select at least one post.', true);
 
-  const authorOnly = !can(c.var.user, 'editor');
+  const authorOnly = !can(c.var.user, 'edit_others_posts');
   const ownerSql = authorOnly ? ' AND author_id=?' : '';
   const ownerArgs = authorOnly ? [c.var.user.id] : [];
   const placeholders = ids.map(() => '?').join(',');
@@ -957,7 +1015,136 @@ const EDITOR_JS = `<script>
   /* ----------------------------------------------------------- submit */
   form.addEventListener('submit',function(){
     if(mode==='text')ta.value=visual.innerHTML;
+    // A real save supersedes any autosave: stop nagging on the way out.
+    dirty=false;
+    clearInterval(timer);
   });
+
+  /* --------------------------------------------------------- autosave */
+  // Autosave writes to the revision table, never to the live row: a crash or a
+  // closed tab leaves a recoverable snapshot and the published page is untouched.
+  var autosaveUrl=form.dataset.autosaveUrl||'',lockUrl=form.dataset.lockUrl||'';
+  var csrf=form.dataset.csrf||'';
+  var autosaveStatus=document.querySelector('[data-autosave-status]');
+  var dirty=false,inflight=false,lastSaved=null,timer=null,unloadArmed=false;
+
+  function currentBody(){return mode==='text'?visual.innerHTML:ta.value}
+  function markDirty(){
+    dirty=true;
+    if(!unloadArmed){
+      unloadArmed=true;
+      window.addEventListener('beforeunload',function(event){
+        if(!dirty)return;
+        event.preventDefault();
+        event.returnValue='';
+        return '';
+      });
+    }
+  }
+  function ago(date){
+    var secs=Math.max(0,Math.round((Date.now()-date.getTime())/1000));
+    if(secs<5)return 'just now';
+    if(secs<60)return secs+' s ago';
+    var mins=Math.round(secs/60);
+    return mins+(mins===1?' minute ago':' minutes ago');
+  }
+  function say(text){
+    if(!autosaveStatus)return;
+    autosaveStatus.textContent=text;
+  }
+  function autosave(){
+    if(!autosaveUrl||!dirty||inflight)return;
+    inflight=true;
+    var body=new URLSearchParams();
+    body.set('_csrf',csrf);
+    body.set('title',(document.getElementById('title')||{}).value||'');
+    var excerptEl=document.getElementById('excerpt');
+    if(excerptEl)body.set('excerpt',excerptEl.value);
+    body.set('body',currentBody());
+    fetch(autosaveUrl,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()})
+      .then(function(res){return res.json().then(function(data){return {ok:res.ok,data:data}})})
+      .then(function(result){
+        if(result.ok&&result.data.ok){
+          dirty=false;lastSaved=new Date(result.data.at||Date.now());
+          say(result.data.unchanged?'No new changes to save.':'Autosaved '+ago(lastSaved)+'.');
+        }else if(result.data&&result.data.error==='needs-migration'){
+          say('Autosave needs a database update: open Updates and run it.');
+        }else{
+          say('Autosave could not save this time. Your Save button still works.');
+        }
+      })
+      .catch(function(){say('Autosave is offline. Your Save button still works.')})
+      .then(function(){inflight=false});
+  }
+  if(autosaveUrl){
+    timer=setInterval(autosave,30000);
+    // Keep the "12 s ago" line honest between saves.
+    setInterval(function(){if(lastSaved&&!dirty)say('Autosaved '+ago(lastSaved)+'.')},10000);
+    ['input','keyup'].forEach(function(type){
+      document.getElementById('edit').addEventListener(type,function(event){
+        if(event.target.closest('#editor-toolbar'))return;
+        markDirty();
+      });
+    });
+    if(ta)ta.addEventListener('input',markDirty);
+    if(visual)visual.addEventListener('input',markDirty);
+  }
+
+  /* ------------------------------------------------------- edit lock */
+  if(lockUrl){
+    // A heartbeat every 45 s keeps the row locked while this tab is open, and
+    // tells us if somebody took it over in the meantime.
+    setInterval(function(){
+      var body=new URLSearchParams();body.set('_csrf',csrf);
+      fetch(lockUrl,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()})
+        .then(function(res){return res.json()})
+        .then(function(data){
+          if(data&&data.holder&&!document.querySelector('[data-lock-banner]')){
+            var box=document.getElementById('lock-slot');
+            if(!box)return;
+            box.innerHTML='<div class="notice warn lock-banner" role="status" data-lock-banner><div><b>'+escapeHtml(data.holder)+' is editing this content now.</b> Saving may overwrite their changes.</div></div>';
+          }
+        })
+        .catch(function(){});
+    },45000);
+  }
+
+  /* ------------------------------------------------------- media picker */
+  // The Image button and the featured-image control open the same dialog, so
+  // finding, uploading and describing an image is one flow.
+  var pickerUrl=form.dataset.pickerEndpoint||'',pickerUpload=form.dataset.pickerUpload||'';
+  var picker=(window.amsMediaPicker&&pickerUrl)?window.amsMediaPicker({uploadUrl:pickerUpload}):null;
+  var featuredPreview=document.querySelector('[data-featured-preview]');
+  function setFeatured(item){
+    var input=document.getElementById('featured-id');
+    if(input)input.value=item?String(item.id):'';
+    if(featuredPreview){
+      featuredPreview.innerHTML=item
+        ?'<img src="'+escapeHtml(item.url)+'" alt="'+escapeHtml(item.alt||'')+'">'
+        :'<span class="muted">No image chosen</span>';
+    }
+  }
+  document.querySelectorAll('[data-open-picker]').forEach(function(button){
+    button.addEventListener('click',function(){
+      if(!picker)return;
+      picker.open({onPick:function(item){
+        if(button.dataset.openPicker==='featured')setFeatured(item);
+      }});
+    });
+  });
+  var clearFeatured=document.querySelector('[data-clear-featured]');
+  if(clearFeatured)clearFeatured.addEventListener('click',function(){setFeatured(null)});
+  var imageButton=document.querySelector('[data-picker-image]');
+  if(imageButton){
+    imageButton.addEventListener('click',function(){
+      if(!picker)return;
+      picker.open({onPick:function(item){
+        var alt=escapeHtml(item.alt||'');
+        insertSnippet('<figure class="image-block"><img src="'+escapeHtml(item.url)+'" alt="'+alt+'" loading="lazy">'+
+          (alt?'<figcaption>'+alt+'</figcaption>':'')+'</figure>\n<p></p>');
+      }});
+    });
+  }
 
   /* ------------------------------------------------------------- boot */
   visual.innerHTML=ta.value;
@@ -994,7 +1181,7 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
     const [terms, mine, images] = await Promise.all([
       c.env.DB.prepare('SELECT id, taxonomy, name FROM terms WHERE site_id=1 ORDER BY name').all<{ id: number; taxonomy: string; name: string }>(),
       row ? c.env.DB.prepare('SELECT term_id FROM content_terms WHERE content_id=?').bind(row.id).all<{ term_id: number }>() : null,
-      c.env.DB.prepare("SELECT id, filename, r2_key FROM media WHERE site_id=1 AND mime LIKE 'image/%' ORDER BY id DESC LIMIT 200").all<{ id: number; filename: string; r2_key: string }>(),
+      c.env.DB.prepare("SELECT id, filename, r2_key, alt FROM media WHERE site_id=1 AND mime LIKE 'image/%' ORDER BY id DESC LIMIT 200").all<{ id: number; filename: string; r2_key: string; alt: string }>(),
     ]);
     const selected = new Set((mine?.results || []).map((t) => t.term_id));
     const cats = terms.results.filter((t) => t.taxonomy === 'category');
@@ -1011,17 +1198,43 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
   <input type="text" name="new_cats" placeholder="Add new categories, comma separated" style="margin-top:.4rem">
   <label for="tags">Tags</label>
   <input type="text" id="tags" name="tags" value="${tags}" placeholder="news, updates">
-  <label for="featured">Featured image</label>
-  <select id="featured" name="featured_media_id">
-    <option value="">None</option>
-    ${images.results.map((i) => html`<option value="${i.id}"${i.id === row?.featured_media_id ? raw(' selected') : ''}>${i.filename}</option>`)}
-  </select>
-  ${featured ? html`<p><img src="${mediaUrl(featured.r2_key)}" alt="" style="max-width:12rem;border-radius:.5rem"></p>` : ''}
-  <p class="hint">Upload images in <a href="${base}/media">Media</a> first.</p>
+  <label for="featured-id">Featured image</label>
+  <input type="hidden" id="featured-id" name="featured_media_id" value="${row?.featured_media_id ?? ''}">
+  <div class="featured-picker">
+    <span class="featured-picker__preview" data-featured-preview>
+      ${featured ? html`<img src="${mediaUrl(featured.r2_key)}" alt="${featured.alt || ''}">` : html`<span class="muted">No image chosen</span>`}
+    </span>
+    <span class="row">
+      <button class="btn ghost small" type="button" data-open-picker="featured">Choose image</button>
+      <button class="btn ghost small" type="button" data-clear-featured>Remove</button>
+    </span>
+  </div>
+  <p class="hint">Picking from the library also lets you set alt text. Upload new images right in the dialog.</p>
 </div>`;
   }
 
+  // Editing state: who else is here, and did a crashed tab leave work behind?
+  let lockHolder: { username: string } | null = null;
+  let autosave: RevisionRow | null = null;
+  let revisionCount = 0;
+  if (row) {
+    await claimLock(c.env, row.id, c.var.user);
+    const [holder, latest, revisions] = await Promise.all([
+      readLock(c.env, row.id, c.var.user.id),
+      latestAutosave(c.env, row.id),
+      countRevisions(c.env, row.id),
+    ]);
+    lockHolder = holder && !holder.mine ? holder : null;
+    revisionCount = revisions;
+    // Only worth offering if the autosave actually differs from the saved copy.
+    if (latest && latest.body !== row.body) autosave = latest;
+  }
+
   const status = row?.status ?? 'draft';
+  // Templates the active theme offers. The kind's own template is the default;
+  // `page` is not offered to a post (it would drop its date, author and comments).
+  const templateOptions = (await activeThemeTemplates(c.env)).templates
+    .filter((t) => !['home', 'archive', '404', type, ...(type === 'post' ? ['page'] : [])].includes(t));
   // Pages: one tick puts the page in the header menu (new pages and drafts start ticked).
   const pageUrl = row ? (settings.home_page_id === String(row.id) ? '/' : '/' + row.slug) : null;
   const inMenu = type === 'page' && (!row || row.status === 'draft' || (await isInPrimaryMenu(c.env, pageUrl!)));
@@ -1033,8 +1246,15 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
   return layout(c, title, html`
 ${raw(EDITOR_CSS)}
 <div class="row between" style="margin-bottom:1rem"><h1 style="margin:0">${title}</h1><a href="${base}/${kind}">&larr; All ${kind}</a></div>
+<div id="lock-slot">${lockHolder ? lockBanner(lockHolder, base, kind, row!.id, can(c.var.user, 'edit_others_posts')) : ''}</div>
+${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
 <form method="post" action="${base}/${kind}/save" id="edit"
-      data-is-new="${row ? '0' : '1'}" data-initial-skin="${initialSkin}" data-preferred-skin="${preferred}"${row ? raw(` data-rowid="${row.id}"`) : ''}>
+      data-is-new="${row ? '0' : '1'}" data-initial-skin="${initialSkin}" data-preferred-skin="${preferred}"
+      data-autosave-url="${row ? `${base}/${kind}/${row.id}/autosave` : ''}"
+      data-lock-url="${row ? `${base}/${kind}/${row.id}/lock` : ''}"
+      data-picker-endpoint="${base}/media/picker"
+      data-picker-upload="${base}/media/picker/upload"
+      data-lock-mine="1"${row ? raw(` data-rowid="${row.id}" data-csrf="${c.var.csrf}"`) : ''}>
   ${csrfField(c)}
   <input type="hidden" name="id" value="${row?.id ?? ''}">
   <div class="card">
@@ -1067,7 +1287,7 @@ ${raw(EDITOR_CSS)}
         <button type="button" data-wrap="<blockquote>|</blockquote>" data-command="formatBlock" data-value="blockquote">Quote</button>
         <button type="button" data-wrap="<pre><code>|</code></pre>">Code</button>
         <button type="button" data-wrap='<a href="$1">|</a>' data-ask="Link URL" data-def="https://">Link</button>
-        <button type="button" data-wrap='<img src="$1" alt="">|' data-ask="Image URL (copy it from Media)" data-def="/media/">Image</button>
+        <button type="button" id="insert-image" data-picker-image title="Insert an image from the library">Image</button>
         <span class="toolbar-separator" aria-hidden="true"></span>
         <button type="button" id="add-html-block" title="Insert a custom HTML block">&lt;/&gt; HTML block</button>
         <button type="button" id="add-youtube" title="Embed a YouTube video">&#9654; YouTube</button>
@@ -1077,7 +1297,7 @@ ${raw(EDITOR_CSS)}
       <p class="ams-editor-status" id="editor-status" role="status" aria-live="polite"></p>
     </div>
     <p class="hint">Text and HTML always show the same content: switch freely, nothing is lost. Add as many HTML and YouTube blocks as you need.</p>
-    ${can(c.var.user, 'admin') ? html`<p class="hint">Admin HTML is not sanitized when you save.</p>` : html`<p class="hint">Unsafe HTML is removed when you save. YouTube embeds added with the YouTube button are allowed.</p>`}
+    ${can(c.var.user, 'manage_settings') ? html`<p class="hint">Admin HTML is not sanitized when you save.</p>` : html`<p class="hint">Unsafe HTML is removed when you save. YouTube embeds added with the YouTube button are allowed.</p>`}
   </div>
   ${postFields}
   <div class="card">
@@ -1100,6 +1320,12 @@ ${raw(EDITOR_CSS)}
     </div>` : ''}
     ${type === 'page' ? html`<label class="check" style="margin-top:.9rem"><input type="checkbox" name="in_menu" value="1"${inMenu ? raw(' checked') : ''}> Show in the main menu</label>
     <p class="hint">Adds a link to this page in the site header once it is published. Reorder or rename links under <a href="${base}/menus">Menus</a>.</p>` : ''}
+    ${templateOptions.length ? html`<label for="template">Template</label>
+    <select id="template" name="template">
+      <option value="">Default (${type})</option>
+      ${templateOptions.map((t) => html`<option value="${t}"${row?.template === t ? raw(' selected') : ''}>${t}</option>`)}
+    </select>
+    <p class="hint">Templates come from the active theme. Browse them under <a href="${base}/templates">Appearance → Templates</a>.</p>` : ''}
     <p class="row" style="margin:1.1rem 0 0"><button class="btn" type="submit">Save</button></p>
   </div>
 </form>
@@ -1145,9 +1371,261 @@ ${raw(EDITOR_CSS)}
     <button type="button" class="btn" id="insert-youtube">Embed video</button>
   </div>
 </dialog>
+${raw(mediaPicker({ endpoint: `${base}/media/picker` }))}
+${row ? card({
+  title: 'History',
+  actions: html`<a class="btn ghost small" href="${base}/${kind}/${row.id}/revisions">All ${revisionCount} version${revisionCount === 1 ? '' : 's'}</a>`,
+  body: html`<p class="hint" style="margin-top:0">A snapshot is kept every time you save, plus an autosave while you type. Restoring is reversible: the current version is saved first.</p>
+  <p class="muted" style="margin:0"><span data-autosave-status role="status" aria-live="polite">Autosave is on: your work is kept every 30 seconds.</span></p>`,
+}) : ''}
 ${row ? html`<form method="post" action="${base}/${kind}/${row.id}/delete" id="delete">${csrfField(c)}<button class="btn danger" type="submit">Delete ${type}</button></form>` : ''}
+${raw(PICKER_JS)}
 ${raw(EDITOR_JS)}`, '/' + kind);
 }
+
+/* ------------------------------------------------------------- quick edit */
+/**
+ * Quick edit keeps you on the list: title, slug, status, date, categories and
+ * tags only. The full editor stays the place for body, SEO and media.
+ */
+content.get('/:kind{(?:pages|posts)}/:id{[0-9]+}/quick', async (c) => {
+  const kind = kindOf(c);
+  const id = Number(c.req.param('id'));
+  const base = c.var.base;
+  const row = await c.env.DB.prepare('SELECT * FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<ContentRow>();
+  if (!row) return errorPage(c, 404, 'Not found.');
+  if (!mayEdit(c, row)) return errorPage(c, 403, 'You can only edit your own posts.');
+  const settings = await getSettings(c.env);
+  const tz = settings.timezone || 'UTC';
+  const rowTerms = kind === 'posts'
+    ? (await c.env.DB.prepare(
+      `SELECT t.id, t.taxonomy, t.name FROM content_terms ct JOIN terms t ON t.id=ct.term_id WHERE ct.content_id=? ORDER BY t.name`,
+    ).bind(id).all<{ id: number; taxonomy: string; name: string }>()).results
+    : [];
+  return layout(c, `Quick edit: ${row.title}`, html`
+${pageHead({ title: 'Quick edit', sub: row.title, actions: html`<a class="btn ghost" href="${base}/${kind}/${id}">Open full editor</a>` })}
+<form method="post" action="${base}/${kind}/${id}/quick" class="card">
+  ${csrfField(c)}
+  <label for="qe-title" style="margin-top:0">Title</label>
+  <input type="text" id="qe-title" name="title" value="${row.title}" required maxlength="200">
+  <label for="qe-slug">Slug</label>
+  <input type="text" id="qe-slug" name="slug" value="${row.slug}" maxlength="80" autocapitalize="none">
+  <label for="qe-status">Status</label>
+  <select id="qe-status" name="status">
+    ${['draft', 'published', ...(kind === 'posts' ? ['scheduled'] : [])].map((value) => html`<option value="${value}"${row.status === value ? raw(' selected') : ''}>${value}</option>`)}
+  </select>
+  ${kind === 'posts' ? html`<label for="qe-when">Publish date (${tz})</label>
+  <input type="datetime-local" id="qe-when" name="publish_at" value="${row.published_at ? utcToLocal(row.published_at, tz) : ''}">
+  ${rowTerms.length ? html`<label>Categories</label>
+  <div class="checks">${rowTerms.filter((t) => t.taxonomy === 'category').map((t) => html`<label class="check"><input type="checkbox" name="cat" value="${t.id}" checked> ${t.name}</label>`)}</div>` : ''}
+  <label for="qe-tags">Tags</label>
+  <input type="text" id="qe-tags" name="tags" value="${rowTerms.filter((t) => t.taxonomy === 'tag').map((t) => t.name).join(', ')}">` : ''}
+  <p class="row" style="margin-top:1.2rem"><button class="btn" type="submit">Save changes</button> <a class="btn ghost" href="${base}/${kind}">Cancel</a></p>
+</form>`, '/' + kind);
+});
+
+content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/quick', async (c) => {
+  const kind = kindOf(c);
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare('SELECT * FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<ContentRow>();
+  if (!row) return errorPage(c, 404, 'Not found.');
+  if (!mayEdit(c, row)) return errorPage(c, 403, 'You can only edit your own posts.');
+  const f = c.var.form;
+  const str = (key: string) => String(f.get(key) ?? '');
+  const settings = await getSettings(c.env);
+  const now = new Date().toISOString();
+  const title = str('title').trim().slice(0, 200) || row.title;
+  let status = ['draft', 'published', 'scheduled'].includes(str('status')) ? str('status') : row.status;
+  if (kind === 'pages' && status === 'scheduled') status = 'published';
+
+  // Slug: only changes when the author changed it; uniqueness is enforced here.
+  let slug = slugify(str('slug') || row.slug) || row.slug;
+  if (RESERVED_SLUGS.includes(slug) || slug === c.var.cfg.adminSlug) slug += '-' + typeOf(kind);
+  const root = slug;
+  for (let n = 2; await c.env.DB.prepare('SELECT 1 AS x FROM content WHERE site_id=1 AND type=? AND slug=? AND id<>?').bind(typeOf(kind), slug, id).first(); n++) {
+    slug = `${root}-${n}`;
+  }
+
+  let publishedAt = row.published_at;
+  if (kind === 'posts' && str('publish_at')) publishedAt = localToUtc(str('publish_at'), settings.timezone || 'UTC');
+  if (status === 'scheduled' && !publishedAt) {
+    return go(c, `/${kind}/${id}/quick`, { err: 'Pick a publish date to schedule this post.' });
+  }
+  if (status === 'scheduled' && publishedAt && publishedAt <= now) status = 'published';
+  if (status === 'published' && (!publishedAt || publishedAt > now)) publishedAt = now;
+
+  await recordRevision(c.env, row, { authorId: c.var.user.id });
+  await c.env.DB.prepare('UPDATE content SET title=?, slug=?, status=?, published_at=?, updated_at=? WHERE id=?')
+    .bind(title, slug, status, publishedAt, now, id).run();
+
+  if (kind === 'posts') {
+    const names = (v: string) => [...new Set(v.split(',').map((x) => x.trim().slice(0, 60)).filter(Boolean))];
+    const catIds = f.getAll('cat').map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0);
+    const tagNames = names(str('tags'));
+    const tagIds = (await Promise.all(tagNames.map((name) => c.env.DB.prepare(
+      "SELECT id FROM terms WHERE site_id=1 AND taxonomy='tag' AND slug=?",
+    ).bind(slugify(name)).first<{ id: number }>()))).filter(Boolean) as { id: number }[];
+    await c.env.DB.batch([
+      c.env.DB.prepare("DELETE FROM content_terms WHERE content_id=? AND term_id IN (SELECT id FROM terms WHERE taxonomy='category')").bind(id),
+      c.env.DB.prepare("DELETE FROM content_terms WHERE content_id=? AND term_id IN (SELECT id FROM terms WHERE taxonomy='tag')").bind(id),
+      ...catIds.map((tid) => c.env.DB.prepare("INSERT OR IGNORE INTO content_terms (content_id,term_id) SELECT ?,id FROM terms WHERE id=? AND site_id=1 AND taxonomy='category'").bind(id, tid)),
+      ...tagIds.map((t) => c.env.DB.prepare("INSERT OR IGNORE INTO content_terms (content_id,term_id) VALUES (?,?)").bind(id, t.id)),
+    ]);
+  }
+  await pruneRevisions(c.env, id);
+  await bumpCache(c.env, c.var.cfg);
+  return go(c, `/${kind}`, { ok: `Updated “${title}”.` });
+});
+
+/* ------------------------------------------------------------ duplicate */
+content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/duplicate', async (c) => {
+  const kind = kindOf(c);
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare('SELECT * FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<ContentRow>();
+  if (!row) return errorPage(c, 404, 'Not found.');
+  if (!mayEdit(c, row)) return errorPage(c, 403, 'You can only duplicate your own posts.');
+  const now = new Date().toISOString();
+  const base = `${row.slug}-copy`;
+  let slug = base;
+  for (let n = 2; await c.env.DB.prepare('SELECT 1 AS x FROM content WHERE site_id=1 AND type=? AND slug=?').bind(row.type, slug).first(); n++) {
+    slug = `${base}-${n}`;
+  }
+  const res = await c.env.DB.prepare(
+    `INSERT INTO content (site_id,type,title,slug,body,excerpt,status,seo_title,seo_description,featured_media_id,author_id,published_at,template,created_at,updated_at)
+     VALUES (1,?,?,?,?,?,'draft',?,?,?,?,NULL,?,?,?)`,
+  ).bind(row.type, `${row.title} (copy)`, slug, row.body, row.excerpt, row.seo_title, row.seo_description, row.featured_media_id, c.var.user.id, now, row.template ?? '', now).run();
+  const copyId = Number(res.meta.last_row_id);
+  await c.env.DB.prepare('INSERT OR IGNORE INTO content_terms (content_id,term_id) SELECT ?,term_id FROM content_terms WHERE content_id=?').bind(copyId, id).run();
+  return go(c, `/${kind}/${copyId}`, { ok: 'Duplicated as a draft. The original is untouched.' });
+});
+
+/* ------------------------------------------------------------------ pin */
+content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/pin', async (c) => {
+  const kind = kindOf(c);
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare('SELECT pinned FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<{ pinned: number }>();
+  if (!row) return errorPage(c, 404, 'Not found.');
+  await c.env.DB.prepare('UPDATE content SET pinned=? WHERE id=?').bind(row.pinned ? 0 : 1, id).run();
+  return go(c, `/${kind}`, { ok: row.pinned ? 'Unpinned.' : 'Pinned to the top of the list.' });
+});
+
+/* ---------------------------------------------------------------- order */
+/** Page order: the editor types a position, the list shows what it will be. */
+content.post('/pages/order', async (c) => {
+  const ids = c.var.form.getAll('id').map((v) => Number(v));
+  const orders = c.var.form.getAll('order').map((v) => Number(v) || 0);
+  const stmts = ids
+    .map((id, index) => ({ id, order: orders[index] ?? 0 }))
+    .filter((row) => Number.isInteger(row.id) && row.id > 0)
+    .map((row) => c.env.DB.prepare("UPDATE content SET menu_order=? WHERE id=? AND type='page' AND site_id=1").bind(row.order, row.id));
+  if (stmts.length) await c.env.DB.batch(stmts);
+  return go(c, '/pages?sort=order&dir=asc', { ok: `Saved the order of ${stmts.length} page${stmts.length === 1 ? '' : 's'}.` });
+});
+
+/* --------------------------------------------------------------- revisions */
+content.get('/:kind{(?:pages|posts)}/:id{[0-9]+}/revisions', async (c) => {
+  const kind = kindOf(c);
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare('SELECT * FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<ContentRow>();
+  if (!row) return errorPage(c, 404, 'Not found.');
+  if (!mayEdit(c, row)) return errorPage(c, 403, 'You can only see the history of your own posts.');
+  const [rows, phase2] = await Promise.all([listRevisions(c.env, id), hasPhase2Schema(c.env)]);
+
+  return layout(c, `Revisions: ${row.title}`, html`
+${pageHead({ title: 'Revisions', sub: row.title, actions: html`<a class="btn ghost" href="${c.var.base}/${kind}/${id}">Back to editor</a>` })}
+${card({ title: 'History', body: revisionList(rows, c.var.base, kind, id) })}
+${phase2 ? '' : notice('Run updates from the Updates screen to start recording revisions.', { tone: 'warn' })}
+`, '/' + kind);
+});
+
+content.get('/:kind{(?:pages|posts)}/:id{[0-9]+}/revisions/:rev{[0-9]+}', async (c) => {
+  const kind = kindOf(c);
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare('SELECT * FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<ContentRow>();
+  if (!row) return errorPage(c, 404, 'Not found.');
+  if (!mayEdit(c, row)) return errorPage(c, 403, 'You can only see the history of your own posts.');
+  const rev = await getRevision(c.env, id, Number(c.req.param('rev')));
+  if (!rev) return errorPage(c, 404, 'That revision is no longer in the history.');
+  return layout(c, `Compare: ${row.title}`, html`
+${pageHead({ title: 'Compare versions', sub: row.title, actions: html`<a class="btn ghost" href="${c.var.base}/${kind}/${id}/revisions">All revisions</a>` })}
+${card({
+  title: `Changes made after this snapshot`,
+  actions: html`<form method="post" action="${c.var.base}/${kind}/${id}/revisions/${rev.id}/restore"><button class="btn small" type="submit">Restore this version</button></form>`,
+  body: html`<p class="hint" style="margin-top:0">Left: the ${rev.note === 'autosave' ? 'autosave' : 'saved version'} from ${rev.created_at.slice(0, 16).replace('T', ' ')}. Right: what is saved now.</p>
+  ${revisionDiff(rev, row)}`,
+})}
+`, '/' + kind);
+});
+
+/** Restore: snapshot what is live now, then write the old version back. */
+content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/revisions/:rev{[0-9]+}/restore', async (c) => {
+  const kind = kindOf(c);
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare('SELECT * FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<ContentRow>();
+  if (!row) return errorPage(c, 404, 'Not found.');
+  if (!mayEdit(c, row)) return errorPage(c, 403, 'You can only restore your own posts.');
+  const rev = await getRevision(c.env, id, Number(c.req.param('rev')));
+  if (!rev) return errorPage(c, 404, 'That revision is no longer in the history.');
+  await recordRevision(c.env, row, { note: 'restore', authorId: c.var.user.id });
+  await c.env.DB.prepare('UPDATE content SET title=?, body=?, excerpt=?, seo_title=?, seo_description=?, status=?, updated_at=? WHERE id=?')
+    .bind(rev.title, rev.body, rev.excerpt, rev.seo_title, rev.seo_description, rev.status, new Date().toISOString(), id).run();
+  await pruneRevisions(c.env, id);
+  await bumpCache(c.env, c.var.cfg);
+  return go(c, `/${kind}/${id}`, { ok: `Restored the version from ${rev.created_at.slice(0, 16).replace('T', ' ')} UTC.` });
+});
+
+/* ---------------------------------------------------------------- autosave */
+/**
+ * Autosave stores into the revision table with note='autosave' and never
+ * touches the live row, so a crash leaves a recoverable copy while the
+ * published page keeps serving the last real save. Returns JSON for the
+ * editor's "Saved 12 s ago" line.
+ */
+content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/autosave', async (c) => {
+  const kind = kindOf(c);
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare('SELECT * FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<ContentRow>();
+  if (!row) return c.json({ ok: false, error: 'not-found' }, 404);
+  if (!mayEdit(c, row)) return c.json({ ok: false, error: 'forbidden' }, 403);
+  if (!(await hasPhase2Schema(c.env))) return c.json({ ok: false, error: 'needs-migration' }, 409);
+
+  const body = String(c.var.form.get('body') ?? '');
+  const title = String(c.var.form.get('title') ?? '').slice(0, 200);
+  const excerpt = String(c.var.form.get('excerpt') ?? '').slice(0, 500);
+  const draft = { ...row, title, body: can(c.var.user, 'manage_settings') ? body : sanitizeHtml(body), excerpt };
+  if (sameContent(row, draft)) return c.json({ ok: true, unchanged: true, at: new Date().toISOString() });
+
+  const at = new Date().toISOString();
+  const res = await c.env.DB.prepare(
+    `INSERT INTO content_revisions (site_id,content_id,title,slug,body,excerpt,seo_title,seo_description,status,author_id,note,created_at)
+     VALUES (1,?,?,?,?,?,?,?,?,?,'autosave',?)`,
+  ).bind(id, draft.title, row.slug, draft.body, draft.excerpt, row.seo_title, row.seo_description, row.status, c.var.user.id, at).run();
+  await pruneRevisions(c.env, id);
+  // Refresh the editing lock while we are here: an autosave is proof of life.
+  await claimLock(c.env, id, c.var.user);
+  return c.json({ ok: true, id: Number(res.meta.last_row_id), at }, 200, { 'Cache-Control': 'no-store' });
+});
+
+/* -------------------------------------------------------------- edit locks */
+content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/lock', async (c) => {
+  const id = Number(c.req.param('id'));
+  const holder = await claimLock(c.env, id, c.var.user);
+  return c.json({ ok: !holder, holder: holder ? holder.username : null }, holder ? 409 : 200, { 'Cache-Control': 'no-store' });
+});
+
+content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/lock/release', async (c) => {
+  await releaseLock(c.env, Number(c.req.param('id')), c.var.user.id);
+  return c.json({ ok: true }, 200, { 'Cache-Control': 'no-store' });
+});
+
+content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/lock/takeover', async (c) => {
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare('SELECT author_id FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kindOf(c))).first<{ author_id: number | null }>();
+  if (!row) return errorPage(c, 404, 'Not found.');
+  if (!can(c.var.user, 'edit_others_posts')) return errorPage(c, 403, 'Your role cannot take over an edit.');
+  await claimLock(c.env, id, c.var.user, true);
+  return go(c, `/${kindOf(c)}/${id}`, { ok: 'You have the edit now. The other person will be warned when they save.' });
+});
 
 content.get('/:kind{(?:pages|posts)}/new', (c) => editor(c, kindOf(c), null));
 
@@ -1186,7 +1664,7 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   }
 
   // Raw HTML is an admin privilege; everyone else goes through the allow-list sanitizer.
-  const body = can(c.var.user, 'admin') ? str('body') : sanitizeHtml(str('body'));
+  const body = can(c.var.user, 'manage_settings') ? str('body') : sanitizeHtml(str('body'));
 
   let status = ['draft', 'published', 'scheduled'].includes(str('status')) ? str('status') : 'draft';
   if (type === 'page' && status === 'scheduled') status = 'published';
@@ -1205,16 +1683,37 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   const excerpt = type === 'post' ? str('excerpt').trim().slice(0, 500) : '';
   const seoTitle = str('seo_title').trim().slice(0, 200);
   const seoDesc = str('seo_description').trim().slice(0, 320);
+  // A per-page template: only a template the active theme really has, else ''.
+  const wantedTemplate = str('template').trim().slice(0, 40);
+  const template = wantedTemplate && (await activeThemeTemplates(c.env)).templates.includes(wantedTemplate) ? wantedTemplate : '';
+
+  // Snapshot the pre-save state first: this is what makes a save reversible.
+  // Skipped when nothing a person can see has changed (a re-save of the same
+  // form), so the history stays meaningful instead of filling with duplicates.
+  if (existing) {
+    const next = { title, slug, body, excerpt, seo_title: seoTitle, seo_description: seoDesc, status };
+    const previous = { ...existing, seo_title: existing.seo_title, seo_description: existing.seo_description };
+    if (!sameContent(previous, next)) await recordRevision(c.env, existing, { note: '', authorId: c.var.user.id });
+  }
 
   let savedId = id;
+  const trackEditor = await hasColumn(c.env, 'content', 'updated_by');
   if (existing) {
-    await db.prepare('UPDATE content SET title=?, slug=?, body=?, excerpt=?, status=?, seo_title=?, seo_description=?, featured_media_id=?, published_at=?, updated_at=? WHERE id=?')
-      .bind(title, slug, body, excerpt, status, seoTitle, seoDesc, featured, publishedAt, now, id).run();
+    await db.prepare(`UPDATE content SET title=?, slug=?, body=?, excerpt=?, status=?, seo_title=?, seo_description=?, featured_media_id=?, published_at=?, template=?, updated_at=?${trackEditor ? ', updated_by=?' : ''} WHERE id=?`)
+      .bind(title, slug, body, excerpt, status, seoTitle, seoDesc, featured, publishedAt, template, now, ...(trackEditor ? [c.var.user.id] : []), id).run();
   } else {
-    const res = await db.prepare('INSERT INTO content (site_id,type,title,slug,body,excerpt,status,seo_title,seo_description,featured_media_id,author_id,published_at,created_at,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .bind(type, title, slug, body, excerpt, status, seoTitle, seoDesc, featured, c.var.user.id, publishedAt, now, now).run();
+    // 13 columns plus the optional updated_by; the placeholder count has to match
+    // exactly, and SQLite will not tell you which one is missing.
+    const columns = 'site_id,type,title,slug,body,excerpt,status,seo_title,seo_description,featured_media_id,author_id,published_at,template,created_at,updated_at'
+      + (trackEditor ? ',updated_by' : '');
+    const placeholders = '1,' + Array.from({ length: 14 }, () => '?').join(',') + (trackEditor ? ',?' : '');
+    const res = await db.prepare(`INSERT INTO content (${columns}) VALUES (${placeholders})`)
+      .bind(type, title, slug, body, excerpt, status, seoTitle, seoDesc, featured, c.var.user.id, publishedAt, template, now, now, ...(trackEditor ? [c.var.user.id] : [])).run();
     savedId = Number(res.meta.last_row_id);
   }
+  if (existing) await pruneRevisions(c.env, savedId);
+  // A real save ends the editing session for everyone, including this author.
+  await releaseLock(c.env, savedId, c.var.user.id);
 
   if (type === 'post') {
     const names = (v: string) => [...new Set(v.split(',').map((s) => s.trim().slice(0, 60)).filter(Boolean))];
@@ -1245,6 +1744,9 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   }
 
   await bumpCache(c.env, c.var.cfg);
+  // One line per real save, saying what changed and where it is.
+  await audit(c, existing ? (status === 'published' ? 'published' : 'updated') : 'created', 'content',
+    `${existing ? 'Saved' : 'Created'} ${typeOf(kind).replace('page', 'page')} “${title || '(untitled)'}” (${status})`, savedId);
   return go(c, `/${kind}/${savedId}`, { ok: status === 'scheduled' ? 'Saved and scheduled.' : status === 'published' ? 'Saved and published.' : 'Draft saved.' });
 });
 
@@ -1257,12 +1759,15 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/delete', async (c) => {
   if (!mayEdit(c, row)) return errorPage(c, 403, 'You can only delete your own posts.');
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM content_terms WHERE content_id=?').bind(id),
+    c.env.DB.prepare('DELETE FROM content_lock WHERE content_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM comments WHERE content_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM content WHERE id=?').bind(id),
     c.env.DB.prepare("DELETE FROM settings WHERE site_id=1 AND key='home_page_id' AND value=?").bind(String(id)),
   ]);
+  await deleteRevisions(c.env, id);
   if (kind === 'pages') await removeUrlFromMenus(c.env, '/' + row.slug);
   await bumpCache(c.env, c.var.cfg);
+  await audit(c, 'deleted', 'content', `Deleted ${typeOf(kind)} /${row.slug}`, id);
   return go(c, `/${kind}`, { ok: 'Deleted.' });
 });
 

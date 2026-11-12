@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>{{{theme_css}}}</style>
+{{#if theme_css_url}}<link rel="stylesheet" href="{{{theme_css_url}}}">{{/if}}
+<style nonce="{{nonce}}">{{{theme_css}}}</style>
 {{{head}}}
 </head>
 <body class="{{body_class}}">
@@ -11,7 +12,7 @@
 <header class="hdr">
   {{#if site.tagline}}<div class="topbar"><div class="wrap">{{site.tagline}}</div></div>{{/if}}
   <div class="wrap hdr-in">
-    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">&#9670;</span>{{site.title}}</a>
+    {{#if site.logo}}<a class="brand brand--logo" href="/"><img src="{{site.logo}}" alt="{{site.title}}" class="brand-logo">{{site.title}}</a>{{else}}<a class="brand" href="/"><span class="brand-mark" aria-hidden="true">&#9670;</span>{{site.title}}</a>{{/if}}
     {{#if menu.primary}}
     <nav class="tabs" aria-label="Primary">
       {{#each menu.primary}}<a href="{{url}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>{{/each}}

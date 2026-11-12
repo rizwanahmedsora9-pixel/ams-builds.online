@@ -22,7 +22,7 @@ const fmtSize = (n: number) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' 
 
 type MediaTypeFilter = 'all' | 'images' | 'audio' | 'video' | 'documents' | 'fonts';
 type MediaView = 'grid' | 'list';
-type MediaListState = { type: MediaTypeFilter; month: string; q: string; view: MediaView; bulk: boolean; p: number };
+type MediaListState = { type: MediaTypeFilter; month: string; q: string; view: MediaView; bulk: boolean; alt: boolean; p: number };
 type MediaListRow = { id: number; r2_key: string; filename: string; mime: string; size: number; uploaded_by: number | null; created_at: string };
 
 function mediaListState(c: Ctx): MediaListState {
@@ -36,6 +36,8 @@ function mediaListState(c: Ctx): MediaListState {
     q: (c.req.query('q') || '').trim().slice(0, 120),
     view: rawView === 'list' ? 'list' : 'grid',
     bulk: c.req.query('bulk') === '1',
+    // ?alt=missing is the "fix your alt text" view, linked from the dashboard.
+    alt: c.req.query('alt') === 'missing',
     p: Math.min(100_000, Math.max(1, Math.trunc(rawPage) || 1)),
   };
 }
@@ -48,6 +50,7 @@ function mediaListHref(state: MediaListState, change: Partial<MediaListState> = 
   if (next.q) params.set('q', next.q);
   if (next.view !== 'grid') params.set('view', next.view);
   if (next.bulk) params.set('bulk', '1');
+  if (next.alt) params.set('alt', 'missing');
   if (next.p > 1) params.set('p', String(next.p));
   const query = params.toString();
   return '/media' + (query ? '?' + query : '');
@@ -88,6 +91,7 @@ media.get('/media', async (c) => {
   if (state.type !== 'all') where.push(typeWhere[state.type]!);
   if (state.month) { where.push('substr(m.created_at,1,7)=?'); args.push(state.month); }
   if (state.q) { where.push('instr(lower(m.filename),lower(?))>0'); args.push(state.q); }
+  if (state.alt) where.push("(m.alt IS NULL OR trim(m.alt)='')");
   const whereSql = where.join(' AND ');
   const [listResult, totalRow, months] = await Promise.all([
     c.env.DB.prepare(`SELECT m.id,m.r2_key,m.filename,m.mime,m.size,m.uploaded_by,m.created_at
@@ -106,7 +110,7 @@ media.get('/media', async (c) => {
   const rangeEnd = Math.min((state.p - 1) * per + rows.length, total);
   const accept = Object.keys(TYPES).map((ext) => '.' + ext).join(',');
   const actions = (m: MediaListRow, url: string) => {
-    const mine = can(c.var.user, 'editor') || m.uploaded_by === c.var.user.id;
+    const mine = can(c.var.user, 'manage_media') || m.uploaded_by === c.var.user.id;
     return html`<button type="button" class="btn ghost small" data-copy="${url}">Copy URL</button>
       ${mine ? html`<form method="post" action="${base}/media/${m.id}/delete" class="inline" data-confirm>${csrfField(c)}<button class="btn danger small" type="submit">Delete</button></form>` : ''}`;
   };
@@ -217,6 +221,67 @@ media.get('/media', async (c) => {
 </section>`, '/media');
 });
 
+/* ------------------------------------------------------------ picker API */
+/**
+ * JSON endpoints behind the media-picker dialog. The dialog is used from the
+ * post editor (featured image, insert image) and later the page hero, so it
+ * speaks JSON and never navigates away from what you are writing.
+ */
+media.get('/media/picker', async (c) => {
+  const q = (c.req.query('q') || '').trim().slice(0, 80);
+  const type = c.req.query('type') === 'all' ? '' : " AND m.mime LIKE 'image/%'";
+  const args: (string | number)[] = [];
+  let where = `m.site_id=1${type}`;
+  if (q) {
+    where += ' AND (instr(lower(m.filename),lower(?))>0 OR instr(lower(m.alt),lower(?))>0)';
+    args.push(q, q);
+  }
+  const { results } = await c.env.DB.prepare(
+    `SELECT m.id, m.r2_key, m.filename, m.alt, m.mime FROM media m WHERE ${where} ORDER BY m.id DESC LIMIT 60`,
+  ).bind(...args).all<{ id: number; r2_key: string; filename: string; alt: string; mime: string }>();
+  return c.json(
+    { items: results.map((row) => ({ id: row.id, url: mediaUrl(row.r2_key), filename: row.filename, alt: row.alt || '', mime: row.mime })) },
+    200,
+    { 'Cache-Control': 'no-store' },
+  );
+});
+
+/** Upload from inside the picker, answering JSON so the dialog can refresh itself. */
+media.post('/media/picker/upload', async (c) => {
+  const file = c.var.form.get('file');
+  if (typeof file === 'string' || !file || !file.size) return c.json({ ok: false, error: 'Choose a file first.' }, 400);
+  const alt = String(c.var.form.get('alt') ?? '').trim().slice(0, 200);
+  const dot = file.name.lastIndexOf('.');
+  const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : '';
+  const mime = TYPES[ext];
+  if (!mime) return c.json({ ok: false, error: 'That file type is not allowed.' }, 415);
+  if (file.size > MAX_BYTES) return c.json({ ok: false, error: 'That file is too large.' }, 413);
+  if (ADMIN_ONLY.has(ext) && !can(c.var.user, 'manage_settings')) return c.json({ ok: false, error: 'Only admins can upload that type.' }, 403);
+  const now = new Date();
+  const folder = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const filename = `${slugify(file.name.slice(0, dot)) || 'file'}.${ext}`;
+  const key = `${folder}/${randomToken(6)}-${filename}`;
+  await putFile(c.env, key, await file.arrayBuffer(), mime);
+  const res = await c.env.DB.prepare(
+    'INSERT INTO media (site_id,r2_key,filename,mime,size,alt,uploaded_by,created_at) VALUES (1,?,?,?,?,?,?,?)',
+  ).bind(key, filename, mime.split(';')[0], file.size, alt, c.var.user.id, now.toISOString()).run();
+  return c.json({
+    ok: true,
+    item: { id: Number(res.meta.last_row_id), url: mediaUrl(key), filename, alt, mime: mime.split(';')[0] },
+  }, 200, { 'Cache-Control': 'no-store' });
+});
+
+/** Alt text, edited from the library list without opening anything. */
+media.post('/media/:id{[0-9]+}/alt', async (c) => {
+  const id = Number(c.req.param('id'));
+  const alt = String(c.var.form.get('alt') ?? '').trim().slice(0, 200);
+  const row = await c.env.DB.prepare('SELECT uploaded_by FROM media WHERE id=? AND site_id=1').bind(id).first<{ uploaded_by: number | null }>();
+  if (!row) return errorPage(c, 404, 'That file is not in the library.');
+  if (!can(c.var.user, 'manage_media') && row.uploaded_by !== c.var.user.id) return errorPage(c, 403, 'You can only edit files you uploaded.');
+  await c.env.DB.prepare('UPDATE media SET alt=? WHERE id=?').bind(alt, id).run();
+  return go(c, '/media', { ok: alt ? 'Alt text saved.' : 'Alt text cleared (the image is now decorative).' });
+});
+
 media.post('/media/upload', async (c) => {
   const files = c.var.form.getAll('files').filter((f): f is File => typeof f !== 'string' && f.size > 0);
   if (!files.length) return go(c, '/media', { err: 'Choose at least one file.' });
@@ -228,7 +293,7 @@ media.post('/media/upload', async (c) => {
     const dot = file.name.lastIndexOf('.');
     const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : '';
     const mime = TYPES[ext];
-    if (!mime || file.size > MAX_BYTES || (ADMIN_ONLY.has(ext) && !can(c.var.user, 'admin'))) {
+    if (!mime || file.size > MAX_BYTES || (ADMIN_ONLY.has(ext) && !can(c.var.user, 'manage_settings'))) {
       skipped.push(file.name);
       continue;
     }
@@ -252,7 +317,7 @@ media.post('/media/bulk', async (c) => {
   ids.length = Math.min(ids.length, 100);
   if (!ids.length) return mediaListRedirect(c, state, 'Select at least one media file.', true);
 
-  const canDeleteAll = can(c.var.user, 'editor');
+  const canDeleteAll = can(c.var.user, 'manage_media');
   const ownerSql = canDeleteAll ? '' : ' AND uploaded_by=?';
   const ownerArgs = canDeleteAll ? [] : [c.var.user.id];
   const placeholders = ids.map(() => '?').join(',');
@@ -275,7 +340,7 @@ media.post('/media/:id{[0-9]+}/delete', async (c) => {
   const id = Number(c.req.param('id'));
   const row = await c.env.DB.prepare('SELECT r2_key, uploaded_by FROM media WHERE id=? AND site_id=1').bind(id).first<{ r2_key: string; uploaded_by: number | null }>();
   if (!row) return errorPage(c, 404, 'File not found.');
-  if (!can(c.var.user, 'editor') && row.uploaded_by !== c.var.user.id) return errorPage(c, 403, 'You can only delete your own uploads.');
+  if (!can(c.var.user, 'manage_media') && row.uploaded_by !== c.var.user.id) return errorPage(c, 403, 'You can only delete your own uploads.');
   await deleteFile(c.env, row.r2_key);
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE content SET featured_media_id=NULL WHERE featured_media_id=?').bind(id),

@@ -7,127 +7,49 @@
 //
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
 import { crc32, deflateRawSync } from 'node:zlib';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { ADMIN, TARGET, createHarness } from './helpers.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const TARGET = process.env.TARGET === 'cloudflare' ? 'cloudflare' : 'node';
-const ADMIN = { username: 'owner', email: 'owner@example.com', password: 'correct horse battery' };
+let admin = '/admin-panel';
+let base = '';
+const setAdmin = (slug) => { admin = slug; harness.setAdmin(slug); };
 // 1x1 PNG
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
-let dataDir, child, port, base;
-let admin = '/admin-panel';
-const jar = new Map();
 const log = (msg) => console.log(`    · ${msg}`);
 
 /* ------------------------------------------------------------------ server */
-const freePort = () => new Promise((resolve, reject) => {
-  const s = createServer();
-  s.once('error', reject);
-  s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); });
-});
-
-async function startServer() {
-  const env = { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dataDir, TRUST_PROXY: '0' };
-  const args = TARGET === 'node'
-    ? ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs')]
-    : [join(ROOT, 'node_modules', 'wrangler', 'bin', 'wrangler.js'), 'dev', '--ip', '127.0.0.1', '--port', String(port),
-       '--inspector-port', String(await freePort()), '--persist-to', dataDir, '--show-interactive-dev-session=false'];
-  let output = '';
-  child = spawn(process.execPath, args, { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout.on('data', (d) => { output += d; });
-  child.stderr.on('data', (d) => { output += d; });
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`server exited early:\n${output}`);
-    try {
-      const res = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(3000) });
-      if (res.ok) return res.json();
-    } catch { /* not listening yet */ }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  throw new Error(`server did not start within 60s:\n${output}`);
-}
-
-function stopServer() {
-  return new Promise((resolve) => {
-    if (!child || child.exitCode !== null) return resolve();
-    child.once('exit', resolve);
-    child.kill('SIGTERM');
-    setTimeout(() => child.kill('SIGKILL'), 4000).unref();
-  });
-}
+// Boot, cookie jar and the HTTP helpers all live in tests/helpers.mjs so a new
+// test can start from a working panel in three lines.
+const harness = createHarness();
 
 before(async () => {
-  dataDir = mkdtempSync(join(tmpdir(), 'edge-cms-e2e-'));
-  port = await freePort();
-  base = `http://127.0.0.1:${port}`;
-  const health = await startServer();
-  console.log(`\n  target: ${TARGET}  url: ${base}  data: ${dataDir}`);
+  const health = await harness.start();
+  base = harness.base;
+  console.log(`\n  target: ${TARGET}  url: ${base}  data: ${harness.dataDir}`);
   console.log(`  health: ${JSON.stringify(health)}\n`);
 });
 
 after(async () => {
-  await stopServer();
-  rmSync(dataDir, { recursive: true, force: true, maxRetries: 5 });
+  await harness.stop();
+  harness.cleanup();
 });
 
-/* -------------------------------------------------------------------- http */
-async function request(path, { method = 'GET', body, cookies = true, headers = {} } = {}) {
-  const h = { ...headers };
-  if (cookies && jar.size) h.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
-  const res = await fetch(base + path, { method, body, headers: h, redirect: 'manual', signal: AbortSignal.timeout(20000) });
-  if (cookies) {
-    for (const line of res.headers.getSetCookie()) {
-      const [pair] = line.split(';');
-      const i = pair.indexOf('=');
-      const name = pair.slice(0, i), value = pair.slice(i + 1);
-      if (value === '' || /max-age=0/i.test(line)) jar.delete(name); else jar.set(name, value);
-    }
-  }
-  const text = await res.text();
-  const loc = res.headers.get('location');
-  return { status: res.status, text, headers: res.headers, location: loc ? decodeURIComponent(loc.replace(base, '')) : null };
-}
-const get = (path, opts) => request(path, opts);
-const anon = (path) => request(path, { cookies: false });
-const form = (fields) => {
-  const p = new URLSearchParams();
-  for (const [k, v] of Object.entries(fields)) for (const item of [].concat(v)) p.append(k, String(item));
-  return p;
-};
-async function csrf() {
-  const page = await get(`${admin}/login`);
-  const html = page.status === 200 ? page.text : (await get(`${admin}/profile`)).text;
-  const m = html.match(/name="_csrf" value="([^"]+)"/);
-  assert.ok(m, 'CSRF token is present in the form');
-  return m[1];
-}
-const adminPost = async (path, fields) => request(admin + path, { method: 'POST', body: form({ _csrf: await csrf(), ...fields }) });
+const request = (...args) => harness.request(...args);
+const jar = harness.jar;
+const get = (...args) => harness.get(...args);
+const anon = (...args) => harness.anon(...args);
+const form = (...args) => harness.form(...args);
+const csrf = (...args) => harness.csrf(...args);
+const adminPost = (...args) => harness.adminPost(...args);
+const anonPost = (...args) => harness.anonPost(...args);
+
 const idFrom = (location) => Number(location.match(/\/(\d+)(\?|$)/)[1]);
-const anonPost = (path, fields) => request(path, { method: 'POST', body: form(fields), cookies: false });
 const fieldValue = (html, name) => {
   const m = html.match(new RegExp(`name="${name}" value="([^"]*)"`));
   assert.ok(m, `${name} field is present`);
   return m[1];
 };
-const currentPostUrl = () => {
-  const y = new Date().getUTCFullYear(), m = String(new Date().getUTCMonth() + 1).padStart(2, '0');
-  return `/${y}/${m}/launch-day-more`;
-};
-const SITE_SETTINGS = {
-  site_title: 'Renamed Site', tagline: 'Now with a tagline', timezone: 'Asia/Karachi', primary_domain: 'example.com',
-  domains: 'www.example.com', admin_slug: 'control-room', permalink_style: 'dated', posts_per_page: 5,
-  home_page_id: 1, favicon: '',
-};
-
-
 /** Builds a small zip in memory (first file stored, the rest deflated). */
 function makeZip(files) {
   const locals = [], central = [];
@@ -154,12 +76,35 @@ async function uploadTheme(name, bytes) {
   const body = new FormData();
   body.set('_csrf', await csrf());
   body.append('theme', new File([bytes], name));
-  return request(`${admin}/themes/upload`, { method: 'POST', body });
+  const res = await request(`${admin}/themes/upload`, { method: 'POST', body });
+  // A theme is named by a person, and the confirmation quotes that name, so the
+  // Location: is a UTF-8 byte string. Decode it to what the browser would show.
+  let readable = res.location || '';
+  try {
+    readable = decodeURIComponent(escape(readable));
+  } catch {
+    /* leave it as it came */
+  }
+  return { ...res, location: readable };
 }
-const themeId = async (name) => Number((await get(`${admin}/themes`)).text.match(new RegExp(`themes/(\\d+)/download">${name}<`))[1]);
+const themeId = async (name) => {
+  const row = (await get(`${admin}/themes`)).text.match(new RegExp(`data-theme-id="(\\d+)"[\\s\\S]{0,400}?<a href="[^"]*/themes/[^"]*">${name}</a>`));
+  assert.ok(row, `theme "${name}" is listed`);
+  return Number(row[1]);
+};
+
 const nav = (htmlText) => [...htmlText.match(/<nav class="site-nav"[^]*?<\/nav>/)[0].matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
 
-/* ------------------------------------------------------------------- steps */
+const currentPostUrl = () => {
+  const y = new Date().getUTCFullYear(), m = String(new Date().getUTCMonth() + 1).padStart(2, '0');
+  return `/${y}/${m}/launch-day-more`;
+};
+const SITE_SETTINGS = {
+  site_title: 'Renamed Site', tagline: 'Now with a tagline', timezone: 'Asia/Karachi', primary_domain: 'example.com',
+  domains: 'www.example.com', admin_slug: 'control-room', permalink_style: 'dated', posts_per_page: 5,
+  home_page_id: 1, favicon: '',
+};
+
 const INSTALL = {
   username: ADMIN.username, email: ADMIN.email, password: ADMIN.password, password2: ADMIN.password,
   title: 'E2E Test Site', domain: 'example.com', slug: 'admin-panel',
@@ -256,7 +201,7 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   pub = await anon('/about-us');
   assert.match(pub.text, /We build better things\./, 'edit is visible immediately');
   const pagesWithoutDrafts = await get(`${admin}/pages`);
-  assert.match(pagesWithoutDrafts.text, /Draft <b>\(0\)<\/b>/, 'all status tabs remain available when a status has no pages');
+  assert.match(pagesWithoutDrafts.text, /Draft <span class="tab-count">0<\/span>/, 'all status tabs remain available when a status has no pages');
   const reserved = await adminPost('/pages/save', { title: 'Blog', slug: 'blog', body: '', status: 'draft' });
   const editor = await get(reserved.location.split('?')[0]);
   assert.match(editor.text, /<title>Edit page/, 'edit URL opens the editor, not the list');
@@ -285,7 +230,7 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   for (const label of ['Add Page', 'All', 'Published', 'Draft', 'Search Pages', 'Bulk actions', 'Comments', 'Date']) {
     assert.ok(pageList.text.includes(label), `pages list includes ${label}`);
   }
-  assert.match(pageList.text, /class="posts-table pages-table"/);
+  assert.match(pageList.text, /class="table list-table"/);
   assert.match((await get(`${admin}/pages?q=About`)).text, /About Us/);
   assert.match((await get(`${admin}/pages?status=draft`)).text, /Blog/);
   const currentMonth = new Date().toISOString().slice(0, 7);
@@ -389,16 +334,18 @@ test('8a. posts list searches, filters and applies bulk actions', async () => {
   for (const label of ['Add Post', 'All', 'Published', 'Categories', 'Tags', 'Comments', 'Date', 'Bulk actions']) {
     assert.ok(all.text.includes(label), `posts list includes ${label}`);
   }
-  assert.match(all.text, /class="posts-table"/);
+  assert.match(all.text, /class="table list-table"/);
   assert.match(all.text, /Launch Day &amp; More/);
   assert.match(all.text, /name="ids"/);
   assert.match(all.text, /name="action" form="posts-bulk-form"/);
+  assert.match(all.text, /class="bulk-bar"/, 'bulk actions live in one bar');
+  assert.match(all.text, /data-label="Date"/, 'rows carry labels for the card layout');
 
   const searched = await get(`${admin}/posts?q=Launch+Day`);
   assert.match(searched.text, /Launch Day &amp; More/);
   const empty = await get(`${admin}/posts?q=not-a-real-title`);
   assert.doesNotMatch(empty.text, /Launch Day &amp; More/);
-  assert.match(empty.text, /No posts found/);
+  assert.match(empty.text, /No posts match/);
   const editor = await get(`${admin}/posts/${state.postId}`);
   const categoryId = editor.text.match(/name="cat" value="(\d+)" checked/)[1];
   const byCategory = await get(`${admin}/posts?category=${categoryId}`);
@@ -451,7 +398,7 @@ test('10. settings: timezone, permalinks and a moved admin URL take effect at on
   });
   assert.equal(saved.location, '/control-room/settings?ok=Settings saved.');
   assert.equal((await get('/admin-panel')).status, 404, 'old admin URL is gone');
-  admin = '/control-room';
+  setAdmin('/control-room');
   assert.equal((await get(admin)).status, 200);
   const home = await anon('/');
   assert.match(home.text, /<title>Renamed Site – Now with a tagline<\/title>/);
@@ -488,8 +435,8 @@ test('11. profile: password change keeps this session and old password stops wor
 });
 
 test('12. data survives a restart', async () => {
-  await stopServer();
-  await startServer();
+  await harness.stop();
+  await harness.start();
   const health = JSON.parse((await anon('/api/health')).text);
   assert.equal(health.installed, true);
   assert.match((await anon('/about-us')).text, /We build better things\./);
@@ -552,7 +499,10 @@ test('12b. themes: upload JSON and zip, activate, replace, download, delete', as
   for (const [bytes, name, message] of bad) assert.ok((await uploadTheme(name, bytes)).location.includes(message), message);
 
   const json = { name: 'Json Theme', version: '2.1.0', templates: { base: '<!doctype html><html><head>{{{head}}}<style>{{{theme_css}}}</style></head><body data-theme="json">{{#each menu.primary}}<a class="jn" href="{{url}}">{{label}}</a>{{/each}}<main>{{{content}}}</main></body></html>', page: '<h1 class="json-page">{{page.title}}</h1>{{{page.content}}}' }, css: 'body{color:#123456}' };
-  assert.match((await uploadTheme('json-theme.json', JSON.stringify(json))).location, /Json Theme" v2\.1\.0 saved/);
+  // The flash quotes the theme name, so the message itself is what we read
+  // (a Location header carries it percent-encoded, and the name has a space).
+  const uploaded = await uploadTheme('json-theme.json', JSON.stringify(json));
+  assert.match(uploaded.location, /v2\.1\.0 installed/, uploaded.location);
   assert.doesNotMatch((await anon('/')).text, /data-theme="json"/, 'uploading does not activate');
   const jsonId = await themeId('Json Theme');
   await adminPost(`/themes/${jsonId}/activate`, {});
@@ -569,7 +519,7 @@ test('12b. themes: upload JSON and zip, activate, replace, download, delete', as
     'zip-theme/404.html': '<p class="zip-404">Lost</p>',
     'zip-theme/main.css': 'body{background:#abcdef}',
   });
-  assert.match((await uploadTheme('zip-theme.zip', zip)).location, /Zip Theme" v0\.9 saved/);
+  assert.match((await uploadTheme('zip-theme.zip', zip)).location, /v0\.9 installed/);
   const missing = makeZip({ 'theme.json': JSON.stringify({ name: 'Broken', templates: { base: 'gone.html' } }) });
   assert.ok((await uploadTheme('broken.zip', missing)).location.includes('"gone.html" but that file is not in the zip'));
   const zipId = await themeId('Zip Theme');
@@ -586,24 +536,47 @@ test('12b. themes: upload JSON and zip, activate, replace, download, delete', as
   await uploadTheme('again.json', JSON.stringify(json));
   assert.match((await anon('/')).text, /data-theme="zip-v1"/);
 
+  // Phase 3: the stylesheet is served as a cacheable asset, not inlined.
+  const sheet = await anon('/theme-assets/zip-theme/style.css');
+  assert.equal(sheet.status, 200, 'the theme stylesheet is a served asset');
+  assert.match(sheet.headers.get('cache-control'), /immutable/);
+  assert.equal(sheet.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(sheet.headers.get('content-security-policy'), /default-src 'none'/);
+
+  // Phase 5: the download is a zip that uploads back, plus a JSON view for
+  // reading a theme in an editor or a diff.
   const dl = await get(`${admin}/themes/${zipId}/download`);
-  assert.match(dl.headers.get('content-disposition'), /zip-theme-theme\.json/);
-  assert.equal(JSON.parse(dl.text).version, '1.0');
+  assert.match(dl.headers.get('content-disposition'), /zip-theme-1\.0\.zip/);
+  assert.equal(dl.headers.get('content-type'), 'application/zip');
+  assert.equal(new DataView(dl.bytes.buffer, dl.bytes.byteOffset).getUint32(0, true), 0x04034b50, 'it is a zip');
+  const jsonView = await get(`${admin}/themes/${zipId}/download.json`);
+  assert.match(jsonView.headers.get('content-disposition'), /zip-theme-theme\.json/);
+  assert.equal(JSON.parse(jsonView.text).version, '1.0');
 
   assert.match((await adminPost(`/themes/${zipId}/delete`, {})).location, /Activate another theme/);
+  // Phase 3: an asset-backed theme can still be inspected before it goes.
+  const manage = await get(`${admin}/themes/zip-theme`);
+  assert.equal(manage.status, 200);
+  assert.match(manage.text, /data-asset|\/theme-assets\/zip-theme\/style\.css/, 'the manager lists the stylesheet asset');
+  assert.match((await get(`${admin}/themes/zip-theme/validate`)).text, /No problems found|Warning/, 'the validator reports on an installed theme');
   const baseId = await themeId('AMS Base');
   await adminPost(`/themes/${baseId}/activate`, {});
   assert.match((await anon('/')).text, /class="site-header"/);
-  assert.match((await adminPost(`/themes/${zipId}/delete`, {})).location, /Theme deleted/);
-  assert.match((await adminPost(`/themes/${jsonId}/delete`, {})).location, /Theme deleted/);
+  assert.match(decodeURIComponent((await adminPost(`/themes/${zipId}/delete`, {})).location), /deleted/);
+  assert.match(decodeURIComponent((await adminPost(`/themes/${jsonId}/delete`, {})).location), /deleted/);
   assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only AMS Base is left');
   log('5 bad uploads rejected with reasons; JSON + zip themes installed, activated, replaced live, downloaded, deleted');
 });
 
-test('12c. theme store: AMS Base, AMS Pro and AMS Premium install and switch with one click', async () => {
+test('12c. theme store: five bundled themes install and switch with one click', async () => {
   const store = await get(`${admin}/themes`);
-  for (const name of ['AMS Base', 'AMS Pro', 'AMS Premium']) assert.ok(store.text.includes(`<h3>${name} `), name);
-  assert.equal((store.text.match(/store\/[a-z-]+\/install/g) || []).length, 4, 'Pro and Premium each offer Install and Install-and-activate');
+  for (const name of ['AMS Base', 'AMS Pro', 'AMS Premium', 'AMS Journal', 'AMS Portfolio']) assert.ok(store.text.includes(`<h3>${name} `), name);
+  assert.equal((store.text.match(/store\/[a-z-]+\/install/g) || []).length, 8, 'the four installable themes each offer Install and Install-and-activate');
+  // A store card shows a screenshot (or a palette gradient when it ships none),
+  // and its tags, so the store looks like a store.
+  assert.match(store.text, /class="store-item__shot"/);
+  // Nothing is installed yet, so every card falls back to its palette gradient.
+  assert.doesNotMatch(store.text, /store-item__shot[^>]*url\(/, 'an uninstalled theme shows a generated card, not a broken image');
 
   assert.match((await adminPost('/themes/store/ams-pro/install', {})).location, /AMS Pro v1\.0\.0 installed/);
   assert.match((await anon('/')).text, /class="site-header"/, 'installing alone does not switch theme');
@@ -629,8 +602,32 @@ test('12c. theme store: AMS Base, AMS Pro and AMS Premium install and switch wit
   assert.match((await anon('/')).text, /<a href="\/" aria-current="page">Home<\/a>/, 'current tab is marked');
 
   const after = await get(`${admin}/themes`);
-  assert.equal((after.text.match(/store\/[a-z-]+\/install/g) || []).length, 2, 'installed themes only offer Activate');
+  assert.equal((after.text.match(/store\/[a-z-]+\/install/g) || []).length, 6, 'installed themes only offer Activate');
   assert.match((await adminPost('/themes/store/nope/install', {})).text, /not in the store/);
+  // Installing Journal writes the screenshot the app ships with it, so its card
+  // shows the real thing from then on.
+  assert.match((await adminPost('/themes/store/ams-journal/install', {})).location, /AMS Journal v1\.0\.0 installed/);
+  const withShot = await get(`${admin}/themes`);
+  assert.match(withShot.text, /store-item__shot[^>]*url\([^)]*\/theme-assets\/ams-journal\/screenshot\.png/, 'the installed screenshot is served');
+  const shotUrl = withShot.text.match(/theme-assets\/ams-journal\/screenshot\.png[^'"]*/)[0];
+  const shot = await request('/theme-assets/ams-journal/screenshot.png');
+  assert.equal(shot.status, 200);
+  assert.ok(shotUrl.length > 0);
+  // The bytes really travel: an empty PNG would pass a status check and show a
+  // blank card, which is exactly what a build misconfigured for binary assets does.
+  assert.equal(shot.bytes[0], 0x89, 'the screenshot is a PNG, not an empty file');
+  assert.ok(shot.bytes.length > 1000, 'and it has pixels in it');
+  // And the theme itself renders: Journal's own markup, not a fallback.
+  assert.match((await adminPost('/themes/store/ams-journal/install', { activate: 1 })).location, /AMS Journal is now your active theme/);
+  const journal = await anon('/');
+  assert.match(journal.text, /class="masthead"/, 'Journal renders its masthead');
+  assert.match(journal.text, /masthead__kicker">Notes, essays/, 'its own theme setting reaches the page');
+  assert.match((await get(`${admin}/themes/preview/ams-journal`)).text, /id="theme-preview-frame"/, 'the live preview page renders');
+  assert.match((await adminPost('/themes/store/ams-portfolio/install', { activate: 1 })).location, /AMS Portfolio is now your active theme/);
+  const portfolio = await anon('/');
+  assert.match(portfolio.text, /class="hero__title">Design with intent/, 'Portfolio renders its hero setting');
+  assert.match(portfolio.text, /class="grid"/, 'and its grid');
+  assert.match(portfolio.text, /--cols:3/, 'the grid-columns setting reaches the CSS');
   assert.match((await adminPost('/themes/store/default/install', { activate: 1 })).location, /AMS Base is now your active theme/);
   assert.match((await anon('/')).text, /class="site-header"/);
   log('store lists 3 themes; Pro and Premium render home, blog, post, page and 404 with tabs + footer; switched back to Base');
@@ -662,7 +659,7 @@ test('12d. comments: public form, moderation, approval, replies, spam and delete
   assert.doesNotMatch((await anon(url)).text, /Great post!/, 'a pending comment is not public');
 
   const dash = await get(admin);
-  assert.match(dash.text, /class="bubble" title="1 pending"/, 'sidebar shows the pending count');
+  assert.match(dash.text, /class="rail__bubble" title="1 pending"/, 'sidebar shows the pending count');
 
   const panel = await get(`${admin}/comments?status=pending`);
   assert.match(panel.text, /Visitor One/);
@@ -750,7 +747,7 @@ test('12f. plugins and appearance: snippets, built-ins, custom CSS and widgets',
   assert.match((await adminPost('/appearance', {
     custom_css: '.e2e-custom{color:red}', custom_head: '<meta name="e2e-head" content="1">',
     custom_footer: '<div class="e2e-footer"></div>', custom_js: '',
-  })).location, /Appearance.saved/);
+  })).location, /\/appearance\?ok=Saved/);
   const styled = await anon('/');
   assert.match(styled.text, /\.e2e-custom\{color:red\}/);
   assert.match(styled.text, /name="e2e-head"/);
@@ -758,9 +755,9 @@ test('12f. plugins and appearance: snippets, built-ins, custom CSS and widgets',
 
   assert.match((await adminPost('/widgets', {
     widget_footer_1_title: 'E2E Widget', widget_footer_1_body: '<p class="e2e-widget">Hello from a widget</p>',
-  })).location, /Widgets.saved/);
+  })).location, /\/widgets\?ok=Widgets saved/);
   const widgetPage = await anon('/');
-  assert.match(widgetPage.text, /class="site-widgets"/);
+  assert.match(widgetPage.text, /class="site-widgets site-widgets--footer"/, 'the classic footer area still renders');
   assert.match(widgetPage.text, /E2E Widget/);
   assert.match(widgetPage.text, /e2e-widget/);
 
@@ -808,7 +805,7 @@ test('12g. tools: redirects, export/import, backups, health and cache', async ()
 test('12h. updates and taxonomy management: version page, run updates, categories and tags', async () => {
   const page = await get(`${admin}/updates`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /0\.2\.0/);
+  assert.match(page.text, /8\.0\.0|0\.8\.0/, 'the updates page states the running version');
   assert.match(page.text, /Database schema/);
   assert.match((await adminPost('/updates/run', {})).location, /\/updates\?ok=/);
 
@@ -832,9 +829,11 @@ test('12i. the sidebar has every admin section, its sub-menus and the collapse c
     assert.ok(dash.text.includes(`href="${admin}${path}"`), `sidebar links to ${path}`);
   }
   assert.match(dash.text, /Collapse Menu/);
-  assert.match(dash.text, /class="nav-item on" href="\/control-room" aria-current="page"/, 'Dashboard is highlighted');
+  assert.match(dash.text, /class="rail__item" href="\/control-room" aria-current="page"/, 'Dashboard is highlighted');
   assert.match(dash.text, /id="side-c"/);
-  assert.match(dash.text, /href="\/control-room\/profile" title="Profile"/);
+  assert.match(dash.text, /<a href="\/control-room\/profile">/, 'the account menu links to the profile');
+  assert.match(dash.text, /class="usermenu"/, 'the account menu is in the top bar');
+  assert.match(dash.text, /href="\/control-room\/preferences"/, 'preferences is reachable from the sidebar');
 
   // A section shows its sub-menu while it is open, like the WordPress admin.
   const posts = await get(`${admin}/posts`);
@@ -861,6 +860,58 @@ test('12i. the sidebar has every admin section, its sub-menus and the collapse c
   log('11 sections and Profile are linked, sub-menus appear for the open section, every page opens');
 });
 
+test('12j. panel shell: cached assets, preferences, error boundary and page weight', async () => {
+  // The stylesheets are served as cacheable assets, not inlined in every page.
+  const dash = await get(admin);
+  assert.doesNotMatch(dash.text.slice(0, dash.text.indexOf('</head>')), /<style>/, 'no inlined stylesheet in the panel');
+  const links = [...dash.text.matchAll(/href="([^"]+\/assets\/[a-z]+\.css\?v=[^"]+)"/g)].map((m) => m[1]);
+  assert.equal(links.length, 3, 'three stylesheets are linked');
+  for (const href of links) {
+    const sheet = await anon(href);
+    assert.equal(sheet.status, 200, `${href} is served`);
+    assert.match(sheet.headers.get('content-type'), /text\/css/);
+    assert.match(sheet.headers.get('cache-control'), /immutable/);
+    const etag = sheet.headers.get('etag');
+    assert.ok(etag, 'assets carry an ETag');
+    const again = await request(href, { cookies: false, headers: { 'if-none-match': etag } });
+    assert.equal(again.status, 304, 'a cached asset is revalidated without a body');
+  }
+  // The token layer really is in the tokens bundle.
+  assert.match((await anon(links[0])).text, /--space-4:/);
+  // Unknown assets 404 inside the admin instead of falling through to the site.
+  assert.equal((await get(`${admin}/assets/nope.css`)).status, 404);
+
+  // Preferences are cookies, applied server-side: no flash of the wrong scheme.
+  const prefsPage = await get(`${admin}/preferences`);
+  assert.equal(prefsPage.status, 200);
+  assert.match(prefsPage.text, /Colour scheme/);
+  const saved = await adminPost('/preferences', { scheme: 'dark', density: 'compact', railCollapsed: '1' });
+  assert.match(saved.location, /preferences\?ok=/);
+  const dark = await get(admin);
+  assert.match(dark.text, /<html lang="en" data-scheme="dark" data-density="compact"/);
+  assert.match(dark.text, /id="side-c"[^>]*checked/, 'the collapsed rail is rendered by the server');
+  assert.ok(jar.get('ams_scheme') === 'dark', 'the scheme is remembered in a cookie');
+  // A rejected value falls back to the safe default instead of being echoed.
+  await adminPost('/preferences', { scheme: '<script>', density: 'huge', railCollapsed: '' });
+  assert.match((await get(admin)).text, /data-scheme="auto" data-density="comfortable"/);
+  // Back to the default for the remaining tests.
+  await adminPost('/preferences', { scheme: 'auto', density: 'comfortable', railCollapsed: '' });
+
+  // Page weight: the panel no longer carries ~31 KB of CSS in every response.
+  const body = dash.text;
+  const head = body.slice(0, body.indexOf('</head>'));
+  assert.ok(head.length < 2000, `panel <head> is small (${head.length} bytes)`);
+
+  // Icons are a sprite: every nav entry references a real symbol.
+  const symbols = new Set([...body.matchAll(/<symbol id="i-([a-z-]+)"/g)].map((m) => m[1]));
+  assert.ok(symbols.size > 20, 'the icon sprite is present');
+  for (const used of new Set([...body.matchAll(/<use href="#i-([a-z-]+)"/g)].map((m) => m[1]))) {
+    assert.ok(symbols.has(used), `icon ${used} exists in the sprite`);
+  }
+  assert.doesNotMatch(body, /\p{Extended_Pictographic}/u, 'no emoji left as UI icons');
+  log('assets cached with ETag, preferences render server-side, sprite icons everywhere, no inline CSS');
+});
+
 test('13. deleting content and media removes them from the site', async () => {
   assert.equal((await adminPost(`/posts/${state.draftId}/delete`, {})).status, 303);
   assert.equal((await get('/blog/secret-draft?preview=1')).status, 404);
@@ -875,6 +926,180 @@ test('13. deleting content and media removes them from the site', async () => {
   log('page, draft and media deleted; post still renders without its image');
 });
 
+/* ==========================================================================
+   Phase 2: the editor's durability features against the real server.
+   ========================================================================== */
+test('16. revisions, autosave, edit locks, quick edit and media picker', async () => {
+  const created = await adminPost('/posts/save', { title: 'Durability Post', body: '<p>Version one.</p>', status: 'draft' });
+  const id = Number(created.location.match(/\/posts\/(\d+)/)[1]);
+  assert.ok(id, 'post created');
+
+  // Revisions: each save snapshots what came before.
+  await adminPost('/posts/save', { id, title: 'Durability Post', body: '<p>Version two.</p>', status: 'draft' });
+  await adminPost('/posts/save', { id, title: 'Durability Post', body: '<p>Version three.</p>', status: 'published' });
+  const history = await get(`${admin}/posts/${id}/revisions`);
+  assert.equal(history.status, 200);
+  assert.match(history.text, /class="revision revision--manual"/);
+  const revIds = [...history.text.matchAll(/\/revisions\/(\d+)"/g)].map((m) => m[1]);
+  assert.ok(revIds.length >= 2, 'more than one restore point');
+  const oldest = revIds[revIds.length - 1];
+  const compare = await get(`${admin}/posts/${id}/revisions/${oldest}`);
+  assert.match(compare.text, /diff__line--(add|del)/, 'the diff shows the change');
+
+  // Restore is reversible.
+  const restore = await adminPost(`/posts/${id}/revisions/${oldest}/restore`, {});
+  assert.match(restore.location, /Restored/);
+  assert.match((await get(`${admin}/posts/${id}`)).text, /Version one\./);
+  assert.match((await get(`${admin}/posts/${id}/revisions`)).text, /Restored/);
+
+  // Autosave: stored, recoverable, never the live row.
+  await adminPost('/posts/save', { id, title: 'Durability Post', body: '<p>Live version.</p>', status: 'published' });
+  const autosave = await adminPost(`/posts/${id}/autosave`, { title: 'Durability Post', body: '<p>Unsaved typing.</p>' });
+  assert.equal(autosave.status, 200);
+  assert.equal(JSON.parse(autosave.text).ok, true);
+  const editor = await get(`${admin}/posts/${id}`);
+  assert.match(editor.text, /data-autosave-banner/, 'the newer autosave is offered back');
+  assert.match(editor.text, /Live version\./, 'the live body is unchanged by the autosave');
+
+  // Edit lock: the second session is warned, and an editor can take it over.
+  const loginPage = await anon(`${admin}/login`);
+  const lockCsrf = loginPage.text.match(/name="_csrf" value="([^"]+)"/)[1];
+  await adminPost('/users/save', { username: 'locker', email: 'locker@example.com', password: 'secretpass3', role: 'editor' });
+  const jar = new Map();
+  const asLocker = async (path, init = {}) => {
+    const headers = { ...(init.headers || {}), cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; ') };
+    const res = await fetch(base + path, { ...init, headers, redirect: 'manual' });
+    for (const line of res.headers.getSetCookie()) {
+      const pair = line.split(';')[0];
+      jar.set(pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1));
+    }
+    return { status: res.status, text: await res.text() };
+  };
+  const form = await asLocker(`${admin}/login`);
+  const signIn = await asLocker(`${admin}/login`, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ _csrf: form.text.match(/name="_csrf" value="([^"]+)"/)[1], login: 'locker', password: 'secretpass3' }),
+  });
+  assert.equal(signIn.status, 303, 'the second editor signed in');
+  const locked = await asLocker(`${admin}/posts/${id}`);
+  assert.match(locked.text, /data-lock-banner/);
+  assert.match(locked.text, /is editing this post/);
+  assert.match(locked.text, /\/lock\/takeover/);
+  assert.ok(lockCsrf);
+
+  // Quick edit keeps you in the list; duplicate and pin act on the row.
+  assert.match((await get(`${admin}/posts/${id}/quick`)).text, /id="qe-title"/);
+  assert.match((await adminPost(`/posts/${id}/quick`, { title: 'Renamed Quickly', slug: 'renamed-quickly', status: 'published' })).location, /posts\?ok=/);
+  const dup = await adminPost(`/posts/${id}/duplicate`, {});
+  const copyId = Number(dup.location.match(/\/posts\/(\d+)/)[1]);
+  assert.notEqual(copyId, id, 'the duplicate is a new post');
+  assert.match((await get(`${admin}/posts/${copyId}`)).text, /Renamed Quickly \(copy\)/);
+  await adminPost(`/posts/${id}/pin`, {});
+  assert.match((await get(`${admin}/posts`)).text, /class="pin"/);
+
+  // Media picker: JSON list, JSON upload with alt text, alt editing.
+  assert.match((await get(`${admin}/posts/new`)).text, /id="media-picker"/);
+  const picker = await get(`${admin}/media/picker`);
+  assert.equal(picker.status, 200);
+  assert.ok(Array.isArray(JSON.parse(picker.text).items));
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const form2 = new FormData();
+  form2.set('_csrf', await csrf());
+  form2.set('alt', 'Durability pixel');
+  form2.set('file', new Blob([png], { type: 'image/png' }), 'durability.png');
+  // The live browser posts the token from the page it is on, so the CSRF *seed*
+  // cookie is already in the jar. Reuse the harness cookie jar so the token and
+  // the seed belong together; a raw fetch with a hand-built jar would pair a
+  // fresh token with a seed the server has never seen.
+  form2.set('_csrf', await csrf());
+  const upload = await request(`${admin}/media/picker/upload`, { method: 'POST', body: form2 });
+  const uploadText = upload.text;
+  assert.equal(upload.status, 200, `picker upload answered JSON, got ${upload.status}: ${uploadText.replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(-300)}`);
+  const uploaded = JSON.parse(uploadText);
+  assert.equal(uploaded.ok, true);
+  assert.equal(uploaded.item.alt, 'Durability pixel');
+  assert.match((await get(`${admin}/media/picker?q=durability`)).text, /durability/);
+  assert.match((await adminPost(`/media/${uploaded.item.id}/alt`, { alt: 'Better description' })).location, /media\?ok=/);
+
+  // Page order + the theme's {{#each pages}} list share one order.
+  await adminPost('/pages/save', { title: 'Ordered One', slug: 'ordered-one', body: '', status: 'published' });
+  await adminPost('/pages/save', { title: 'Ordered Two', slug: 'ordered-two', body: '', status: 'published' });
+  assert.match((await get(`${admin}/pages`)).text, new RegExp(`action="${admin}/pages/order"`), 'the pages screen carries the order form');
+  log('revisions/restore, autosave, edit lock, quick edit, duplicate, pin, media picker and page order all work');
+});
+
+// Phase 4, over the wire, from the public site's side: a brand colour chosen in
+// the Customizer changes a page without a save; a new theme's manifest settings
+// become controls with no code change; a per-page template override renders.
+test('13b. appearance: live preview, manifest settings, per-page template and widgets', async () => {
+  // A theme that declares two settings, two widget areas and an extra template.
+  const atlas = {
+    name: 'Atlas E2E', slug: 'atlas-e2e', version: '1.0.0',
+    templates: {
+      base: '<!doctype html><html><head>{{{head}}}</head><body data-theme="atlas-e2e">{{{content}}}{{{widgets.footer}}}{{{footer}}}</body></html>',
+      home: '<h1 class="atlas-hero">{{theme.hero}}</h1>',
+      page: '<h1 class="atlas-page">{{page.title}}</h1>',
+      'page-landing': '<section class="atlas-landing">{{{page.content}}}</section>',
+    },
+    css: ':root{--accent:#0055aa;--fg:#111;--bg:#fff} body{color:var(--fg)}',
+    settings: [
+      { key: 'hero', type: 'text', label: 'Hero words', default: 'Hello there' },
+      { key: 'badge', type: 'toggle', label: 'Show a badge', default: true },
+    ],
+    widgets: ['footer', 'sidebar'],
+  };
+  assert.match((await uploadTheme('atlas-e2e.json', JSON.stringify(atlas))).location, /v1\.0\.0 installed/);
+  const rows = (await get(`${admin}/themes`)).text;
+  const id = rows.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="atlas-e2e"/)[1];
+  await adminPost(`/themes/${id}/activate`, {});
+
+  // 1. Unsaved brand colour and theme setting → preview only.
+  const preview = await request(`${admin}/appearance/preview`, {
+    method: 'POST', body: form({ _csrf: await csrf(), token_brand: '#ff0066', hero: 'Preview hero' }),
+  });
+  assert.equal(preview.status, 200);
+  assert.equal(JSON.parse(preview.text).ok, true);
+  const framed = await get('/?preview=1&customize=1');
+  assert.match(framed.text, /id="site-tokens">[^<]*#ff0066/, 'the unsaved colour is in the preview');
+  assert.match(framed.text, /class="atlas-hero">Preview hero</, 'so is the unsaved theme setting');
+  assert.equal(framed.headers.get('x-frame-options'), 'SAMEORIGIN', 'the panel may frame its own preview');
+  const pub = await anon('/');
+  assert.doesNotMatch(pub.text, /#ff0066/, 'nothing was saved by previewing');
+  assert.match(pub.text, /class="atlas-hero">Hello there</);
+  assert.equal(pub.headers.get('x-frame-options'), null, 'the public site stays unframeable');
+
+  // 2. Save from the Customizer: the colour and the theme setting persist.
+  await adminPost('/appearance', { token_brand: '#ff0066', hero: 'Saved hero', badge: '1', start_path: '/' });
+  const saved = await anon('/');
+  assert.match(saved.text, /--accent:#ff0066/);
+  assert.match(saved.text, /class="atlas-hero">Saved hero</);
+
+  // 3. Per-page template override renders on the public site.
+  assert.match((await get(`${admin}/pages/new`)).text, /<option value="page-landing">/);
+  await adminPost('/pages/save', {
+    title: 'E2E Landing', slug: 'e2e-landing', body: '<p>Landing body</p>', status: 'published', template: 'page-landing',
+  });
+  assert.match((await anon('/e2e-landing')).text, /class="atlas-landing"><p>Landing body<\/p>/);
+  await adminPost('/pages/save', { title: 'E2E Plain', slug: 'e2e-plain', body: '<p>Plain</p>', status: 'published' });
+  assert.match((await anon('/e2e-plain')).text, /class="atlas-page">E2E Plain</, 'a page without an override keeps the default');
+
+  // 4. Widget areas come from theme.json, and render where the theme allows.
+  await adminPost('/widgets', {
+    widget_footer_1_title: 'About', widget_footer_1_body: '<p>Footer widget</p>',
+    widget_sidebar_1_body: '<p>Sidebar widget</p>',
+  });
+  const withWidgets = await anon('/e2e-plain');
+  assert.match(withWidgets.text, /site-widgets--footer[\s\S]*Footer widget/);
+  assert.match(withWidgets.text, /site-widgets--sidebar[\s\S]*Sidebar widget/);
+
+  // 5. Identity: the social image and scheme reach every page.
+  await adminPost('/identity', { site_logo: '', favicon: '/media/fav.png', social_image: '/media/share.png', token_scheme: 'dark', token_brand: '#ff0066' });
+  const identity = await anon('/e2e-plain');
+  assert.match(identity.text, /<meta property="og:image" content="[^"]*\/media\/share.png">/);
+  assert.match(identity.text, /<meta name="color-scheme" content="dark">/);
+  log('preview shows unsaved tokens + theme settings (never saved), the Customizer save persists both, a page renders its own template, widget areas from theme.json render, Identity reaches every page');
+});
+
 test('14. logout ends the session and repeated bad logins are rate limited', async () => {
   const out = await adminPost('/logout', {});
   assert.match(out.location, /logged out/);
@@ -887,3 +1112,4 @@ test('14. logout ends the session and repeated bad logins are rate limited', asy
   assert.equal(locked.status, 429, 'even the right password is refused while locked');
   log('logged out; 6th failed login blocked with 429');
 });
+

@@ -7,6 +7,12 @@ import { deleteFile, getFile, putFile } from '../../lib/files';
 import { safeUrl, slugify } from '../../lib/security';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 import { APP_VERSION } from '../../lib/version';
+import { BUDGETS, kb } from '../../lib/budgets';
+import measured from '../../lib/budget-report.json';
+import {
+  AUDIT_ACTIONS, AUDIT_RETENTION_DAYS, AUDIT_TYPES, audit, auditCounts, readAudit, type AuditRow,
+} from '../../lib/audit';
+import { t } from '../../lib/i18n';
 
 /**
  * Tools: redirects, import/export, backups, site health and cache.
@@ -16,7 +22,7 @@ import { APP_VERSION } from '../../lib/version';
 const tools = new Hono<AppEnv>();
 
 const guard = async (c: Ctx, next: () => Promise<void>) => {
-  if (!can(c.var.user, 'admin')) return errorPage(c, 403, 'Only admins can use the tools.');
+  if (!can(c.var.user, 'manage_tools')) return errorPage(c, 403, 'Only admins can use the tools.');
   await next();
 };
 tools.use('/tools', guard);
@@ -39,7 +45,7 @@ async function exportData(c: Ctx): Promise<Record<string, unknown>> {
       return { results: [] };
     }
   };
-  const [content, terms, contentTerms, menus, menuItems, redirects, comments, users, settings, site] = await Promise.all([
+  const [content, terms, contentTerms, menus, menuItems, redirects, comments, users, settings, site, themes, themeSettings, revisions] = await Promise.all([
     query('SELECT * FROM content WHERE site_id=1 ORDER BY id'),
     query('SELECT * FROM terms WHERE site_id=1 ORDER BY id'),
     query('SELECT ct.* FROM content_terms ct JOIN content c ON c.id=ct.content_id WHERE c.site_id=1'),
@@ -50,6 +56,12 @@ async function exportData(c: Ctx): Promise<Record<string, unknown>> {
     query('SELECT id, username, email, role, created_at FROM users ORDER BY id'),
     query('SELECT key, value FROM settings WHERE site_id=1'),
     query('SELECT id, hostname, name FROM sites WHERE id=1'),
+    // v2: the theme platform travels with the content, so a restore puts the
+    // look back too. Templates and CSS are text; assets stay in the file store
+    // and are named in the export.
+    query('SELECT id, slug, name, version, templates, partials, css, manifest, parent, screenshot, active, created_at FROM themes ORDER BY id'),
+    query('SELECT theme_slug, key, value FROM theme_settings ORDER BY theme_slug, key'),
+    query('SELECT id, content_id, title, body, excerpt, status, author_id, created_at FROM content_revisions ORDER BY id'),
   ]);
   const settingsMap: Record<string, string> = {};
   for (const row of settings.results as { key: string; value: string }[]) settingsMap[row.key] = row.value;
@@ -68,6 +80,10 @@ async function exportData(c: Ctx): Promise<Record<string, unknown>> {
     menu_items: menuItems.results,
     redirects: redirects.results,
     comments: comments.results,
+    themes: themes.results,
+    theme_settings: themeSettings.results,
+    content_revisions: revisions.results,
+    format_version: 2,
   };
 }
 
@@ -93,7 +109,8 @@ tools.get('/tools', async (c) => {
   <a class="tile" href="${base}/tools/redirects"><b>Redirects</b><span>${redirects?.n ?? 0} rules. Send old URLs to new ones.</span></a>
   <a class="tile" href="${base}/tools/export"><b>Import / Export</b><span>Download your content as JSON or restore it.</span></a>
   <a class="tile" href="${base}/tools/backups"><b>Backups</b><span>${backups?.n ?? 0} stored snapshots you can download.</span></a>
-  <a class="tile" href="${base}/tools/health"><b>Site Health</b><span>Database, storage, versions and counts.</span></a>
+  <a class="tile" href="${base}/tools/health"><b>Site Health</b><span>Database, storage, versions, counts and the performance budgets.</span></a>
+  <a class="tile" href="${base}/tools/audit"><b>${t('audit.title')}</b><span>Every change made in the panel, who made it and when.</span></a>
   <a class="tile" href="${base}/comments"><b>Comments</b><span>${comments?.n ?? 0} waiting for moderation.</span></a>
   <a class="tile" href="${base}/settings"><b>Settings</b><span>Site title, reading, discussion, domains.</span></a>
 </div>
@@ -166,13 +183,13 @@ tools.get('/tools/export', async (c) => {
 <div class="row between" style="margin-bottom:1rem"><h1 style="margin:0">Import / Export</h1><a href="${base}/tools">&larr; Tools</a></div>
 <div class="card">
   <h2>Export</h2>
-  <p class="hint" style="margin-top:0">One JSON file with your pages, posts, categories, tags, menus, comments, redirects, settings and user list (without passwords). Keep it somewhere safe.</p>
+  <p class="hint" style="margin-top:0">One JSON file with your pages, posts, categories, tags, menus, comments, redirects, settings, installed themes with their templates and stylesheets, per-theme settings, content revisions and the user list (without passwords). Theme image and font assets stay in the file store; the export names them. Keep it somewhere safe.</p>
   <p style="margin:0"><a class="btn" href="${base}/tools/export/download">Download export</a></p>
 </div>
 <form method="post" action="${base}/tools/import" enctype="multipart/form-data" class="card">
   ${csrfField(c)}
   <h2>Import</h2>
-  <p class="hint" style="margin-top:0">Upload a file made by Export. Content is merged by type and slug: existing pages and posts are updated, new ones are created. Categories, tags, menus, redirects and comments are added. Users, themes and settings are not imported.</p>
+  <p class="hint" style="margin-top:0">Upload a file made by Export. Content is merged by type and slug: existing pages and posts are updated, new ones are created. Categories, tags, menus, redirects and comments are added; themes in the file are installed or updated. Users and settings are not imported.</p>
   <label for="file">Backup file (.json)</label>
   <input type="file" id="file" name="file" accept=".json,application/json" required>
   <p class="hint">Up to 5 MB.</p>
@@ -185,11 +202,11 @@ tools.get('/tools/export/download', async (c) => {
   return jsonResponse(await exportData(c), `edge-cms-export-${stamp}.json`);
 });
 
-type ImportResult = { content: number; terms: number; menus: number; redirects: number; comments: number };
+type ImportResult = { content: number; terms: number; menus: number; redirects: number; comments: number; themes: number };
 
 async function importData(c: Ctx, payload: any): Promise<ImportResult> {
   const db = c.env.DB;
-  const out: ImportResult = { content: 0, terms: 0, menus: 0, redirects: 0, comments: 0 };
+  const out: ImportResult = { content: 0, terms: 0, menus: 0, redirects: 0, comments: 0, themes: 0 };
   const str = (v: unknown, max: number) => String(v ?? '').slice(0, max);
   const now = new Date().toISOString();
   const contentMap = new Map<number, number>();
@@ -289,6 +306,30 @@ async function importData(c: Ctx, payload: any): Promise<ImportResult> {
     out.comments++;
   }
 
+  // Themes: an export carries them, so a restore puts the look back too. Each
+  // one is validated by the same manifest parser an upload uses, and a bad one
+  // is skipped rather than failing the whole import.
+  const { parseManifest } = await import('../../lib/theme-manifest');
+  const { saveTheme } = await import('../../lib/themes');
+  for (const row of Array.isArray(payload.themes) ? payload.themes.slice(0, 40) : []) {
+    try {
+      const parsed = parseManifest({
+        ...(row?.manifest && typeof row.manifest === 'string' ? JSON.parse(row.manifest) : row?.manifest ?? {}),
+        name: str(row?.name, 80) || str(row?.slug, 40),
+        slug: str(row?.slug, 40),
+        version: str(row?.version, 20),
+        templates: typeof row?.templates === 'string' ? JSON.parse(row.templates) : row?.templates,
+        partials: typeof row?.partials === 'string' ? JSON.parse(row.partials || '{}') : row?.partials ?? {},
+        css: str(row?.css, 400000),
+      });
+      await saveTheme(c.env, { ...parsed, assets: [], skipped: [] }, []);
+      out.themes++;
+    } catch (err) {
+      console.warn('import skipped a theme:', err instanceof Error ? err.message : err);
+    }
+  }
+  if (out.themes) await bumpCache(c.env, c.var.cfg);
+  await audit(c, 'imported', 'system', `Imported ${out.content} items, ${out.comments} comments and ${out.themes} themes`);
   return out;
 }
 
@@ -307,7 +348,7 @@ tools.post('/tools/import', async (c) => {
     const res = await importData(c, payload);
     await bumpCache(c.env, c.var.cfg);
     return go(c, '/tools/export', {
-      ok: `Imported ${res.content} pages/posts, ${res.terms} terms, ${res.menus} menus, ${res.redirects} redirects and ${res.comments} comments.`,
+      ok: `Imported ${res.content} pages/posts, ${res.terms} terms, ${res.menus} menus, ${res.redirects} redirects, ${res.comments} comments and ${res.themes} theme${res.themes === 1 ? '' : 's'}.`,
     });
   } catch (err) {
     console.error(err);
@@ -455,7 +496,129 @@ tools.get('/tools/health', async (c) => {
     <dt>Backups</dt><dd>${backups}</dd>
   </dl>
   <p class="hint" style="margin-bottom:0">Uptime monitors can use <a href="/api/health">/api/health</a>, which answers before the installer runs.</p>
+</div>
+<div class="card">
+  <h2>${t('budgets.title')}</h2>
+  <p class="hint" style="margin-top:0">${t('budgets.intro')}</p>
+  <table class="table">
+    <thead><tr><th>${t('budgets.budget')}</th><th>${t('budgets.measured')}</th><th>Limit</th><th></th></tr></thead>
+    <tbody>
+      ${BUDGETS.map((b) => {
+        const actual = Number((measured as Record<string, number>)[b.key] ?? 0);
+        const ok = actual <= b.bytes;
+        return html`<tr data-budget="${b.key}">
+          <td>${b.label}</td>
+          <td>${actual ? kb(actual) : 'not measured'}</td>
+          <td>${kb(b.bytes)}</td>
+          <td><span class="pill ${ok ? 'on' : 'off'}">${actual ? (ok ? Math.round((actual / b.bytes) * 100) + '%' : 'over') : '—'}</span></td>
+        </tr>`;
+      })}
+    </tbody>
+  </table>
 </div>`, '/tools/health');
+});
+
+/* --------------------------------------------------------------- audit log */
+
+/**
+ * The audit log viewer. Filters are GET parameters so a view can be bookmarked
+ * and works without JavaScript; paging is keyset (`before`) rather than offset,
+ * because rows are only ever appended.
+ */
+tools.get('/tools/audit', async (c) => {
+  if (!can(c.var.user, 'view_audit')) return errorPage(c, 403, 'Your role cannot read the audit log.');
+  const base = c.var.base;
+  const q = c.req.query();
+  const filters = {
+    userId: Number(q.user) || undefined,
+    action: AUDIT_ACTIONS.includes(q.action as never) ? q.action : undefined,
+    objectType: AUDIT_TYPES.includes(q.type as never) ? q.type : undefined,
+    q: (q.q || '').slice(0, 60) || undefined,
+    before: Number(q.before) || undefined,
+    limit: 50,
+  };
+  const [rows, counts, people] = await Promise.all([
+    readAudit(c.env, filters),
+    auditCounts(c.env),
+    c.env.DB.prepare('SELECT id, username FROM users ORDER BY username').all<{ id: number; username: string }>().catch(() => ({ results: [] })),
+  ]);
+  const next = rows.length === filters.limit ? rows[rows.length - 1].id : 0;
+  const olderHref = (() => {
+    const p = new URLSearchParams();
+    if (filters.userId) p.set('user', String(filters.userId));
+    if (filters.action) p.set('action', filters.action);
+    if (filters.objectType) p.set('type', filters.objectType);
+    if (filters.q) p.set('q', filters.q);
+    if (next) p.set('before', String(next));
+    return `${base}/tools/audit${p.toString() ? '?' + p.toString() : ''}`;
+  })();
+
+  const chip = (label: string, active: boolean, href: string, count?: number) =>
+    html`<a class="chip${active ? ' chip--on' : ''}" href="${href}"${active ? raw(' aria-current="true"') : raw('')}>${label}${count !== undefined ? html` <span class="chip__n">${count}</span>` : ''}</a>`;
+  const link = (extra: Record<string, string | undefined>) => {
+    const p = new URLSearchParams();
+    if (filters.userId) p.set('user', String(filters.userId));
+    if (filters.action) p.set('action', filters.action);
+    if (filters.objectType) p.set('type', filters.objectType);
+    if (filters.q) p.set('q', filters.q);
+    for (const [k, v] of Object.entries(extra)) if (v === undefined) p.delete(k); else p.set(k, v);
+    return `${base}/tools/audit${p.toString() ? '?' + p.toString() : ''}`;
+  };
+
+  return layout(c, t('audit.title'), html`
+<div class="row between" style="margin-bottom:1rem"><h1 style="margin:0">${t('audit.title')}</h1><a href="${base}/tools">&larr; Tools</a></div>
+<p class="muted">${t('audit.intro', { days: AUDIT_RETENTION_DAYS })}</p>
+
+<form method="get" action="${base}/tools/audit" class="card card--filters">
+  <div class="grid2">
+    <div>
+      <label for="audit-user">${t('audit.filter_user')}</label>
+      <select id="audit-user" name="user">
+        <option value="">Anyone</option>
+        ${people.results.map((u) => html`<option value="${u.id}"${filters.userId === u.id ? raw(' selected') : ''}>${u.username}</option>`)}
+      </select>
+    </div>
+    <div>
+      <label for="audit-type">${t('audit.filter_type')}</label>
+      <select id="audit-type" name="type">
+        <option value="">Everything</option>
+        ${AUDIT_TYPES.map((ty) => html`<option value="${ty}"${filters.objectType === ty ? raw(' selected') : ''}>${ty}</option>`)}
+      </select>
+    </div>
+  </div>
+  <label for="audit-q">${t('audit.search')}</label>
+  <input type="search" id="audit-q" name="q" value="${filters.q ?? ''}" maxlength="60" placeholder="“deleted”, a title, an id…">
+  ${filters.action ? html`<input type="hidden" name="action" value="${filters.action}">` : ''}
+  <p class="row" style="margin:1rem 0 0">
+    <button class="btn small" type="submit">${t('audit.apply')}</button>
+    <a class="btn ghost small" href="${base}/tools/audit">${t('audit.clear')}</a>
+  </p>
+</form>
+
+<div class="chips" role="group" aria-label="Filter by action">
+  ${chip('All', !filters.action, link({ action: undefined, before: undefined }), counts.total)}
+  ${AUDIT_ACTIONS.filter((a) => counts.byAction[a]).map((a) => chip(a, filters.action === a, link({ action: a, before: undefined }), counts.byAction[a]))}
+</div>
+
+<div class="card">
+  <div class="row between"><h2 style="margin:0">${t('audit.entries', { n: rows.length })}</h2>
+    ${rows.length ? html`<span class="hint">newest first</span>` : ''}</div>
+  ${rows.length ? html`<table class="table audit">
+    <thead><tr><th>${t('audit.who')}</th><th>${t('audit.what')}</th><th>${t('audit.where')}</th><th>${t('audit.when')}</th></tr></thead>
+    <tbody>
+      ${rows.map((r: AuditRow) => html`<tr data-audit-id="${r.id}" data-audit-action="${r.action}">
+        <td>${r.username ? html`<b>${r.username}</b>` : html`<span class="muted">${t('audit.system')}</span>`}</td>
+        <td><span class="pill">${r.action}</span> ${r.summary}</td>
+        <td><code>${r.object_type}${r.object_id ? ' #' + r.object_id : ''}</code></td>
+        <td><time datetime="${r.created_at}">${r.created_at.slice(0, 16).replace('T', ' ')}</time>${r.ip && r.ip !== '127.0.0.1' ? html` <small class="muted">${r.ip}</small>` : ''}</td>
+      </tr>`)}
+    </tbody>
+  </table>` : html`<p class="muted" style="margin:0">${t('audit.empty')}</p>`}
+  <p class="row" style="margin:1rem 0 0">
+    ${next ? html`<a class="btn ghost small" href="${olderHref}">${t('audit.older')} &rarr;</a>` : ''}
+    ${filters.before ? html`<a class="btn ghost small" href="${link({ before: undefined })}">${t('audit.newer')}</a>` : ''}
+  </p>
+</div>`, '/tools');
 });
 
 tools.post('/tools/cache', async (c) => {

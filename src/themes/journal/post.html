@@ -1,0 +1,12 @@
+<article class="measure article">
+  <header class="article__head">
+    <p class="article__meta"><time datetime="{{post.date_iso}}">{{post.date}}</time>{{#if post.author}} &middot; {{post.author}}{{/if}}</p>
+    <h1>{{post.title}}</h1>
+    {{#each post.categories}}<a class="article__cat" href="{{url}}">{{name}}</a>{{/each}}
+  </header>
+  {{#if post.featured_image}}<figure class="article__figure"><img src="{{post.featured_image}}" alt="{{post.featured_alt}}">{{#if post.featured_alt}}<figcaption>{{post.featured_alt}}</figcaption>{{/if}}</figure>{{/if}}
+  <div class="content">{{{post.content}}}</div>
+  {{#if post.tags}}<p class="article__tags">{{#each post.tags}}<a href="{{url}}">#{{name}}</a>{{/each}}</p>{{/if}}
+  <p class="article__back"><a href="/blog">&larr; All posts</a></p>
+  {{{comments_html}}}
+</article>

@@ -1,0 +1,68 @@
+/* ===========================================================================
+   AMS admin — Themes: store cards, the in-panel editor, the live preview.
+
+   The store is the first screen where a card has to look like *something*: a
+   screenshot (or a palette gradient when a theme ships none), its name, its
+   author and tags. The editor is a two-column file list plus a code pane. The
+   preview reuses the Customizer's frame styles from appearance.css.
+
+   Colours come from tokens.css only; nothing here is a literal.
+   =========================================================================== */
+
+/* ------------------------------------------------------------- store cards */
+
+.store-item__shot {
+  height: 7.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background-size: cover;
+  background-position: top center;
+  margin-bottom: var(--space-2);
+}
+
+.store-item h3 { margin: 0 0 var(--space-1); }
+
+.store-item .tags { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0 0 var(--space-2); }
+
+.tag {
+  font-size: var(--text-xs);
+  letter-spacing: .02em;
+  padding: .1rem .45rem;
+  border-radius: 2rem;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------ theme editor */
+
+.theme-editor {
+  display: grid;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (min-width: 60rem) {
+  .theme-editor { grid-template-columns: minmax(13rem, 16rem) minmax(0, 1fr); }
+}
+
+.theme-editor__files .list { margin: 0 0 var(--space-2); }
+.theme-editor__files li { padding: .45rem .6rem; border-radius: var(--radius-sm); }
+.theme-editor__files li.is-current { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+.theme-editor__files a { font-family: var(--mono-font); font-size: var(--text-sm); }
+
+.theme-editor__code {
+  width: 100%;
+  min-height: 24rem;
+  font-family: var(--mono-font);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}
+
+/* ----------------------------------------------------------- live preview */
+
+.customizer__bar { position: sticky; top: 0; z-index: 2; }
+.customizer__bar .row { align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.customizer__devices { display: inline-flex; gap: var(--space-1); }

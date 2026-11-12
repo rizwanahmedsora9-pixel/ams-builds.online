@@ -1,0 +1,23 @@
+<section class="shell work">
+  <div class="work__head"><h1>{{archive.title}}</h1></div>
+  {{#if posts}}
+  <div class="grid">
+    {{#each posts}}
+    <article class="tile">
+      {{#if featured_image}}<a class="tile__img" href="{{url}}" tabindex="-1"><img src="{{featured_image}}" alt="{{featured_alt}}" loading="lazy"></a>{{else}}<a class="tile__img tile__img--blank" href="{{url}}" tabindex="-1" aria-hidden="true"><span>{{label}}</span></a>{{/if}}
+      <div class="tile__body">
+        <h2 class="tile__title"><a href="{{url}}">{{title}}</a></h2>
+        {{#if theme.show_excerpts}}<p class="tile__excerpt">{{excerpt}}</p>{{/if}}
+        <p class="tile__meta"><time datetime="{{date_iso}}">{{date}}</time></p>
+      </div>
+    </article>
+    {{/each}}
+  </div>
+  <nav class="pager" aria-label="Pagination">
+    {{#if pagination.prev}}<a class="button ghost" href="{{pagination.prev}}">&larr; Newer</a>{{/if}}
+    {{#if pagination.next}}<a class="button ghost" href="{{pagination.next}}">Older &rarr;</a>{{/if}}
+  </nav>
+  {{else}}
+  <p class="empty">Nothing published yet.</p>
+  {{/if}}
+</section>
