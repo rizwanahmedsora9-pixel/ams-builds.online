@@ -55,7 +55,10 @@ export function landingScreenMarkup(opts: {
     <div class="ams-landing-equalizer" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
     <p class="ams-landing-status" id="ams-landing-status" role="status" aria-live="polite">${status}</p>
     <div class="ams-landing-controls">
-      <button class="ams-landing-play" type="button" data-landing-play aria-label="Play soundtrack"${hasTracks ? '' : ' disabled'}>Play audio</button>
+      <button class="ams-landing-play" type="button" data-landing-play aria-label="Play soundtrack"${hasTracks ? '' : ' disabled'}>
+        <svg class="ams-landing-icon ams-landing-icon-play" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8.6 4.9a1 1 0 0 1 1.53-.84l10 7.1a1 1 0 0 1 0 1.68l-10 7.1a1 1 0 0 1-1.53-.84z"/></svg>
+        <svg class="ams-landing-icon ams-landing-icon-pause" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.2 5h3.5v14H7.2zM13.3 5h3.5v14h-3.5z"/></svg>
+      </button>
       <div class="ams-landing-secondary">
         ${hasTracks ? '<button class="ams-landing-mute" type="button" data-landing-mute aria-pressed="false">Mute sound</button>' : ''}
         <button class="ams-landing-enter" type="button" data-landing-enter>Enter site</button>
@@ -63,7 +66,7 @@ export function landingScreenMarkup(opts: {
     </div>
     ${hasTracks ? '<p class="ams-landing-footnote">Your soundtrack will loop until you enter.</p>' : ''}
   </div>
-  <audio class="ams-landing-audio" data-landing-audio preload="none"></audio>
+  <audio class="ams-landing-audio" data-landing-audio preload="auto"></audio>
 </div>
 <script nonce="${nonce}">${LANDING_PLAYER}</script>`;
   return { head, body };
@@ -87,10 +90,19 @@ const LANDING_PLAYER = `(function(){
   var current=0;
   var muted=false;
   var card=screen.querySelector('.ams-landing-card');
+  // Fetch the first track while the visitor is still reading the screen, so the
+  // play gesture starts sound from the buffer instead of waiting for a download.
+  // A discarded screen (this tab already entered) downloads nothing.
+  function warm(){
+    if(!tracks.length||audio.getAttribute('src'))return;
+    audio.muted=muted;
+    audio.preload='auto';
+    audio.src=tracks[current];
+  }
   function update(){
     var playing=!audio.paused;
     if(card)card.classList.toggle('is-playing',playing);
-    if(playButton){playButton.textContent=playing?'Pause audio':'Play audio';playButton.setAttribute('aria-label',playing?'Pause soundtrack':'Play soundtrack')}
+    if(playButton)playButton.setAttribute('aria-label',playing?'Pause soundtrack':'Play soundtrack');
     if(muteButton){muteButton.textContent=muted?'Unmute sound':'Mute sound';muteButton.setAttribute('aria-pressed',muted?'true':'false')}
     if(status&&tracks.length)status.textContent=playing?'Soundtrack playing. It will loop until you enter.':'Soundtrack paused. Press play to continue.';
   }
@@ -112,9 +124,13 @@ const LANDING_PLAYER = `(function(){
   }
   function start(){
     if(!tracks.length)return;
-    if(!audio.getAttribute('src'))playTrack(current,tracks.length);
-    else audio.play().then(update).catch(failed);
+    // No source yet means warm() could not run: load, then play.
+    if(!audio.getAttribute('src')){playTrack(current,tracks.length);return}
+    // The warm source is already buffered, so this starts on the same task as
+    // the click; if the file is unusable, fall through to the next track.
+    audio.play().then(update).catch(function(){playTrack((current+1)%tracks.length,tracks.length-1)});
   }
+  if(active)warm();
   if(playButton)playButton.addEventListener('click',function(){if(audio.paused)start();else audio.pause()});
   if(muteButton)muteButton.addEventListener('click',function(){muted=!muted;audio.muted=muted;update()});
   audio.addEventListener('play',update);
@@ -174,8 +190,13 @@ html[data-ams-landing="show"] .ams-landing-screen{display:grid}
 .ams-landing-status{min-height:1.6em;margin:0 0 1rem;color:#aab5c9;font-size:.86rem}
 .ams-landing-controls{display:grid;justify-items:center;gap:.8rem;width:min(100%,22rem);margin:0 auto}
 .ams-landing-play,.ams-landing-mute,.ams-landing-enter{min-height:3rem;border:1px solid transparent;border-radius:999px;font:inherit;font-weight:700;cursor:pointer;transition:transform .18s ease,filter .18s ease,background-color .18s ease}
-.ams-landing-play{width:100%;min-height:3.8rem;padding:.7rem 1.5rem;color:#101526;background:linear-gradient(110deg,#d8e7ff,#9cb8ff 48%,#d8b6ff);box-shadow:0 .65rem 2.1rem rgba(134,165,255,.28);font-size:1.03rem;letter-spacing:.035em}
+.ams-landing-play{display:grid;place-items:center;width:4.9rem;height:4.9rem;min-height:0;padding:0;border-radius:50%;color:#101526;background:linear-gradient(140deg,#e4eeff,#9cb8ff 52%,#d4b6ff);box-shadow:0 .7rem 2.2rem rgba(134,165,255,.34),inset 0 1px rgba(255,255,255,.55)}
 .ams-landing-play:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.06)}
+.ams-landing-icon{display:block;width:1.95rem;height:1.95rem;fill:currentColor}
+.ams-landing-icon-play{transform:translateX(.12rem)}
+.ams-landing-icon-pause{display:none}
+.ams-landing-card.is-playing .ams-landing-icon-play{display:none}
+.ams-landing-card.is-playing .ams-landing-icon-pause{display:block}
 .ams-landing-secondary{display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:.6rem;width:100%}
 .ams-landing-mute,.ams-landing-enter{min-height:2.75rem;padding:.5rem 1rem;border-color:rgba(255,255,255,.17);color:#eef2fa;background:rgba(255,255,255,.065);font-size:.9rem}
 .ams-landing-enter{border-color:rgba(255,255,255,.32);background:transparent}
@@ -184,6 +205,6 @@ html[data-ams-landing="show"] .ams-landing-screen{display:grid}
 .ams-landing-play:disabled,.ams-landing-mute:disabled{opacity:.58;cursor:not-allowed}
 .ams-landing-footnote{margin:1.1rem 0 0;color:#8f9ab0;font-size:.77rem}
 .ams-landing-audio{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-@media(max-width:420px){.ams-landing-card{padding:1.35rem 1.1rem}.ams-landing-equalizer{margin-top:1.2rem}.ams-landing-secondary{display:grid;grid-template-columns:1fr 1fr}.ams-landing-mute,.ams-landing-enter{width:100%;padding-inline:.5rem}}
+@media(max-width:420px){.ams-landing-play{width:4.4rem;height:4.4rem}.ams-landing-card{padding:1.35rem 1.1rem}.ams-landing-equalizer{margin-top:1.2rem}.ams-landing-secondary{display:grid;grid-template-columns:1fr 1fr}.ams-landing-mute,.ams-landing-enter{width:100%;padding-inline:.5rem}}
 @media(prefers-reduced-motion:reduce){.ams-landing-play,.ams-landing-mute,.ams-landing-enter{transition:none}.ams-landing-card.is-playing .ams-landing-equalizer span{animation:none;transform:scaleY(.7)}}
 `;

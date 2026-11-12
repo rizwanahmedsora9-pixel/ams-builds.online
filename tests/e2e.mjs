@@ -490,6 +490,10 @@ test('10b. fixed landing screen uses settings, without a landing Page, and loops
   assert.ok(home.text.includes('Now with a tagline'));
   const playButton = home.text.match(/<button[^>]*data-landing-play[^>]*>/)?.[0];
   assert.ok(playButton && !/\sdisabled/.test(playButton), 'saving tracks enables the Play button');
+  assert.match(home.text, /data-landing-play[^>]*>\s*<svg[^>]*ams-landing-icon-play/, 'the play control is a round icon button');
+  assert.match(home.text, /ams-landing-icon-pause/, 'the same button swaps to a pause icon while playing');
+  assert.match(home.text, /preload="auto"/, 'the audio is preloaded instead of fetched on the click');
+  assert.match(home.text, /if\(active\)warm\(\)/, 'the first track starts loading while the screen is up');
   assert.match(home.text, /data-landing-mute/);
   assert.match(home.text, /data-landing-enter/);
   assert.match(home.text, /data-ams-landing/);
@@ -508,6 +512,11 @@ test('10b. fixed landing screen uses settings, without a landing Page, and loops
   const landingScreen = landingWindow.document.getElementById('ams-landing-screen');
   assert.equal(landingWindow.document.documentElement.getAttribute('data-ams-landing'), 'show', 'a new tab session opens the landing screen');
   const player = landingWindow.document.querySelector('[data-landing-audio]');
+  assert.ok(player.getAttribute('src'), 'the first track is requested before the visitor clicks, so Play starts at once');
+  const playControl = landingWindow.document.querySelector('[data-landing-play]');
+  assert.equal(playControl.textContent.trim(), '', 'the play control is an icon only, with no text label');
+  assert.ok(playControl.querySelector('.ams-landing-icon-play'), 'the button draws a play glyph');
+  assert.ok(playControl.querySelector('.ams-landing-icon-pause'), 'and a pause glyph for the playing state');
   Object.defineProperty(player, 'paused', { configurable: true, writable: true, value: true });
   player.load = () => {};
   let playCount = 0;
@@ -517,6 +526,7 @@ test('10b. fixed landing screen uses settings, without a landing Page, and loops
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(playCount, 1, 'Play starts the soundtrack on a visitor gesture');
   assert.equal(landingScreen.querySelector('.ams-landing-card').classList.contains('is-playing'), true, 'the equalizer animates while audio plays');
+  assert.equal(landingWindow.document.querySelector('[data-landing-play]').getAttribute('aria-label'), 'Pause soundtrack', 'the icon button names its current action for screen readers');
   const firstTrack = player.src;
   player.dispatchEvent(new landingWindow.Event('ended'));
   await new Promise((resolve) => setImmediate(resolve));

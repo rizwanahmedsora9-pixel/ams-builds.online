@@ -237,11 +237,13 @@ rendered underneath; **Enter site** dismisses the welcome layer for that tab
 session.
 
 Sound files added under **Settings → Landing screen** become the screen's
-playlist. A centered **Play audio** button starts them in the saved order and
-loops the playlist until the visitor enters; the button is shown even before
-any audio exists (disabled, with a hint), so the control is never missing.
-Browsers require a visitor gesture for audible playback, so the soundtrack does
-not autoplay. The **Preview the landing screen** link in Settings reopens it via
+playlist. A centered round icon button (a play glyph that becomes pause while it
+plays; no text label) starts them in the saved order and loops the playlist
+until the visitor enters; the button is shown even before any audio exists
+(disabled, with a hint), so the control is never missing. The first track starts
+downloading as the screen appears, so pressing play starts sound at once rather
+than after a fetch. Browsers require a visitor gesture for audible playback, so
+the soundtrack does not autoplay. The **Preview the landing screen** link in Settings reopens it via
 `/?landing=1`, even in a tab where it was already dismissed.
 
 ## Writing posts and pages

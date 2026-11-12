@@ -114,8 +114,9 @@ empty leftovers, so the stored markup is as clean as the writing.
   replaced by a CMS Page or sample content. It takes the company name from **Settings → Site title**,
   the welcome line from **Settings → Tagline**, and an optional image from **Appearance → Identity**.
   Under **Settings → Landing screen**, upload/select up to 20 audio tracks; the fixed screen has a
-  centered Play button, equalizer, mute control and Enter button. Tracks play in order and loop after
-  Play is pressed. Enter stops playback and reveals the regular home page. The welcome layer stays
+  centered round play/pause icon button, equalizer, mute control and Enter button. The first track is
+  preloaded while the screen is up, so pressing Play starts sound immediately. Tracks play in order and
+  loop after Play is pressed. Enter stops playback and reveals the regular home page. The welcome layer stays
   dismissed in that tab until the tab is closed; **Preview the landing screen** (`/?landing=1`)
   reopens it for a check. Browsers require a visitor gesture for audible playback, so audio does not
   start automatically on page load.
