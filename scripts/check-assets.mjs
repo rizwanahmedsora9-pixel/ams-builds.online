@@ -63,6 +63,28 @@ for (const rel of Object.keys(limits).filter((r) => r !== 'tokens.css')) {
 const missing = [...used].filter((name) => !defined.has(name));
 if (missing.length) failures.push(`undefined token(s): ${missing.join(', ')}`);
 
+/* The writer's editor ships one more stylesheet: the classic/modern chrome, as
+   a single <style> in src/routes/admin/content.ts. It is not one of the three
+   cacheable files, but it is panel CSS all the same and has to play by the same
+   rules. The check matters more here than in the files: a `var(--card)` that
+   does not exist does not fail anything, it silently drops the whole
+   declaration and the toolbar buttons lose their background. */
+const editorSource = readFileSync(join(ROOT, 'src/routes/admin/content.ts'), 'utf8');
+const inline = editorSource.match(/export const EDITOR_CSS = `<style>([\s\S]*?)<\/style>`;/);
+if (!inline) {
+  failures.push('EDITOR_CSS is no longer one <style> block in content.ts; update this check');
+} else {
+  const editorCss = inline[1];
+  notes.push(`editor <style>       ${(Buffer.byteLength(editorCss) / 1024).toFixed(1)} KB inline (content.ts)`);
+  for (const m of editorCss.matchAll(/var\((--[a-z0-9-]+)/g)) used.add(m[1]);
+  const editorMissing = [...new Set([...editorCss.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]))].filter((name) => !defined.has(name));
+  if (editorMissing.length) failures.push(`editor CSS references undefined token(s): ${editorMissing.join(', ')}`);
+  const editorColours = [...editorCss.matchAll(COLOUR)].map((m) => m[0]);
+  if (editorColours.length) {
+    failures.push(`editor CSS hard-codes ${editorColours.length} colour(s) (${[...new Set(editorColours)].slice(0, 6).join(', ')}); add a token to tokens.css instead`);
+  }
+}
+
 // Every screen family present on disk is imported, so nothing silently ships dead.
 const screensDir = join(ASSETS, 'screens');
 const screens = readdirSync(screensDir).filter((f) => f.endsWith('.css'));

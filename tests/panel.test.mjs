@@ -31,6 +31,44 @@ test('the panel is one document shell: top bar, rail, main, one sprite', async (
   assert.doesNotMatch(page.text, /\p{Extended_Pictographic}/u, 'no emoji icons');
 });
 
+test('panel chrome: controls sit where their CSS expects, tokens resolve, nothing sticks under the top bar', async () => {
+  const page = await panel.get(panel.admin);
+
+  // The collapse switch belongs to the rail and the expand link to the top bar.
+  // Every collapsed-rail rule is written `#side-c:checked ~ .shell …`, so a
+  // control rendered outside those elements is never styled: both used to land
+  // after </div class="shell">, which put a stray full-width "Collapse Menu"
+  // bar at the bottom of every page and left its text showing in the 3.75rem
+  // collapsed rail.
+  const rail = page.text.slice(page.text.indexOf('<nav class="rail"'), page.text.indexOf('</nav>'));
+  assert.match(rail, /class="rail__collapse"/, 'the collapse switch is inside the rail');
+  assert.match(rail, /<span class="rail__label">Collapse Menu<\/span>/, 'its text is a rail label, so collapsing hides it');
+  const topbar = page.text.slice(page.text.indexOf('<header class="topbar">'), page.text.indexOf('</header>'));
+  assert.match(topbar, /class="rail-toggle"/, 'the expand link is in the top bar');
+  // The checkbox hack only reaches siblings that come after it.
+  assert.ok(page.text.indexOf('id="side-c"') < page.text.indexOf('<header class="topbar">'), 'the rail checkbox precedes the top bar it styles');
+  assert.ok(page.text.indexOf('id="side-c"') < page.text.indexOf('<div class="shell">'), 'the rail checkbox precedes the shell it styles');
+
+  // A var() that does not exist drops the whole declaration, silently: that is
+  // how the editor toolbar and the image drag handles lost their background.
+  const tokens = (await panel.get(`${panel.admin}/assets/tokens.css`)).text;
+  const defined = new Set([...tokens.matchAll(/^\s*(--[a-z0-9-]+):/gm)].map((m) => m[1]));
+  const sheets = [tokens, (await panel.get(`${panel.admin}/assets/app.css`)).text, (await panel.get(`${panel.admin}/assets/screens.css`)).text];
+  const inline = (html) => [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]);
+  const editorPage = await panel.get(`${panel.admin}/posts/new`);
+  const css = [...sheets, ...inline(page.text), ...inline(editorPage.text)].join('\n');
+  const unresolved = [...new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]))].filter((name) => !defined.has(name));
+  assert.deepEqual(unresolved, [], 'every var() in the panel resolves to a token');
+
+  // Anything sticky inside the content column has to clear the top bar, which is
+  // itself sticky and exactly --topbar-h tall: at top:0 it hides behind it.
+  for (const rule of css.matchAll(/([^{}]+)\{[^}]*position:\s*sticky[^}]*\}/g)) {
+    const selector = rule[1].trim();
+    if (/\.topbar\b/.test(selector)) continue; // the bar itself sticks to the viewport
+    assert.match(rule[0], /top:\s*(?:calc\()?var\(--topbar-h\)/, `${selector} sticks below the top bar`);
+  }
+});
+
 test('every page is reachable and every one renders the shell', async () => {
   for (const path of ['', '/posts', '/pages', '/media', '/comments', '/terms', '/themes', '/menus', '/widgets',
     '/appearance', '/plugins', '/users', '/tools', '/tools/redirects', '/tools/export', '/tools/backups',

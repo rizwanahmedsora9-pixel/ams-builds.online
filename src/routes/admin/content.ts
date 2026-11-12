@@ -699,25 +699,25 @@ content.post('/posts/bulk', async (c) => {
 export const EDITOR_CSS = `<style>
 .ams-editor{margin-bottom:.4rem}
 .ams-editor-bar{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-bottom:.45rem}
-.ams-editor-switch{display:inline-flex;border:1px solid var(--line);border-radius:.45rem;overflow:hidden;background:var(--card)}
-.ams-editor-switch button{padding:.3rem .8rem;border:0;border-left:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-size:.82rem;cursor:pointer;line-height:1.5}
+.ams-editor-switch{display:inline-flex;border:1px solid var(--line);border-radius:.45rem;overflow:hidden;background:var(--surface)}
+.ams-editor-switch button{padding:.3rem .8rem;border:0;border-left:1px solid var(--line);background:var(--surface);color:var(--fg);font:inherit;font-size:.82rem;cursor:pointer;line-height:1.5;white-space:nowrap}
 .ams-editor-switch button:first-child{border-left:0}
 .ams-editor-switch button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
 .ams-editor-bar .hint{margin:0;flex:1 1 12rem}
 .ams-editor-pane[hidden]{display:none!important}
 .ams-editor .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem;margin-bottom:.4rem}
-.ams-editor .toolbar button{display:inline-flex;align-items:center;justify-content:center;min-width:3rem;height:2.25rem;padding:0 .55rem;border:1px solid var(--line);border-radius:.3rem;background:var(--card);color:var(--fg);font:inherit;font-size:.82rem;line-height:1.2;white-space:nowrap;cursor:pointer}
+.ams-editor .toolbar button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:3rem;height:2.25rem;padding:0 .55rem;border:1px solid var(--line);border-radius:.3rem;background:var(--surface);color:var(--fg);font:inherit;font-size:.82rem;line-height:1.2;white-space:nowrap;cursor:pointer}
 .ams-editor .toolbar button:hover{border-color:var(--accent);color:var(--accent)}
 /* Keep native text selection vivid inside both editor modes; the global
    selection colour is intentionally softer for ordinary page text. */
 .ams-editor .visual-editor::selection,.ams-editor .visual-editor *::selection,.ams-editor textarea.code::selection{background:var(--accent);color:var(--accent-fg)}
 .ams-editor .toolbar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .ams-editor .toolbar button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
-.toolbar-separator{width:1px;height:1.25rem;margin:0 .2rem;background:var(--line);align-self:center}
+.toolbar-separator{width:1px;height:1.25rem;margin:0 .2rem;background:var(--line);align-self:center;flex:0 0 auto}
 .ams-editor textarea.code,.ams-editor .visual-editor{min-height:22rem;margin:0;width:100%}
 .ams-editor-status{margin:.35rem 0 0;color:var(--muted);font-size:.78rem;min-height:1.1em}
 .ams-editor-stats{margin:0 0 0 auto;color:var(--muted);font-size:.78rem;font-variant-numeric:tabular-nums;white-space:nowrap}
-.slug-preview{margin:.15rem 0 .9rem;font-family:var(--mono-font,ui-monospace,monospace)}
+.slug-preview{margin:.15rem 0 .9rem;font-family:var(--mono-font,ui-monospace,monospace);overflow-wrap:anywhere}
 /* Classic: compact WP-style chrome — small square buttons over a plain box.
    The bar stays visible: it holds the Classic/Modern switch itself, so hiding
    it (the old rule) stranded the user in Classic with no way back. */
@@ -726,7 +726,7 @@ export const EDITOR_CSS = `<style>
 .ams-editor.is-classic .ams-editor-stats{margin-left:auto}
 .ams-editor.is-classic .ams-editor-switch button{padding:.2rem .55rem;font-size:.78rem}
 .ams-editor.is-classic .toolbar{gap:.15rem;margin:0;padding:.35rem;border:1px solid var(--line);border-bottom:0;border-radius:.35rem .35rem 0 0;background:var(--bg)}
-.ams-editor.is-classic .toolbar button{padding:.2rem .45rem;font-size:.8rem;border-radius:.2rem;background:var(--card)}
+.ams-editor.is-classic .toolbar button{padding:.2rem .45rem;font-size:.8rem;border-radius:.2rem;background:var(--surface)}
 .ams-editor.is-classic textarea.code,.ams-editor.is-classic .visual-editor{border-radius:0 0 .35rem .35rem;min-height:24rem}
 .ams-editor.is-classic .ams-editor-status{padding:0 .2rem}
 /* Modern: roomy writing surface, a framed toolbar and generous spacing. */
@@ -734,7 +734,7 @@ export const EDITOR_CSS = `<style>
 .ams-editor.is-modern .toolbar{gap:.35rem;padding:.5rem;border:1px solid var(--line);border-radius:.55rem;background:var(--bg)}
 .ams-editor.is-modern textarea.code{font-size:.92rem;line-height:1.65}
 .ams-mode-dialog .ams-mode-options{display:grid;gap:.5rem;margin:1rem 0}
-.ams-mode-dialog .ams-mode-option{display:block;width:100%;padding:.75rem .85rem;border:1px solid var(--line);border-radius:.5rem;background:var(--card);color:var(--fg);font:inherit;text-align:left;cursor:pointer}
+.ams-mode-dialog .ams-mode-option{display:block;width:100%;padding:.75rem .85rem;border:1px solid var(--line);border-radius:.5rem;background:var(--surface);color:var(--fg);font:inherit;text-align:left;cursor:pointer}
 .ams-mode-dialog .ams-mode-option:hover,.ams-mode-dialog .ams-mode-option:focus-visible{border-color:var(--accent);outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
 .ams-mode-dialog .ams-mode-option b{display:block;font-size:.95rem;margin:0 0 .2rem}
 .ams-mode-dialog .ams-mode-option span{display:block;color:var(--muted);font-size:.82rem;font-weight:400}
@@ -766,13 +766,16 @@ export const EDITOR_CSS = `<style>
 .image-tools{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.4rem 0;padding:.4rem .5rem;border:1px solid var(--accent);border-radius:.45rem;background:var(--bg);font-size:.82rem}
 .image-tools[hidden]{display:none!important}
 .image-tools b{margin-right:.15rem}
-.image-tools button{padding:.22rem .55rem;border:1px solid var(--line);border-radius:.3rem;background:var(--card);color:var(--fg);font:inherit;font-size:.8rem;cursor:pointer}
+/* The panel's global label style is a block with vertical margins; inside this
+   bar it has to sit on the same line as the slider it belongs to. */
+.image-tools label{display:inline-flex;align-items:center;gap:.35rem;margin:0;font-weight:400;white-space:nowrap}
+.image-tools button{padding:.22rem .55rem;border:1px solid var(--line);border-radius:.3rem;background:var(--surface);color:var(--fg);font:inherit;font-size:.8rem;cursor:pointer;flex:0 0 auto}
 .image-tools button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 .image-tools input[type=range]{width:7rem;accent-color:var(--accent)}
 .image-tools output{min-width:3ch;font-variant-numeric:tabular-nums}
 .img-overlay{position:absolute;z-index:30;pointer-events:none;border:2px solid var(--accent);box-sizing:border-box}
 .img-overlay[hidden]{display:none!important}
-.img-overlay span{position:absolute;width:12px;height:12px;margin:-7px 0 0 -7px;border:2px solid var(--accent);border-radius:2px;background:var(--card);pointer-events:auto;touch-action:none}
+.img-overlay span{position:absolute;width:12px;height:12px;margin:-7px 0 0 -7px;border:2px solid var(--accent);border-radius:2px;background:var(--surface);pointer-events:auto;touch-action:none}
 .img-overlay span[data-handle=nw]{left:0;top:0;cursor:nwse-resize}
 .img-overlay span[data-handle=ne]{left:100%;top:0;cursor:nesw-resize}
 .img-overlay span[data-handle=sw]{left:0;top:100%;cursor:nesw-resize}
@@ -789,12 +792,14 @@ export const EDITOR_CSS = `<style>
 .image-block-form__width input[type=range]{flex:1;accent-color:var(--accent)}
 .image-block-form__width output{min-width:3ch;font-variant-numeric:tabular-nums}
 .dialog-grow{flex:1 1 auto}
-dialog[open]{max-height:90vh}
+dialog[open]{max-height:90vh;overflow:auto}
 #link-dialog,#image-block-dialog{width:min(34rem,94vw)}
 @media(max-width:640px){
   .image-block-form{grid-template-columns:1fr}
   .image-block-form__preview{min-height:5rem;max-height:8rem}
-  .ams-editor-bar{position:sticky;top:0;z-index:5;background:var(--bg);padding:.25rem 0}
+  /* Sticks under the panel's own top bar: at top:0 the bar slid underneath it
+     and the Classic/Modern switch and word count were covered. */
+  .ams-editor-bar{position:sticky;top:var(--topbar-h);z-index:5;background:var(--bg);padding:.25rem 0;border-bottom:1px solid var(--line)}
   .ams-editor .toolbar{overflow-x:auto;flex-wrap:nowrap;padding-bottom:.3rem}
   .ams-editor.is-modern .toolbar{flex-wrap:wrap}
 }
