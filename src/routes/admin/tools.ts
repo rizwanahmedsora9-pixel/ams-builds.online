@@ -7,6 +7,8 @@ import { deleteFile, getFile, putFile } from '../../lib/files';
 import { safeUrl, slugify } from '../../lib/security';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 import { APP_VERSION } from '../../lib/version';
+import { hasColumn } from '../../lib/schema';
+import { MAX_PAGE_DEPTH } from '../../lib/page-hierarchy';
 import { BUDGETS, kb } from '../../lib/budgets';
 import measured from '../../lib/budget-report.json';
 import {
@@ -210,6 +212,8 @@ async function importData(c: Ctx, payload: any): Promise<ImportResult> {
   const str = (v: unknown, max: number) => String(v ?? '').slice(0, max);
   const now = new Date().toISOString();
   const contentMap = new Map<number, number>();
+  const importedPageIds = new Map<number, number>();
+  const importedPageParents = new Map<number, number | null>();
 
   for (const row of Array.isArray(payload.content) ? payload.content.slice(0, 5000) : []) {
     const type = row?.type === 'post' ? 'post' : 'page';
@@ -219,17 +223,63 @@ async function importData(c: Ctx, payload: any): Promise<ImportResult> {
     const publishedAt = row?.published_at ? new Date(row.published_at).toISOString() : null;
     const existing = await db.prepare('SELECT id FROM content WHERE site_id=1 AND type=? AND slug=?').bind(type, slug)
       .first<{ id: number }>();
+    let localId: number;
     if (existing) {
       await db.prepare('UPDATE content SET title=?, body=?, excerpt=?, status=?, seo_title=?, seo_description=?, published_at=?, updated_at=? WHERE id=?')
         .bind(title, str(row?.body, 200000), str(row?.excerpt, 500), status, str(row?.seo_title, 200), str(row?.seo_description, 320), publishedAt, now, existing.id).run();
-      contentMap.set(Number(row?.id), existing.id);
+      localId = existing.id;
     } else {
       const res = await db.prepare(
         'INSERT INTO content (site_id,type,title,slug,body,excerpt,status,seo_title,seo_description,author_id,published_at,created_at,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?)',
       ).bind(type, title, slug, str(row?.body, 200000), str(row?.excerpt, 500), status, str(row?.seo_title, 200), str(row?.seo_description, 320), c.var.user.id, publishedAt, now, now).run();
-      contentMap.set(Number(row?.id), Number(res.meta.last_row_id));
+      localId = Number(res.meta.last_row_id);
+    }
+    const sourceId = Number(row?.id);
+    if (Number.isSafeInteger(sourceId) && sourceId > 0) {
+      contentMap.set(sourceId, localId);
+      if (type === 'page') {
+        importedPageIds.set(sourceId, localId);
+        if (Object.prototype.hasOwnProperty.call(row, 'parent_id')) {
+          const parentSourceId = Number(row.parent_id);
+          importedPageParents.set(sourceId, Number.isSafeInteger(parentSourceId) && parentSourceId > 0 ? parentSourceId : null);
+        }
+      }
     }
     out.content++;
+  }
+
+  // Restore page parent links only after every referenced page has an id in
+  // this database. Invalid, missing or cyclic links are safely detached.
+  if (importedPageParents.size && await hasColumn(c.env, 'content', 'parent_id')) {
+    const homePageId = Number((await getSettings(c.env)).home_page_id) || 0;
+    const parentUpdates = [];
+    for (const [sourceId, parentSourceId] of importedPageParents) {
+      const localId = importedPageIds.get(sourceId);
+      if (!localId) continue;
+      if (localId === homePageId) {
+        parentUpdates.push(db.prepare("UPDATE content SET parent_id=NULL WHERE id=? AND site_id=1 AND type='page'").bind(localId));
+        continue;
+      }
+      let parentLocalId: number | null = null;
+      let valid = true;
+      if (parentSourceId != null) {
+        parentLocalId = importedPageIds.get(parentSourceId) ?? null;
+        if (!parentLocalId || parentLocalId === localId) valid = false;
+        const seen = new Set<number>([sourceId]);
+        let cursor: number | null = parentSourceId;
+        let depth = 0;
+        while (cursor != null && valid) {
+          if (seen.has(cursor)) { valid = false; break; }
+          seen.add(cursor);
+          depth++;
+          if (depth > MAX_PAGE_DEPTH) { valid = false; break; }
+          cursor = importedPageParents.get(cursor) ?? null;
+        }
+      }
+      parentUpdates.push(db.prepare("UPDATE content SET parent_id=? WHERE id=? AND site_id=1 AND type='page'")
+        .bind(valid ? parentLocalId : null, localId));
+    }
+    if (parentUpdates.length) await db.batch(parentUpdates);
   }
 
   const termMap = new Map<number, number>();

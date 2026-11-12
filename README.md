@@ -208,7 +208,7 @@ autosaved and versioned, and no screen needs JavaScript to work.
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
 | Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). **Browser-side WebP compression** before upload, every common image format (JPG/JFIF, PNG/APNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, JXL, ICO, SVG), and a two-tab picker in the editor: already-uploaded images, or upload straight from the device |
-| Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; a tick adds a page to the header menu |
+| Pages | Same list pattern as Posts, plus a **Page hierarchy** tree, **Parent page** selector and **Page order** panel; published children become linked cards with breadcrumbs; status/date filters and bulk publish/draft/delete; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes** (store, installed, editor), **Templates**, **Menus**, **Widgets**, **Identity** |
 | Plugins | Built-in XML sitemap, robots.txt, RSS feed and **Search Console Verification** (paste Google/Bing/Yandex meta tag → live in `<head>`) can be switched off; add your own snippet to `<head>` or before `</body>` |
@@ -362,9 +362,11 @@ Roles: **admin** has everything, **editor** manages all content, media, menus an
 comments, **author** only writes and edits their own posts and uploads. You cannot
 delete your own account, demote yourself, or remove the last admin.
 
-## Menus
+## Menus and parent/child pages
 
-- Tick **Show in the main menu** when editing a page and it is linked in the site header once published. New pages start ticked.
+- Tick **Show in the main menu** when editing a page and it is linked in the site header once published. New pages start ticked; choosing a parent in the page editor unchecks it automatically, and you can still override the checkbox.
+- To make a folder-like hierarchy, edit a page and choose its **Parent page**. The Pages screen shows the tree; published children appear automatically as links on the parent page, and child pages show breadcrumbs back to their parents. Uncheck **Show in the main menu** to keep those child links out of the header.
+- Moving a page in the hierarchy does not change its existing `/<slug>` URL. Deleting a parent safely makes its children top-level pages instead of leaving broken links.
 - **Menus** in the admin panel lets you reorder links (drag the handle or use the arrows), rename them, add custom links, and create a footer menu.
 
 

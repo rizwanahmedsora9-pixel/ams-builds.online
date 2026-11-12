@@ -6,7 +6,7 @@ import { resetSchemaCache } from '../../lib/schema';
  * by the installer; each entry here upgrades an already-installed database.
  * Append new entries with the next version number - never edit old ones.
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /**
  * A migration statement that must not take the whole batch down.
@@ -158,6 +158,12 @@ const WORKFLOW_FIXES = [
   "INSERT INTO settings (site_id, key, value) VALUES (1, 'pages_order', 'menu_order') ON CONFLICT(site_id, key) DO NOTHING",
 ];
 
+/** Parent/child links for Pages. Existing page URLs remain unchanged. */
+const PAGE_HIERARCHY = [
+  tolerant('ALTER TABLE content ADD COLUMN parent_id INTEGER'),
+  'CREATE INDEX IF NOT EXISTS idx_content_parent ON content (site_id, type, parent_id, menu_order)',
+];
+
 export const migrations: { version: number; name: string; statements: string[] }[] = [
   { version: 2, name: 'Comments', statements: COMMENTS },
   { version: 3, name: 'Revisions, edit locks and page ordering', statements: EDITOR_WORKFLOW },
@@ -165,6 +171,7 @@ export const migrations: { version: number; name: string; statements: string[] }
   { version: 5, name: 'Theme platform: assets, partials, versions', statements: THEME_PLATFORM },
   { version: 6, name: 'Per-page templates', statements: TEMPLATES },
   { version: 7, name: 'Audit log', statements: AUDIT },
+  { version: 8, name: 'Hierarchical pages', statements: PAGE_HIERARCHY },
 ];
 
 /** Runs one migration statement, tolerating the errors marked in its comment. */

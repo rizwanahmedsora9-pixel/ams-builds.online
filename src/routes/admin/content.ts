@@ -16,6 +16,10 @@ import {
   pruneLocks, pruneRevisions, readLock, recordRevision, releaseLock, sameContent, type RevisionRow,
 } from '../../admin/revisions';
 import { hasColumn, hasPhase2Schema } from '../../lib/schema';
+import {
+  comparePageOrder, MAX_PAGE_DEPTH, orderedPageTree, pageDepth, pageDescendants,
+  pageSubtreeHeight, type PageHierarchyRow,
+} from '../../lib/page-hierarchy';
 import { activeThemeTemplates } from '../../lib/theme-store';
 import { audit } from '../../lib/audit';
 import { lockBanner, restoreBanner, revisionDiff, revisionList } from '../../admin/editor-views';
@@ -371,6 +375,53 @@ type PageListRow = {
   pinned: number;
 };
 
+type AdminPageRow = PageHierarchyRow;
+
+const PAGE_PARENT_JS = `<script>
+(function(){
+  var parent=document.getElementById('page-parent');
+  var menu=document.querySelector('input[name="in_menu"]');
+  if(parent&&menu)parent.addEventListener('change',function(){if(parent.value)menu.checked=false;});
+})();
+</script>`;
+
+/** Server-rendered, keyboard-friendly tree for the Pages screen. */
+function pageTreeMarkup(pages: AdminPageRow[], base: string): Raw {
+  if (!pages.length) return html`<p class="muted" style="margin:0">No pages yet. Create a page to start the tree.</p>`;
+  const byId = new Map(pages.map((page) => [page.id, page]));
+  const byParent = new Map<number | null, AdminPageRow[]>();
+  for (const page of pages) {
+    const parent = page.parent_id != null && byId.has(page.parent_id) ? page.parent_id : null;
+    const siblings = byParent.get(parent) ?? [];
+    siblings.push(page);
+    byParent.set(parent, siblings);
+  }
+  for (const siblings of byParent.values()) siblings.sort(comparePageOrder);
+  const visited = new Set<number>();
+  const render = (parentId: number | null): Raw => {
+    const children = (byParent.get(parentId) ?? []).filter((page) => !visited.has(page.id));
+    if (!children.length) return html``;
+    return html`<ul class="page-tree__list">
+      ${children.map((page) => {
+        visited.add(page.id);
+        const nested = render(page.id);
+        const parent = page.parent_id == null ? null : byId.get(page.parent_id) ?? null;
+        return html`<li class="page-tree__node">
+          <div class="page-tree__row">
+            <a href="${base}/pages/${page.id}">${page.title}</a>
+            <span class="badge ${page.status}">${page.status}</span>
+            ${parent ? html`<span class="page-tree__parent">Parent: ${parent.title}</span>` : ''}
+          </div>
+          ${nested}
+        </li>`;
+      })}
+    </ul>`;
+  };
+  const tree = render(null);
+  const unvisited = pages.filter((page) => !visited.has(page.id)).sort(comparePageOrder);
+  return html`${tree}${unvisited.length ? html`<p class="hint">A broken or cyclic parent link was found. These pages are shown at the root so they remain editable.</p><ul class="page-tree__list">${unvisited.map((page) => html`<li class="page-tree__node"><div class="page-tree__row"><a href="${base}/pages/${page.id}">${page.title}</a><span class="badge ${page.status}">${page.status}</span></div></li>`)}</ul>` : ''}`;
+}
+
 function pageListState(c: Ctx): PageListState {
   const rawStatus = c.req.query('status') || 'all';
   const rawSort = c.req.query('sort') || 'date';
@@ -456,9 +507,12 @@ async function pagesList(c: Ctx): Promise<Response> {
   const rows = listResult.results.slice(0, per);
   const statusTabs: [PageStatusFilter, string][] = [['all', 'All'], ['published', 'Published'], ['draft', 'Draft']];
   const installedThemes = (await c.env.DB.prepare('SELECT slug, name FROM themes ORDER BY name').all<{ slug: string; name: string }>().catch(() => ({ results: [] as { slug: string; name: string }[] }))).results;
+  const hasParentColumn = await hasColumn(c.env, 'content', 'parent_id');
   const allPages = (await c.env.DB.prepare(
-    "SELECT id, title, status, COALESCE(menu_order,0) AS menu_order FROM content WHERE site_id=1 AND type='page' ORDER BY COALESCE(menu_order,0) ASC, title COLLATE NOCASE ASC LIMIT 200",
-  ).all<{ id: number; title: string; status: string; menu_order: number }>().catch(() => ({ results: [] as { id: number; title: string; status: string; menu_order: number }[] }))).results;
+    `SELECT id, title, slug, status, ${hasParentColumn ? 'parent_id' : 'NULL AS parent_id'}, COALESCE(menu_order,0) AS menu_order
+     FROM content WHERE site_id=1 AND type='page' ORDER BY COALESCE(menu_order,0) ASC, title COLLATE NOCASE ASC LIMIT 500`,
+  ).all<AdminPageRow>().catch(() => ({ results: [] as AdminPageRow[] }))).results;
+  const hierarchyTree = pageTreeMarkup(allPages, base);
   const currentUrl = pageListHref(state);
   const bulkAction = `${base}/pages/bulk${currentUrl.slice('/pages'.length)}`;
   const monthOptions = months.results.filter((row) => /^\d{4}-(0[1-9]|1[0-2])$/.test(row.month));
@@ -481,6 +535,11 @@ async function pagesList(c: Ctx): Promise<Response> {
     sub: total ? `${total} page${total === 1 ? '' : 's'}` : 'Standalone pages: about, contact, landing pages.',
     id: 'pages-title',
     actions: html`<a class="btn" href="${base}/pages/new">${icon('plus', { cls: 'ico--sm' })}Add Page</a>`,
+  })}
+  ${card({
+    title: 'Page hierarchy',
+    body: html`<p class="hint" style="margin-top:0">Set a <b>Parent page</b> in the editor to make a page a child. The tree is for organizing and browsing; turn off <b>Show in the main menu</b> on child pages to keep the header uncluttered. Published children are listed automatically on their parent page.</p>
+      ${hasParentColumn ? hierarchyTree : html`<p class="notice">Run the database update to enable parent and child pages. <a href="${base}/updates">Open Updates</a>.</p>`}`,
   })}
   ${listToolbar({
     tabs: tabs(statusTabs.map(([key, label]) => ({
@@ -609,6 +668,9 @@ content.post('/pages/bulk', async (c) => {
   const now = new Date().toISOString();
   if (action === 'delete') {
     for (const row of rows) await removeUrlFromMenus(c.env, pageUrl(row));
+    if (await hasColumn(c.env, 'content', 'parent_id')) {
+      await db.batch(rows.map((row) => db.prepare("UPDATE content SET parent_id=NULL WHERE site_id=1 AND type='page' AND parent_id=?").bind(row.id)));
+    }
     await db.batch(rows.flatMap((row) => [
       db.prepare('DELETE FROM content_terms WHERE content_id=?').bind(row.id),
       db.prepare('DELETE FROM comments WHERE content_id=?').bind(row.id),
@@ -878,6 +940,29 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
   // `page` is not offered to a post (it would drop its date, author and comments).
   const templateOptions = (await activeThemeTemplates(c.env)).templates
     .filter((t) => !['home', 'archive', '404', type, ...(type === 'post' ? ['page'] : [])].includes(t));
+  const hierarchyAvailable = type === 'page' && await hasColumn(c.env, 'content', 'parent_id');
+  const hierarchyPages = hierarchyAvailable
+    ? (await c.env.DB.prepare(
+      "SELECT id, title, slug, parent_id, status, COALESCE(menu_order,0) AS menu_order FROM content WHERE site_id=1 AND type='page' ORDER BY COALESCE(menu_order,0), title COLLATE NOCASE LIMIT 500",
+    ).all<PageHierarchyRow>()).results
+    : [];
+  const hierarchyById = new Map(hierarchyPages.map((page) => [page.id, page]));
+  const excludedParents = row ? pageDescendants(row.id, hierarchyPages) : new Set<number>();
+  const movedSubtreeHeight = row ? pageSubtreeHeight(row.id, hierarchyPages) : 0;
+  const parentOptions = orderedPageTree(hierarchyPages).filter(({ page }) =>
+    !excludedParents.has(page.id) && pageDepth(page.id, hierarchyById) + 1 + movedSubtreeHeight <= MAX_PAGE_DEPTH,
+  );
+  const isHomePage = type === 'page' && !!row && settings.home_page_id === String(row.id);
+  const pageParentField = type !== 'page' ? '' : !hierarchyAvailable
+    ? html`<p class="hint">Parent and child pages are available after the database update. <a href="${base}/updates">Run updates</a>.</p>`
+    : isHomePage
+      ? html`<input type="hidden" name="parent_id" value=""><p class="hint">The site home page stays at the top level.</p>`
+      : html`<label for="page-parent">Parent page</label>
+        <select id="page-parent" name="parent_id">
+          <option value="">No parent (top level)</option>
+          ${parentOptions.map(({ page, depth }) => html`<option value="${page.id}"${String(row?.parent_id ?? '') === String(page.id) ? raw(' selected') : raw('')}>${'— '.repeat(depth)}${page.title}${page.status === 'draft' ? ' (draft)' : ''}</option>`)}
+        </select>
+        <p class="hint">A published parent page automatically lists its published children. Choosing a parent unchecks the main-menu option; child pages keep their own URLs.</p>`;
   // Pages: one tick puts the page in the header menu (new pages and drafts start ticked).
   const pageUrl = row ? (settings.home_page_id === String(row.id) ? '/' : '/' + row.slug) : null;
   const inMenu = type === 'page' && (!row || row.status === 'draft' || (await isInPrimaryMenu(c.env, pageUrl!)));
@@ -996,6 +1081,7 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
     <select id="status" name="status">
       ${opt('draft', 'Draft')}${opt('published', 'Published')}${type === 'post' ? opt('scheduled', 'Scheduled') : ''}
     </select>
+    ${pageParentField}
     ${type === 'post' ? html`<div id="when">
       <label for="publish_at">Publish date (${tz})</label>
       <input type="datetime-local" id="publish_at" name="publish_at" value="${row?.published_at ? utcToLocal(row.published_at, tz) : ''}">
@@ -1101,7 +1187,8 @@ ${row ? card({
 ${row ? html`<form method="post" action="${base}/${kind}/${row.id}/delete" id="delete">${csrfField(c)}<button class="btn danger" type="submit">Delete ${type}</button></form>` : ''}
 ${raw(PICKER_JS)}
 ${raw(EDITOR_UTILS_JS)}
-${raw(EDITOR_JS)}`, '/' + kind);
+${raw(EDITOR_JS)}
+${hierarchyAvailable ? raw(PAGE_PARENT_JS) : ''}`, '/' + kind);
 }
 
 /* ------------------------------------------------------------- quick edit */
@@ -1217,6 +1304,9 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/duplicate', async (c) => {
   ).bind(row.type, `${row.title} (copy)`, slug, row.body, row.excerpt, row.seo_title, row.seo_description, row.featured_media_id, c.var.user.id, now, row.template ?? '', now).run();
   const copyId = Number(res.meta.last_row_id);
   await c.env.DB.prepare('INSERT OR IGNORE INTO content_terms (content_id,term_id) SELECT ?,term_id FROM content_terms WHERE content_id=?').bind(copyId, id).run();
+  if (kind === 'pages' && await hasColumn(c.env, 'content', 'parent_id') && row.parent_id != null) {
+    await c.env.DB.prepare("UPDATE content SET parent_id=? WHERE id=? AND type='page' AND site_id=1").bind(row.parent_id, copyId).run();
+  }
   return go(c, `/${kind}/${copyId}`, { ok: 'Duplicated as a draft. The original is untouched.' });
 });
 
@@ -1390,6 +1480,40 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   let status = ['draft', 'published', 'scheduled'].includes(str('status')) ? str('status') : 'draft';
   if (type === 'page' && status === 'scheduled') status = 'published';
   const settings = await getSettings(c.env);
+  const hierarchyAvailable = type === 'page' && await hasColumn(c.env, 'content', 'parent_id');
+  let parentId: number | null = existing?.parent_id ?? null;
+  if (hierarchyAvailable) {
+    const rawParent = f.has('parent_id') ? str('parent_id').trim() : undefined;
+    const wantedParent = rawParent === undefined
+      ? existing?.parent_id ?? null
+      : rawParent === '' ? null : Number(rawParent);
+    if (rawParent !== undefined && rawParent !== '' && (!Number.isSafeInteger(wantedParent) || (wantedParent ?? 0) < 1)) {
+      return go(c, id ? `/${kind}/${id}` : `/${kind}/new`, { err: 'Choose a valid parent page.' });
+    }
+    if (settings.home_page_id === String(id) && wantedParent != null) {
+      return go(c, `/${kind}/${id}`, { err: 'The site home page cannot have a parent.' });
+    }
+    if (wantedParent != null) {
+      const pageRows = (await db.prepare(
+        "SELECT id, title, slug, parent_id, status, COALESCE(menu_order,0) AS menu_order FROM content WHERE site_id=1 AND type='page'",
+      ).all<PageHierarchyRow>()).results;
+      const pageMap = new Map(pageRows.map((page) => [page.id, page]));
+      if (!pageMap.has(wantedParent)) {
+        return go(c, id ? `/${kind}/${id}` : `/${kind}/new`, { err: 'That parent page no longer exists. Choose another one.' });
+      }
+      if (id && pageDescendants(id, pageRows).has(wantedParent)) {
+        return go(c, `/${kind}/${id}`, { err: 'A page cannot be its own parent or a child of one of its descendants.' });
+      }
+      const newDepth = pageDepth(wantedParent, pageMap) + 1;
+      const subtreeHeight = id ? pageSubtreeHeight(id, pageRows) : 0;
+      if (newDepth > MAX_PAGE_DEPTH || newDepth + subtreeHeight > MAX_PAGE_DEPTH) {
+        return go(c, id ? `/${kind}/${id}` : `/${kind}/new`, { err: `Page nesting is limited to ${MAX_PAGE_DEPTH + 1} levels.` });
+      }
+      parentId = wantedParent;
+    } else {
+      parentId = null;
+    }
+  }
   const chosen = type === 'post' && str('publish_at') ? localToUtc(str('publish_at'), settings.timezone || 'UTC') : null;
   let publishedAt = chosen ?? existing?.published_at ?? null;
   if (status === 'scheduled') {
@@ -1419,17 +1543,23 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
 
   let savedId = id;
   const trackEditor = await hasColumn(c.env, 'content', 'updated_by');
+  const saveParent = type === 'page' && hierarchyAvailable;
   if (existing) {
-    await db.prepare(`UPDATE content SET title=?, slug=?, body=?, excerpt=?, status=?, seo_title=?, seo_description=?, featured_media_id=?, published_at=?, template=?, updated_at=?${trackEditor ? ', updated_by=?' : ''} WHERE id=?`)
-      .bind(title, slug, body, excerpt, status, seoTitle, seoDesc, featured, publishedAt, template, now, ...(trackEditor ? [c.var.user.id] : []), id).run();
+    const parentSet = saveParent ? ', parent_id=?' : '';
+    await db.prepare(`UPDATE content SET title=?, slug=?, body=?, excerpt=?, status=?, seo_title=?, seo_description=?, featured_media_id=?, published_at=?, template=?${parentSet}, updated_at=?${trackEditor ? ', updated_by=?' : ''} WHERE id=?`)
+      .bind(title, slug, body, excerpt, status, seoTitle, seoDesc, featured, publishedAt, template,
+        ...(saveParent ? [parentId] : []), now, ...(trackEditor ? [c.var.user.id] : []), id).run();
   } else {
-    // 13 columns plus the optional updated_by; the placeholder count has to match
-    // exactly, and SQLite will not tell you which one is missing.
-    const columns = 'site_id,type,title,slug,body,excerpt,status,seo_title,seo_description,featured_media_id,author_id,published_at,template,created_at,updated_at'
-      + (trackEditor ? ',updated_by' : '');
-    const placeholders = '1,' + Array.from({ length: 14 }, () => '?').join(',') + (trackEditor ? ',?' : '');
-    const res = await db.prepare(`INSERT INTO content (${columns}) VALUES (${placeholders})`)
-      .bind(type, title, slug, body, excerpt, status, seoTitle, seoDesc, featured, c.var.user.id, publishedAt, template, now, now, ...(trackEditor ? [c.var.user.id] : [])).run();
+    const columns = ['site_id', 'type', 'title', 'slug', 'body', 'excerpt', 'status', 'seo_title', 'seo_description',
+      'featured_media_id', 'author_id', 'published_at', 'template'];
+    const values: (string | number | null)[] = [type, title, slug, body, excerpt, status, seoTitle, seoDesc,
+      featured, c.var.user.id, publishedAt, template];
+    if (saveParent) { columns.push('parent_id'); values.push(parentId); }
+    columns.push('created_at', 'updated_at');
+    values.push(now, now);
+    if (trackEditor) { columns.push('updated_by'); values.push(c.var.user.id); }
+    const placeholders = ['1', ...values.map(() => '?')].join(',');
+    const res = await db.prepare(`INSERT INTO content (${columns.join(',')}) VALUES (${placeholders})`).bind(...values).run();
     savedId = Number(res.meta.last_row_id);
   }
   if (existing) await pruneRevisions(c.env, savedId);
@@ -1478,6 +1608,9 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/delete', async (c) => {
   const row = await c.env.DB.prepare('SELECT id, slug, author_id FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kind)).first<{ id: number; slug: string; author_id: number | null }>();
   if (!row) return errorPage(c, 404, 'Not found.');
   if (!mayEdit(c, row)) return errorPage(c, 403, 'You can only delete your own posts.');
+  if (kind === 'pages' && await hasColumn(c.env, 'content', 'parent_id')) {
+    await c.env.DB.prepare("UPDATE content SET parent_id=NULL WHERE site_id=1 AND type='page' AND parent_id=?").bind(id).run();
+  }
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM content_terms WHERE content_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM content_lock WHERE content_id=?').bind(id),

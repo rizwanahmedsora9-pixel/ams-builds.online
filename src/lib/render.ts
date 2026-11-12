@@ -3,6 +3,7 @@ import type { Settings } from './config';
 import { commentToken, commentsEnabled, approvedComments, renderCommentsHtml, type CommentRow } from './comments';
 import { esc, safeUrl } from './security';
 import { listPages } from './content';
+import { type PublicPageHierarchy } from './page-hierarchy';
 import { defaultTheme } from '../themes/default';
 import type { ThemeBundle } from './theme-manifest';
 import { activeThemeFor, applyLayout, loadTheme, renderWithTheme, themeAssetUrl } from './theme-store';
@@ -33,6 +34,39 @@ async function loadMenus(env: Env, path: string): Promise<Record<string, MenuIte
   const out: Record<string, MenuItem[]> = {};
   for (const r of results) (out[r.location] ||= []).push({ label: r.label, url: r.url, active: r.url === path });
   return out;
+}
+
+const PAGE_HIERARCHY_CSS = `
+.page-breadcrumbs{margin:0 0 1.25rem;font-size:.92em}
+.page-breadcrumbs ol{display:flex;flex-wrap:wrap;gap:.4rem;list-style:none;margin:0;padding:0}
+.page-breadcrumbs li+li:before{content:"/";margin-right:.4rem;opacity:.65}
+.page-breadcrumbs a{color:inherit;text-underline-offset:.15em}
+.page-children{margin:2rem 0 0;padding:clamp(1rem,3vw,1.5rem);border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:1rem}
+.page-children h2{margin:0 0 1rem;font-size:1.3em}
+.page-children ul{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;list-style:none;margin:0;padding:0}
+.page-children a{display:flex;min-height:3.25rem;align-items:center;justify-content:space-between;gap:.75rem;padding:.75rem 1rem;border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:.75rem;color:inherit;text-decoration:none}
+.page-children a:hover,.page-children a:focus-visible{border-color:currentColor;text-decoration:underline;text-underline-offset:.15em}
+`;
+
+/** Folder-like page links, rendered by the CMS so every theme gets the hierarchy. */
+function pageHierarchyMarkup(hierarchy: PublicPageHierarchy | undefined, nonce: string): { before: string; after: string; styles: string } {
+  const current = hierarchy?.current;
+  const ancestors = hierarchy?.ancestors ?? [];
+  const children = hierarchy?.children ?? [];
+  if (!current || (!ancestors.length && !children.length)) return { before: '', after: '', styles: '' };
+  const safeHref = (url: string) => esc(safeUrl(url) || '/');
+  let before = '';
+  if (ancestors.length) {
+    const trail = ancestors.some((item) => item.url === '/')
+      ? ancestors
+      : [{ id: 0, title: 'Home', slug: '', url: '/' }, ...ancestors];
+    before = `<nav class="page-breadcrumbs" aria-label="Breadcrumb"><ol>${trail.map((item) => `<li><a href="${safeHref(item.url)}">${esc(item.title)}</a></li>`).join('')}<li aria-current="page">${esc(current.title)}</li></ol></nav>`;
+  }
+  const after = children.length
+    ? `<nav class="page-children" aria-labelledby="page-children-heading"><h2 id="page-children-heading">Explore ${esc(current.title)}</h2><ul>${children.map((item) => `<li><a href="${safeHref(item.url)}"><span>${esc(item.title)}</span><span aria-hidden="true">&rarr;</span></a></li>`).join('')}</ul></nav>`
+    : '';
+  const styles = `<style nonce="${esc(nonce)}">${PAGE_HIERARCHY_CSS}</style>`;
+  return { before, after, styles };
 }
 
 export type PageMeta = {
@@ -177,6 +211,8 @@ export async function renderTheme(
     themeSettings?: Record<string, string> | null;
     /** Token overrides from an unsaved Customizer preview (signed cookie). */
     tokenOverrides?: Record<string, string>;
+    /** Parent/child navigation for a public CMS Page. */
+    pageHierarchy?: PublicPageHierarchy;
   },
 ): Promise<string> {
   const { settings, url } = opts;
@@ -217,6 +253,8 @@ export async function renderTheme(
   // one for the kind is used, so switching theme never blanks a page.
   const source = theme.templates[opts.template] ?? theme.templates.page ?? theme.templates.home ?? '';
   const nonce = nonceFor();
+  const hierarchyMarkup = pageHierarchyMarkup(opts.pageHierarchy, nonce);
+  const headExtra = [hooks.head.join('\n'), hierarchyMarkup.styles].filter(Boolean).join('\n');
   // Design tokens: only the variables this theme actually reads are emitted, so
   // changing a brand colour cannot break a theme that hard-codes its palette.
   const tokenValues = { ...readTokens(settings), ...(opts.tokenOverrides ?? {}) };
@@ -272,15 +310,16 @@ export async function renderTheme(
     if (commentsHtml && !/\{\{\{?\s*comments_html\s*\}?\}\}/.test(source)) {
       inner += `\n<div class="comments-fallback">${commentsHtml}</div>`;
     }
-    return applyLayout(theme, opts.template, inner, {
+    const pageContent = `${hierarchyMarkup.before}${inner}${hierarchyMarkup.after}`;
+    return applyLayout(theme, opts.template, pageContent, {
       ...shared,
-      content: inner,
+      content: pageContent,
       theme_css: theme.css.replace(/<\/style/gi, '<\\/style'),
       theme_css_url: cssUrl,
       tokens_css: tokensBlock,
       // The site's own tokens go *after* the theme stylesheet so they win, but
       // before custom CSS so an author's final say still has the last word.
-      head: buildHead(opts.meta, settings, url.origin, hooks.head.join('\n'), nonce, tokensBlock, scheme),
+      head: buildHead(opts.meta, settings, url.origin, headExtra, nonce, tokensBlock, scheme),
       footer: buildFooter(settings, theme, hooks.footer.join('\n'), nonce),
     }, renderOpts);
   } catch (err) {
@@ -290,15 +329,16 @@ export async function renderTheme(
     markThemeFailure(theme.slug, err);
     const fallbackCss = defaultTheme.css.replace(/<\/style/gi, '<\\/style');
     const safeInner = source ? renderWithTheme(defaultTheme, source, shared, { ...renderOpts, settings }).replace(/\{\{[\s\S]*?\}\}/g, '') : '';
-    return applyLayout(defaultTheme, opts.template, safeInner || inner || '', {
+    const fallbackContent = `${hierarchyMarkup.before}${safeInner || inner || ''}${hierarchyMarkup.after}`;
+    return applyLayout(defaultTheme, opts.template, fallbackContent, {
       ...shared,
-      content: safeInner,
+      content: fallbackContent,
       theme_css: fallbackCss,
       theme_css_url: '',
       tokens_css: tokensBlock,
       // The site's own tokens go *after* the theme stylesheet so they win, but
       // before custom CSS so an author's final say still has the last word.
-      head: buildHead(opts.meta, settings, url.origin, hooks.head.join('\n'), nonce, tokensBlock, scheme),
+      head: buildHead(opts.meta, settings, url.origin, headExtra, nonce, tokensBlock, scheme),
       footer: buildFooter(settings, theme, hooks.footer.join('\n'), nonce),
     }, { ...renderOpts, settings });
   }

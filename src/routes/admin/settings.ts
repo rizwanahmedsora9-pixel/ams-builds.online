@@ -3,6 +3,7 @@ import { audit } from '../../lib/audit';
 import type { AppEnv, Ctx } from '../../types';
 import { can, randomToken } from '../../lib/auth';
 import { bumpCache, getSettings, saveConfig, setSettings, validAdminSlug } from '../../lib/config';
+import { hasColumn } from '../../lib/schema';
 import { mediaUrl } from '../../lib/content';
 import { MAX_FILE_BYTES, deleteFile, putFile } from '../../lib/files';
 import { FILE_TYPES } from '../../lib/media-types';
@@ -282,6 +283,12 @@ settings.post('/settings', async (c) => {
 
   const style = ['blog', 'plain', 'dated'].includes(str('permalink_style')) ? str('permalink_style') : 'blog';
   const domains = [...new Set([primary, ...str('domains').split(/[\s,]+/).map(cleanDomain).filter(Boolean)])].slice(0, 50);
+
+  // A page may have been nested before it was selected as the home page.
+  // Keep the invariant when changing the setting, not only while editing pages.
+  if (homeOk && await hasColumn(c.env, 'content', 'parent_id')) {
+    await c.env.DB.prepare("UPDATE content SET parent_id=NULL WHERE id=? AND site_id=1 AND type='page'").bind(homeId).run();
+  }
 
   await setSettings(c.env, {
     site_title: siteTitle,

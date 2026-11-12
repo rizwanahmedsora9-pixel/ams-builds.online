@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS content (
   published_at TEXT,
   updated_by INTEGER,
   menu_order INTEGER NOT NULL DEFAULT 0,
+  parent_id INTEGER,
   pinned INTEGER NOT NULL DEFAULT 0,
   -- Phase 4: the theme template that renders this item ('' = the default one).
   template TEXT NOT NULL DEFAULT '',
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS content (
   UNIQUE (site_id, type, slug)
 );
 CREATE INDEX IF NOT EXISTS idx_content_list ON content (site_id, type, status, published_at);
+CREATE INDEX IF NOT EXISTS idx_content_parent ON content (site_id, type, parent_id, menu_order);
 
 -- Phase 2: an append-only history of every save, so nothing is ever lost.
 CREATE TABLE IF NOT EXISTS content_revisions (
