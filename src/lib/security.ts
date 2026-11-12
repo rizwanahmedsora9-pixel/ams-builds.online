@@ -38,6 +38,49 @@ export function sameOrigin(req: Request): boolean {
   }
 }
 
+/* ------------------------------------------------------- content security policy */
+
+/**
+ * Per-response CSP nonce. Not a secret (it is in the HTML by design); it only
+ * has to be unguessable per response, which 16 random bytes are.
+ */
+export function nonceFor(): string {
+  // 16 bytes as unpadded base64url: no characters that need escaping in HTML.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export type CspMode = 'off' | 'report' | 'enforce';
+
+/**
+ * The site's Content-Security-Policy.
+ *
+ * Themes may ship a script as an asset (`theme.js`), which is `'self'`; inline
+ * code only runs when it carries the response nonce, which the renderer adds to
+ * the site's own custom JS/CSS and hook snippets. `report` emits the same policy
+ * as `Content-Security-Policy-Report-Only` so a site can try it safely.
+ */
+export function cspFor(opts: { mode: CspMode; nonce: string }): { header: string; value: string } | null {
+  if (opts.mode === 'off') return null;
+  // A page with no inline code carries no nonce: emitting `'nonce-'` would be a
+  // token that can never match, and an empty one reads like a bug in the header.
+  const nonce = opts.nonce ? ` 'nonce-${opts.nonce}'` : '';
+  const value = [
+    "default-src 'self'",
+    `script-src 'self'${nonce}`,
+    `style-src 'self' 'unsafe-inline'${nonce}`,
+    "img-src 'self' data: https:",
+    "font-src 'self' data:",
+    "media-src 'self' https:",
+    "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com",
+    "connect-src 'self'",
+    "form-action 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+  ].join('; ');
+  return { header: opts.mode === 'report' ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy', value };
+}
+
 /* ---------------------------------------------------------------- sanitizer */
 
 const ALLOWED_TAGS = new Set(

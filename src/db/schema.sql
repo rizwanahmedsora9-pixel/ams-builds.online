@@ -128,9 +128,54 @@ CREATE TABLE IF NOT EXISTS themes (
   name TEXT NOT NULL,
   version TEXT NOT NULL DEFAULT '1.0.0',
   templates TEXT NOT NULL,
+  partials TEXT NOT NULL DEFAULT '{}',
   css TEXT NOT NULL DEFAULT '',
+  manifest TEXT NOT NULL DEFAULT '{}',
+  parent TEXT,
+  author TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  screenshot TEXT NOT NULL DEFAULT '',
   active INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
+);
+
+-- Phase 3: theme packages. Binary assets live in the file store; this table is
+-- the index (sizes, mime types) that the theme manager and size caps read.
+CREATE TABLE IF NOT EXISTS theme_assets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  theme_slug TEXT NOT NULL,
+  path TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  UNIQUE (theme_slug, path)
+);
+CREATE INDEX IF NOT EXISTS idx_theme_assets_slug ON theme_assets (theme_slug);
+
+-- A snapshot written before every activation, so a theme change can be undone.
+CREATE TABLE IF NOT EXISTS theme_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  theme_slug TEXT NOT NULL,
+  version TEXT NOT NULL,
+  name TEXT NOT NULL,
+  templates TEXT NOT NULL,
+  partials TEXT NOT NULL DEFAULT '{}',
+  css TEXT NOT NULL DEFAULT '',
+  manifest TEXT NOT NULL DEFAULT '{}',
+  assets TEXT NOT NULL DEFAULT '[]',
+  note TEXT NOT NULL DEFAULT '',
+  author_id INTEGER,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_theme_versions_slug ON theme_versions (theme_slug, id DESC);
+
+-- One row per theme setting that has been changed in the panel.
+CREATE TABLE IF NOT EXISTS theme_settings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  theme_slug TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL DEFAULT '',
+  UNIQUE (theme_slug, key)
 );
 
 CREATE TABLE IF NOT EXISTS redirects (

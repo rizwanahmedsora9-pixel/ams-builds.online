@@ -72,6 +72,16 @@ settings.get('/settings', async (c) => {
     <label class="check"><input type="checkbox" name="comments_require_approval" value="1"${s.comments_require_approval !== '0' ? raw(' checked') : ''}> Hold new comments for moderation</label>
     <p class="hint">Visitors can comment with a name and email; the email is never published. Moderate everything under <a href="${c.var.base}/comments">Comments</a>.</p>
   </div>
+  <div class="card" id="security">
+    <h2>Content security policy</h2>
+    <label for="csp">Policy for your public pages</label>
+    <select id="csp" name="csp">
+      <option value="off"${sel((s.csp || 'report') === 'off')}>Off — no policy header</option>
+      <option value="report"${sel((s.csp || 'report') === 'report')}>Report only — log what would break (recommended while you check)</option>
+      <option value="enforce"${sel(s.csp === 'enforce')}>Enforce — block anything not allowed</option>
+    </select>
+    <p class="hint">The policy allows scripts from this site and your own inline code (it carries a per-page nonce), plus images from anywhere over HTTPS. Start with <b>Report only</b>: your browser's console lists anything a theme or snippet would have blocked, and nothing breaks. Themes' JavaScript is served as a file, so it keeps working when you switch to <b>Enforce</b>.</p>
+  </div>
   <div class="card" id="domains">
     <h2>Domains &amp; admin URL</h2>
     <label for="primary_domain" style="margin-top:0">Primary domain</label>
@@ -122,6 +132,7 @@ settings.post('/settings', async (c) => {
     default_editor: ['classic', 'modern'].includes(str('default_editor')) ? str('default_editor') : 'ask',
     comments_enabled: str('comments_enabled') === '1' ? '1' : '0',
     comments_require_approval: str('comments_require_approval') === '1' ? '1' : '0',
+    csp: ['off', 'report', 'enforce'].includes(str('csp')) ? str('csp') : 'report',
   });
   await c.env.DB.prepare('UPDATE sites SET hostname=?, name=? WHERE id=1').bind(primary, siteTitle).run();
 

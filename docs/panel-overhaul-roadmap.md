@@ -278,7 +278,7 @@ adds 8.1 KB raw / 2.0 KB gzip).
 blocks) replacing the contenteditable command layer; per-user rows-per-page; "last edited by" in the
 editor footer.
 
-### Phase 3 — Theme platform v2 (9 d)
+### Phase 3 — Theme platform v2 (9 d) — ✅ shipped in 0.6.0
 
 This is the architectural change that makes "adding themes" cheap.
 
@@ -317,6 +317,56 @@ This is the architectural change that makes "adding themes" cheap.
 **Acceptance:** a theme with an image logo, custom font, `{{> partial}}` and `{{post.date | date}}`
 authored and installed purely through the panel; page HTML drops the inlined CSS; CSP enforced with zero
 inline violations on all three bundled themes.
+
+Shipped in 0.6.0 (schema version 5):
+
+- **Theme packages** — `theme_assets` (index), `theme_versions` (snapshots), `theme_settings`, plus
+  `themes.partials/manifest/parent/author/description/screenshot`. Asset bytes live in the existing file
+  store under `themes/{slug}/{path}` (KV on Cloudflare, `data/media/` on Node), so nothing new to
+  provision and the 25 MB KV value limit already covers a 512 KB asset. Uploads take a `.zip`
+  (`theme.json` + templates + `partials/` + `style.css` + `assets/`) or a v1 `.json` bundle. Limits: 6 MB
+  zip, 512 KB per asset, 80 assets, 4 MB total; PNG/JPEG/GIF/WebP/AVIF/ICO, WOFF/WOFF2/TTF/OTF and one
+  `theme.js`; **SVG and HTML refused** because they can carry script and are served from the site origin.
+- **`GET /theme-assets/{slug}/{path}`** — one-year immutable cache, ETag/304, `nosniff`, sandbox CSP, and
+  path traversal refused before any lookup. The stylesheet is stored as an asset, so every v2 layout
+  *links* it: page HTML no longer carries a theme's CSS.
+- **Template engine v2** (`src/lib/template.ts`, replacing the inline engine in `render.ts`) — comparisons
+  (`eq ne gt gte lt lte and or not`, parentheses), loop helpers (`@index/@number/@key/@first/@last`),
+  `{{#each}} limit=/offset=` over arrays *and* objects, partials (`{{> header}}`, `{{> card post}}`,
+  `{{> @theme "x"}}`), layout blocks (`{{#block content}}` alongside `{{{content}}}`), filters (`date`,
+  `truncate`, `strip_html`, `slug`, `json`, `default`, `upper/lower/capitalize`, `reading_time`,
+  `number_format`, `asset`, `url`, `escape`, `nl2br`) and `{{asset "x"}}` in both the helper and filter
+  spellings. Compile cache keyed by source string. Everything is a pure function over data: a template
+  still cannot execute code, and anything that is not a path/literal/filter/block is a parse error.
+- **Manifest v2** — `author`, `homepage`, `description`, `tags`, `screenshot`, `parent`, `layout`,
+  `supports`, `preview`, `settings[]` (text/textarea/toggle/color/select/number/image/url), `changelog`,
+  `assets`. v1 manifests load unchanged.
+- **Inheritance + de-duplication** — `"parent": "ams-pro"` merges templates, partials and settings, one
+  level deep, with children winning. **AMS Premium stopped copying Pro's templates** and now declares
+  Pro as its parent; a cycle or a missing parent is refused at upload time. Deleting a theme that others
+  inherit from is refused.
+- **Settings** — declared defaults are seeded on install, edited under Themes → *theme*, merged over the
+  defaults at render time (`{{theme.accent}}`), invalidated on save, and reset in one click.
+- **Version history** — a snapshot is written before every activation, upload and revert (10 kept per
+  theme); **Revert** restores templates/partials/CSS/manifest and is itself revertible.
+- **Validator** — `GET /{admin}/themes/validate` checks a file *before* installing it, and
+  `/themes/{slug}/validate` checks what is installed: template syntax, unknown filters, missing partials,
+  assets the manifest promises but does not ship, refused file types, a layout with no page slot, and
+  reliance on values the CMS does not provide. Findings are graded error/warning and listed with the
+  place to fix them.
+- **Public CSP** — per-response nonce (read back out of the rendered HTML so the header and page always
+  agree, including on a cache hit), `script-src 'self' 'nonce-…'`, `object-src 'none'`, `base-uri 'self'`,
+  `form-action 'self'`, YouTube only in `frame-src`. Custom CSS/JS and hook snippets get the nonce
+  automatically; theme JS is a served asset. Setting: **off / report (default) / enforce**, with a
+  description of what to do while on report-only.
+- **Theme safety** — a theme that throws while rendering falls back to AMS Base for that page and the
+  Themes screen shows the error with a link to the editor; `?theme=slug` previews any installed theme for
+  signed-in users only, never cached.
+
+**Measured in 0.6.0:** `tests/template.test.mjs` 11 cases (new), `tests/panel.test.mjs` 30 cases (7 new),
+`tests/e2e.mjs` 26 cases, all green on Node; panel CSS budgets unchanged (largest 29.6 KB). A zip theme
+authored for the test ships a partial, a PNG logo, a linked stylesheet and three typed settings, and is
+installed, configured, rendered, versioned, inherited and validated entirely through the panel.
 
 ### Phase 4 — Appearance hub & live Customizer (8 d)
 
@@ -398,8 +448,8 @@ show screenshots; zip export round-trips through upload byte-for-byte for templa
 | 0 | Safety net, design system, assets | 4 | — |
 | 1 | Panel shell, palette, list tables, dashboard | 7 | 0 |
 | 2 | Revisions, autosave, locks, editor v2, media picker, list v2 | 11 | 0, 1 |
-| 3 | Theme platform v2 (assets, partials, filters, manifest, CSP) | 9 | 0 |
-| 4 | Appearance hub, tokens, per-theme settings, live preview | 8 | 1, 3 |
+| 3 ✅ | Theme platform v2 (assets, partials, filters, manifest, CSP) | 9 | 0 |
+| 4 | Appearance hub, tokens, live preview (per-theme settings shipped early, in 0.6.0) | 8 | 1, 3 |
 | 5 | Store lifecycle, authoring, rollback, 2 new themes | 6 | 3, 4 |
 | 6 | Audit log, capabilities, budgets, i18n, docs | 7 | 1–5 |
 | | **Total** | **52** | |
@@ -505,8 +555,9 @@ Every helper is a pure function over data; the engine still cannot execute code.
 |---|---|---|
 | 3 ✅ | Revisions & workflow | `content_revisions`, `content_lock`, `content.updated_by`, `content.menu_order`, `content.pinned` (`content.template` moved to Phase 3) |
 | 4 ✅ | Page ordering default | the `pages_order` setting (a database that ran an early build of v3 lands on a consistent version) |
-| 5 | Theme platform | `theme_assets`, `theme_settings`, `theme_versions`, `themes.site_id/author/description/screenshot/manifest` |
-| 6 | Governance | `audit_log`, `role_caps`, `user_prefs` |
+| 5 ✅ | Theme platform | `theme_assets`, `theme_versions`, `theme_settings`, `themes.partials/manifest/parent/author/description/screenshot` (assets themselves live in the file store) |
+| 6 | Appearance hub | `theme_presets` (brand tokens, presets) if the settings table is not enough |
+| 7 | Governance | `audit_log`, `role_caps`, `user_prefs` |
 
 Forward-only, each applied by the existing `migrate()` and surfaced on the Updates screen.
 

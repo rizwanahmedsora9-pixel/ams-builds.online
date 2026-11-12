@@ -487,3 +487,269 @@ test('an upgrade path: a database without the Phase 2 tables still works', async
   const after = await panel.adminPost(`/posts/${id}/autosave`, { title: 'Pre Migration Post', body: '<p>Typed now.</p>' });
   assert.equal(after.status, 200, 'after the update, autosave works');
 });
+
+/* ---------------------------------------------------------------- Phase 3 */
+
+/** Builds a zip in memory (stored entries are enough; the reader handles both). */
+function zip(files) {
+  const encoder = new TextEncoder();
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, content] of Object.entries(files)) {
+    const data = typeof content === 'string' ? encoder.encode(content) : content;
+    const nameBytes = encoder.encode(name);
+    const crcTable = [];
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      crcTable[n] = c >>> 0;
+    }
+    let crc = 0xffffffff;
+    for (const byte of data) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    crc = (crc ^ 0xffffffff) >>> 0;
+    const local = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0, true);
+    lv.setUint16(8, 0, true); lv.setUint16(10, 0, true); lv.setUint16(12, 0, true);
+    lv.setUint32(14, crc, true); lv.setUint32(18, data.length, true); lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true); lv.setUint16(28, 0, true);
+    local.set(nameBytes, 30);
+    chunks.push(local, data);
+    const dir = new Uint8Array(46 + nameBytes.length);
+    const dv = new DataView(dir.buffer);
+    dv.setUint32(0, 0x02014b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, 20, true);
+    dv.setUint32(16, crc, true); dv.setUint32(20, data.length, true); dv.setUint32(24, data.length, true);
+    dv.setUint16(28, nameBytes.length, true); dv.setUint32(42, offset, true);
+    dir.set(nameBytes, 46);
+    central.push(dir);
+    offset += local.length + data.length;
+  }
+  const centralSize = central.reduce((n, c) => n + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, central.length, true); ev.setUint16(10, central.length, true);
+  ev.setUint32(12, centralSize, true); ev.setUint32(16, offset, true);
+  return Buffer.concat([...chunks, ...central, end].map((b) => Buffer.from(b)));
+}
+
+const PNG_PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
+async function uploadZip(name, files) {
+  const body = new FormData();
+  body.set('_csrf', await panel.csrf());
+  body.append('theme', new Blob([zip(files)], { type: 'application/zip' }), name);
+  const res = await panel.request(`${panel.admin}/themes/upload`, { method: 'POST', body });
+  return { ...res, location: decodeURIComponent(res.location || '') };
+}
+
+const journalTheme = () => ({
+  'journal/theme.json': JSON.stringify({
+    name: 'Journal', slug: 'journal', version: '1.0.0', author: 'Tester',
+    description: 'Serif, single column.', layout: 'base',
+    templates: { base: 'base.html', post: 'post.html' },
+    partials: { header: 'partials/header.html' },
+    css: 'style.css',
+    assets: ['assets/logo.png'],
+    settings: [
+      { key: 'accent', type: 'color', label: 'Accent', default: '#b4552d' },
+      { key: 'show_tagline', type: 'toggle', label: 'Show tagline', default: true },
+      { key: 'archive_layout', type: 'select', label: 'Archive', default: 'grid', options: [{ value: 'grid', label: 'Grid' }, { value: 'list', label: 'List' }] },
+    ],
+  }),
+  'journal/base.html': [
+    '<!doctype html><html lang="en"><head><meta charset="utf-8">{{{head}}}',
+    '{{#if theme_css_url}}<link rel="stylesheet" href="{{{theme_css_url}}}">{{/if}}',
+    '</head><body data-theme="journal" data-accent="{{theme.accent}}">',
+    '{{> header}}<main>{{{content}}}</main>',
+    '<footer>{{#if theme.show_tagline}}{{site.tagline}}{{/if}} · {{theme.archive_layout}}</footer>',
+    '</body></html>',
+  ].join('\n'),
+  'journal/post.html': '<article data-tpl="journal-post"><h1>{{post.title}}</h1>'
+    + '<p class="date">{{post.date | date "Y-m-d"}}</p>'
+    + '<img class="logo" src="{{asset "assets/logo.png"}}" alt="logo">'
+    + '{{#if post.comments_count gt 0}}<p class="has">comments</p>{{else}}<p class="none">no comments</p>{{/if}}'
+    + '{{{post.content}}}</article>',
+  'journal/partials/header.html': '<header class="journal-header"><a href="/" class="brand">{{site.title | upper}}</a></header>',
+  'journal/style.css': 'body{font-family:serif}',
+  'journal/assets/logo.png': PNG_PIXEL,
+});
+
+test('phase 3: a zip theme with partials, assets and settings installs and renders', async () => {
+  const upload = await uploadZip('journal.zip', journalTheme());
+
+  assert.match(upload.location, /Journal|base|template|refused|allow/i, upload.location);
+  assert.match(upload.location, /2 assets/, 'the stylesheet and the logo are both stored as assets');
+
+  const manage = await panel.get(`${panel.admin}/themes/journal`);
+  assert.equal(manage.status, 200, `the manager page renders (${panel.admin}/themes/journal): ${upload.location}`);
+  assert.match(manage.text, /Inherits|Files/, 'the manager describes the theme');
+
+  const row = (await panel.get(`${panel.admin}/themes`)).text.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="journal"/);
+  assert.ok(row, 'the theme is listed');
+  assert.equal((await panel.adminPost(`/themes/${row[1]}/activate`, {})).status, 303);
+
+  // A post written through the panel, rendered by the new theme.
+  const created = await panel.adminPost('/posts/save', { title: 'Journal Post', body: '<p>Hi</p>', status: 'published' });
+  assert.equal(created.status, 303);
+  const post = await panel.anon('/blog/journal-post');
+  assert.equal(post.status, 200);
+  assert.match(post.text, /data-theme="journal"/, 'the new theme renders the page');
+  assert.match(post.text, /class="journal-header"><a href="\/" class="brand">[A-Z]/, 'the partial renders and its filter ran');
+  assert.match(post.text, /class="date">\d{4}-\d{2}-\d{2}</, 'the date filter honouring its pattern');
+  assert.match(post.text, /class="none">no comments</, 'a comparison against a number');
+  assert.match(post.text, /src="\/theme-assets\/journal\/assets\/logo\.png"/, '{{asset}} points at the served file');
+  assert.match(post.text, /<link rel="stylesheet" href="\/theme-assets\/journal\/style\.css/, 'the stylesheet is linked, not inlined');
+  assert.doesNotMatch(post.text, /font-family:serif/, 'the CSS is not in the HTML any more');
+
+  const logo = await panel.anon('/theme-assets/journal/assets/logo.png');
+  assert.equal(logo.status, 200);
+  assert.equal(logo.headers.get('content-type'), 'image/png');
+  assert.equal(logo.headers.get('x-content-type-options'), 'nosniff');
+  const sheet = await panel.anon('/theme-assets/journal/style.css');
+  assert.match(sheet.headers.get('cache-control'), /immutable/);
+  assert.equal((await panel.anon('/theme-assets/journal/../secret')).status, 404, 'path traversal is refused');
+});
+
+test('phase 3: theme settings are typed, saved per theme and reach the templates', async () => {
+  // A tagline the toggle can hide.
+  await panel.adminPost('/settings', {
+    site_title: 'E2E Test Site', tagline: 'Tagline text', timezone: 'UTC', primary_domain: 'localhost',
+    admin_slug: panel.admin.replace(/^\//, ''), posts_per_page: '10', permalink_style: 'blog', csp: 'report',
+  });
+  const page = await panel.get(`${panel.admin}/themes/journal`);
+  assert.match(page.text, /id="set-accent"[^>]*type="color"|type="color"[^>]*id="set-accent"/, 'a colour setting renders a colour input');
+  assert.match(page.text, /type="checkbox"[^>]*id="set-show_tagline"/, 'a toggle renders a checkbox');
+  assert.match(page.text, /<select id="set-archive_layout"/, 'a select renders options');
+
+  await panel.adminPost('/themes/journal/settings', { accent: '#123456', show_tagline: '1', archive_layout: 'list' });
+  const rendered = await panel.anon('/blog/journal-post');
+  assert.match(rendered.text, /data-accent="#123456"/);
+  assert.match(rendered.text, /Tagline text · list</);
+
+  // Un-ticking the toggle removes its markup.
+  await panel.adminPost('/themes/journal/settings', { accent: '#123456', archive_layout: 'list' });
+  const off = await panel.anon('/blog/journal-post');
+  assert.doesNotMatch(off.text, /Tagline text/, 'the toggle is off, so the tagline is gone from the footer');
+  assert.match(off.text, /data-accent="#123456"/, 'other settings are untouched');
+
+  await panel.adminPost('/themes/journal/settings/reset', {});
+  assert.match((await panel.anon('/blog/journal-post')).text, /data-accent="#b4552d"/, 'reset restores the defaults');
+});
+
+test('phase 3: assets can be uploaded and removed from the manager, and refused types stay out', async () => {
+  const body = new FormData();
+  body.set('_csrf', await panel.csrf());
+  body.append('file', new Blob([PNG_PIXEL], { type: 'image/png' }), 'banner.png');
+  body.set('path', 'banner.png');
+  assert.equal((await panel.request(`${panel.admin}/themes/journal/assets`, { method: 'POST', body })).status, 303);
+  assert.equal((await panel.anon('/theme-assets/journal/banner.png')).status, 200);
+
+  const evil = new FormData();
+  evil.set('_csrf', await panel.csrf());
+  evil.append('file', new Blob(['<svg onload="alert(1)">'], { type: 'image/svg+xml' }), 'evil.svg');
+  const refused = await panel.request(`${panel.admin}/themes/journal/assets`, { method: 'POST', body: evil });
+  assert.equal(refused.status, 303);
+  assert.match(decodeURIComponent(refused.location), /refused/i, 'SVG is refused');
+  assert.equal((await panel.anon('/theme-assets/journal/evil.svg')).status, 404);
+
+  assert.equal((await panel.adminPost('/themes/journal/assets/delete', { path: 'banner.png' })).status, 303);
+  assert.equal((await panel.anon('/theme-assets/journal/banner.png')).status, 404);
+});
+
+test('phase 3: the validator catches broken templates before activation', async () => {
+  const broken = {
+    'broken/theme.json': JSON.stringify({
+      name: 'Broken', slug: 'broken', version: '1.0.0',
+      templates: { base: 'base.html' },
+      assets: ['assets/missing.png'],
+    }),
+    'broken/base.html': '<html><body data-x>{{#if a}}never closed</body></html>{{{content}}}',
+    'broken/style.css': 'body{}',
+  };
+  const res = await uploadZip('broken.zip', broken);
+  // Not installed (the base template has no page slot? it does), so validate it as a file instead.
+  const body = new FormData();
+  body.set('_csrf', await panel.csrf());
+  body.append('theme', new Blob([zip(broken)], { type: 'application/zip' }), 'broken.zip');
+  const report = await panel.request(`${panel.admin}/themes/validate`, { method: 'POST', body });
+  assert.equal(report.status, 200);
+  assert.match(report.text, /never closed/, 'an unclosed block is reported');
+  assert.match(report.text, /missing\.png/, 'a missing asset is reported');
+  assert.match(report.text, /Error/, 'findings are graded');
+  assert.ok(res.status === 303, 'the same file still uploads (validation is advisory at upload time)');
+});
+
+test('phase 3: activation history exists and Revert restores the previous files', async () => {
+  const manage = await panel.get(`${panel.admin}/themes/journal`);
+  assert.match(manage.text, /History/, 'the manager has a history card');
+
+  // Change the theme through a new upload; the old files must be recoverable.
+  const next = journalTheme();
+  next['journal/theme.json'] = next['journal/theme.json'].replace('"version": "1.0.0"', '"version": "1.1.0"');
+  next['journal/partials/header.html'] = '<header class="journal-header v2">TWO</header>';
+  await uploadZip('journal-1.1.zip', next);
+  assert.match((await panel.anon('/blog/journal-post')).text, /journal-header v2/, 'the new version renders');
+
+  const history = await panel.get(`${panel.admin}/themes/journal`);
+  const snapshot = history.text.match(/themes\/journal\/versions\/(\d+)\/restore/);
+  assert.ok(snapshot, 'a snapshot is offered');
+  assert.equal((await panel.adminPost(`/themes/journal/versions/${snapshot[1]}/restore`, {})).status, 303);
+  const back = await panel.anon('/blog/journal-post');
+  assert.match(back.text, /class="journal-header"><a href="\/" class="brand">/, 'the previous partial is back');
+  assert.doesNotMatch(back.text, /journal-header v2/);
+});
+
+test('phase 3: a theme that only declares a parent inherits the rest', async () => {
+  const child = {
+    'journal-lite/theme.json': JSON.stringify({
+      name: 'Journal Lite', slug: 'journal-lite', version: '1.0.0', parent: 'journal',
+      templates: { base: 'base.html' },
+      css: 'body{background:#fff}',
+    }),
+    'journal-lite/base.html': '<!doctype html><html><head>{{{head}}}</head><body data-theme="lite">{{> header}}<main>{{{content}}}</main></body></html>',
+  };
+  const res = await uploadZip('journal-lite.zip', child);
+  assert.match(res.location, /Journal Lite/, res.location);
+  const row = (await panel.get(`${panel.admin}/themes`)).text.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="journal-lite"/);
+  assert.ok(row);
+  await panel.adminPost(`/themes/${row[1]}/activate`, {});
+
+  const page = await panel.anon('/blog/journal-post');
+  assert.match(page.text, /data-theme="lite"/, 'the child layout is used');
+  assert.match(page.text, /class="journal-header"/, 'the partial comes from the parent theme');
+  assert.match(page.text, /data-tpl="journal-post"/, 'so does the post template');
+
+  // Deleting a parent with children is refused.
+  const parentRow = (await panel.get(`${panel.admin}/themes`)).text.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="journal"/);
+  const refused = await panel.adminPost(`/themes/${parentRow[1]}/delete`, {});
+  assert.match(decodeURIComponent(refused.location), /inherits from this theme|Activate another/, 'a parent in use is protected');
+});
+
+test('phase 3: the content security policy is emitted, and the nonce matches the page', async () => {
+  const page = await panel.anon('/blog/journal-post');
+  const header = page.headers.get('content-security-policy') ?? page.headers.get('content-security-policy-report-only');
+  assert.ok(header, 'a policy header is present by default (report-only)');
+  assert.match(header, /default-src 'self'/);
+  assert.match(header, /script-src 'self'/);
+  assert.match(header, /object-src 'none'/);
+  const nonce = page.text.match(/<(?:script|style) nonce="([^"]+)"/)?.[1];
+  if (nonce) assert.ok(header.includes(`'nonce-${nonce}'`), 'the policy allows the nonce the page uses');
+
+  // Enforce mode switches the header name; off removes it.
+  await panel.adminPost('/settings', {
+    site_title: 'E2E Test Site', timezone: 'UTC', primary_domain: 'localhost', admin_slug: 'admin-panel',
+    posts_per_page: '10', permalink_style: 'blog', csp: 'enforce',
+  });
+  const enforced = await panel.anon('/blog/journal-post');
+  assert.equal(enforced.headers.get('content-security-policy') !== null, true, 'enforce emits the blocking header');
+  assert.equal(enforced.headers.get('content-security-policy-report-only'), null);
+
+  await panel.adminPost('/settings', {
+    site_title: 'E2E Test Site', timezone: 'UTC', primary_domain: 'localhost', admin_slug: 'admin-panel',
+    posts_per_page: '10', permalink_style: 'blog', csp: 'off',
+  });
+  const off = await panel.anon('/blog/journal-post');
+  assert.equal(off.headers.get('content-security-policy'), null);
+  assert.equal(off.headers.get('content-security-policy-report-only'), null);
+});

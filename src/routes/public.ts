@@ -1,15 +1,18 @@
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
-import type { AppEnv, Ctx } from '../types';
+import type { AppEnv, Ctx, Env } from '../types';
 import { SESSION_COOKIE, sessionUser } from '../lib/auth';
 import { bumpCache, cfgFor, getConfig, getSettings, type Settings } from '../lib/config';
 import { findContent, listPosts, permalinkStyle, postUrl, toViews, type ContentView } from '../lib/content';
 import { commentsEnabled, commentsModerated, validCommentToken } from '../lib/comments';
 import { getFile } from '../lib/files';
 import { pluginOn } from '../lib/plugins';
-import { PAGE_CACHE_TTL, cacheKey, renderTheme, themeBySlug, type PageMeta } from '../lib/render';
-import type { ThemeBundle } from '../themes/default';
-import { clientIp, rateCount, rateHit, sameOrigin, stripTags } from '../lib/security';
+import { PAGE_CACHE_TTL, activeTheme, cacheKey, renderTheme, themeBySlug, type PageMeta } from '../lib/render';
+import { resolveSettings } from '../lib/theme-manifest';
+import type { ThemeBundle } from '../lib/theme-manifest';
+import { clientIp, cspFor, rateCount, rateHit, sameOrigin, stripTags, type CspMode } from '../lib/security';
+import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
+import { assetMime, cleanAssetPath, isRefusedAsset } from '../lib/theme-manifest';
 
 const site = new Hono<AppEnv>();
 
@@ -35,6 +38,32 @@ site.get('/media/*', async (c) => {
     'Cache-Control': 'public, max-age=31536000, immutable',
     'X-Content-Type-Options': 'nosniff',
     // Uploaded files may never run script in the site's origin (matters for SVG/HTML-ish files).
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; media-src 'self'; sandbox",
+    ETag: etag,
+  });
+  if (c.req.header('if-none-match') === etag) return new Response(null, { status: 304, headers });
+  return new Response(file.body, { headers });
+});
+
+/* ----------------------------------------------------------- theme assets */
+/**
+ * Theme packages ship images, fonts and an optional `theme.js`. They are served
+ * from this origin, so the response is locked down the same way media is:
+ * `nosniff`, an immutable cache, and a sandbox CSP (a JS asset cannot touch the
+ * page; a page that loads it does so with `defer`, as a plain script).
+ */
+site.get('/theme-assets/:slug/:path{.+}', async (c) => {
+  const slug = c.req.param('slug');
+  const raw = c.req.param('path');
+  const path = cleanAssetPath(raw);
+  if (!path || isRefusedAsset(path)) return c.notFound();
+  const file = await getThemeAsset(c.env, slug, path);
+  if (!file) return c.notFound();
+  const etag = `"${file.etag}"`;
+  const headers = new Headers({
+    'Content-Type': file.contentType,
+    'Cache-Control': 'public, max-age=31536000, immutable',
+    'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; media-src 'self'; sandbox",
     ETag: etag,
   });
@@ -296,12 +325,21 @@ site.get('*', async (c) => {
   const key = cacheKey(c.var.cfg, url);
   const headers = { 'Cache-Control': hasSession ? 'private, no-store' : 'public, max-age=0, must-revalidate' };
 
+  const settings = await getSettings(c.env);
   if (cacheable) {
     const hit = await c.env.KV.get(key);
-    if (hit !== null) return c.html(hit, 200, { ...headers, 'X-Cache': 'HIT' });
+    if (hit !== null) {
+      // A cached page still needs its policy. The nonce is the one baked into the
+      // cached HTML, so it rotates with the page (an hour at most) rather than
+      // per request — long enough to matter only if someone can read the cache.
+      return c.html(hit, 200, { ...headers, 'X-Cache': 'HIT', ...cspHeaders(settings, hit) });
+    }
   }
 
-  const settings = await getSettings(c.env);
+  // Theme settings are read per request (they are one small table) so a change in
+  // the panel is visible on the next page load, not the next cache generation.
+  const activeSlug = preview ? undefined : await activeThemeSlug(c.env);
+  const themeSettings = activeSlug ? await themeValues(c.env, activeSlug) : null;
   const result = await resolve(c, settings, path, preview);
   if ('redirect' in result) return preview ? c.redirect(result.redirect + '?preview=1', 302) : c.redirect(result.redirect, 301);
   if (preview) result.meta.noindex = true;
@@ -313,6 +351,7 @@ site.get('*', async (c) => {
     template: result.template,
     meta: result.meta,
     theme: previewTheme,
+    themeSettings: previewTheme ? await themeValues(c.env, previewTheme.slug) : themeSettings,
     data: {
       ...result.data,
       comment_notice: url.searchParams.get('comment') || undefined,
@@ -322,9 +361,83 @@ site.get('*', async (c) => {
   if (cacheable && result.status === 200) {
     c.executionCtx.waitUntil(c.env.KV.put(key, body, { expirationTtl: PAGE_CACHE_TTL }));
   }
-  return c.html(body, result.status, { ...headers, 'X-Cache': 'MISS' });
+  // Content-Security-Policy: a per-response nonce, so the site's own custom
+  // JS/CSS (which the renderer stamps with it) keeps working while nothing else
+  // inline can run. `report` is the safe first step after upgrading.
+  return c.html(body, result.status, { ...headers, 'X-Cache': 'MISS', ...cspHeaders(settings, body) });
 });
 
 site.all('*', (c) => c.text('Method not allowed', 405));
+
+/* --------------------------------------------------------------- helpers */
+
+/**
+ * The Content-Security-Policy for one response. The nonce is read out of the
+ * rendered HTML (the renderer stamped it on the site's own inline code), so the
+ * policy and the page always agree — including when the page came from cache.
+ */
+function cspHeaders(settings: Settings, html: string): Record<string, string> {
+  const nonce = html.match(/<(?:script|style) nonce="([^"]+)"/)?.[1] ?? '';
+  const csp = cspFor({ mode: cspMode(settings), nonce });
+  return csp ? { [csp.header]: csp.value } : {};
+}
+
+/** `csp` setting: off | report | enforce (default report, so nothing breaks silently). */
+function cspMode(settings: Settings): CspMode {
+  const value = (settings.csp || '').toLowerCase();
+  return value === 'off' || value === 'enforce' ? (value as CspMode) : 'report';
+}
+
+async function activeThemeSlug(env: Env): Promise<string | null> {
+  try {
+    const row = await env.DB.prepare('SELECT slug FROM themes WHERE active=1 LIMIT 1').first<{ slug: string }>();
+    return row?.slug ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Saved theme settings merged over the theme's declared defaults. Cached for a
+ * few seconds per isolate: it is read on every page render, and a stale default
+ * for 5 s cannot hurt.
+ */
+export const themeValueCache = new WeakMap<object, { at: number; bySlug: Map<string, Record<string, string>> }>();
+
+/** Called when theme settings change, so the next page render sees the new values. */
+export function clearThemeValueCache(env: Env): void {
+  themeValueCache.delete(env);
+}
+async function themeValues(env: Env, slug: string): Promise<Record<string, string>> {
+  const now = Date.now();
+  let entry = themeValueCache.get(env);
+  if (!entry || now - entry.at > 5_000) {
+    entry = { at: now, bySlug: new Map() };
+    themeValueCache.set(env, entry);
+  }
+  const hit = entry.bySlug.get(slug);
+  if (hit) return hit;
+  let out: Record<string, string> = {};
+  try {
+    const theme = await loadTheme(env, { slug });
+    const { results } = await env.DB.prepare('SELECT key, value FROM theme_settings WHERE theme_slug=?')
+      .bind(slug).all<{ key: string; value: string }>();
+    const saved: Record<string, string> = {};
+    for (const r of results) saved[r.key] = r.value;
+    out = theme ? resolveSettings(theme.manifest, saved) : saved;
+  } catch {
+    /* no theme settings table yet */
+  }
+  entry.bySlug.set(slug, out);
+  return out;
+}
+
+/** Uploads a theme asset from the panel (theme manager). Exported for tests. */
+export async function storeThemeAsset(env: Env, slug: string, path: string, data: ArrayBuffer): Promise<boolean> {
+  const mime = assetMime(path);
+  if (!mime || isRefusedAsset(path)) return false;
+  await putThemeAsset(env, slug, path, data, mime);
+  return true;
+}
 
 export default site;

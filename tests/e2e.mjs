@@ -76,9 +76,22 @@ async function uploadTheme(name, bytes) {
   const body = new FormData();
   body.set('_csrf', await csrf());
   body.append('theme', new File([bytes], name));
-  return request(`${admin}/themes/upload`, { method: 'POST', body });
+  const res = await request(`${admin}/themes/upload`, { method: 'POST', body });
+  // A theme is named by a person, and the confirmation quotes that name, so the
+  // Location: is a UTF-8 byte string. Decode it to what the browser would show.
+  let readable = res.location || '';
+  try {
+    readable = decodeURIComponent(escape(readable));
+  } catch {
+    /* leave it as it came */
+  }
+  return { ...res, location: readable };
 }
-const themeId = async (name) => Number((await get(`${admin}/themes`)).text.match(new RegExp(`themes/(\\d+)/download">${name}<`))[1]);
+const themeId = async (name) => {
+  const row = (await get(`${admin}/themes`)).text.match(new RegExp(`data-theme-id="(\\d+)"[\\s\\S]{0,400}?<a href="[^"]*/themes/[^"]*">${name}</a>`));
+  assert.ok(row, `theme "${name}" is listed`);
+  return Number(row[1]);
+};
 
 const nav = (htmlText) => [...htmlText.match(/<nav class="site-nav"[^]*?<\/nav>/)[0].matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
 
@@ -486,7 +499,10 @@ test('12b. themes: upload JSON and zip, activate, replace, download, delete', as
   for (const [bytes, name, message] of bad) assert.ok((await uploadTheme(name, bytes)).location.includes(message), message);
 
   const json = { name: 'Json Theme', version: '2.1.0', templates: { base: '<!doctype html><html><head>{{{head}}}<style>{{{theme_css}}}</style></head><body data-theme="json">{{#each menu.primary}}<a class="jn" href="{{url}}">{{label}}</a>{{/each}}<main>{{{content}}}</main></body></html>', page: '<h1 class="json-page">{{page.title}}</h1>{{{page.content}}}' }, css: 'body{color:#123456}' };
-  assert.match((await uploadTheme('json-theme.json', JSON.stringify(json))).location, /Json Theme" v2\.1\.0 saved/);
+  // The flash quotes the theme name, so the message itself is what we read
+  // (a Location header carries it percent-encoded, and the name has a space).
+  const uploaded = await uploadTheme('json-theme.json', JSON.stringify(json));
+  assert.match(uploaded.location, /v2\.1\.0 installed/, uploaded.location);
   assert.doesNotMatch((await anon('/')).text, /data-theme="json"/, 'uploading does not activate');
   const jsonId = await themeId('Json Theme');
   await adminPost(`/themes/${jsonId}/activate`, {});
@@ -503,7 +519,7 @@ test('12b. themes: upload JSON and zip, activate, replace, download, delete', as
     'zip-theme/404.html': '<p class="zip-404">Lost</p>',
     'zip-theme/main.css': 'body{background:#abcdef}',
   });
-  assert.match((await uploadTheme('zip-theme.zip', zip)).location, /Zip Theme" v0\.9 saved/);
+  assert.match((await uploadTheme('zip-theme.zip', zip)).location, /v0\.9 installed/);
   const missing = makeZip({ 'theme.json': JSON.stringify({ name: 'Broken', templates: { base: 'gone.html' } }) });
   assert.ok((await uploadTheme('broken.zip', missing)).location.includes('"gone.html" but that file is not in the zip'));
   const zipId = await themeId('Zip Theme');
@@ -520,16 +536,28 @@ test('12b. themes: upload JSON and zip, activate, replace, download, delete', as
   await uploadTheme('again.json', JSON.stringify(json));
   assert.match((await anon('/')).text, /data-theme="zip-v1"/);
 
+  // Phase 3: the stylesheet is served as a cacheable asset, not inlined.
+  const sheet = await anon('/theme-assets/zip-theme/style.css');
+  assert.equal(sheet.status, 200, 'the theme stylesheet is a served asset');
+  assert.match(sheet.headers.get('cache-control'), /immutable/);
+  assert.equal(sheet.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(sheet.headers.get('content-security-policy'), /default-src 'none'/);
+
   const dl = await get(`${admin}/themes/${zipId}/download`);
   assert.match(dl.headers.get('content-disposition'), /zip-theme-theme\.json/);
   assert.equal(JSON.parse(dl.text).version, '1.0');
 
   assert.match((await adminPost(`/themes/${zipId}/delete`, {})).location, /Activate another theme/);
+  // Phase 3: an asset-backed theme can still be inspected before it goes.
+  const manage = await get(`${admin}/themes/zip-theme`);
+  assert.equal(manage.status, 200);
+  assert.match(manage.text, /data-asset|\/theme-assets\/zip-theme\/style\.css/, 'the manager lists the stylesheet asset');
+  assert.match((await get(`${admin}/themes/zip-theme/validate`)).text, /No problems found|Warning/, 'the validator reports on an installed theme');
   const baseId = await themeId('AMS Base');
   await adminPost(`/themes/${baseId}/activate`, {});
   assert.match((await anon('/')).text, /class="site-header"/);
-  assert.match((await adminPost(`/themes/${zipId}/delete`, {})).location, /Theme deleted/);
-  assert.match((await adminPost(`/themes/${jsonId}/delete`, {})).location, /Theme deleted/);
+  assert.match(decodeURIComponent((await adminPost(`/themes/${zipId}/delete`, {})).location), /deleted/);
+  assert.match(decodeURIComponent((await adminPost(`/themes/${jsonId}/delete`, {})).location), /deleted/);
   assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only AMS Base is left');
   log('5 bad uploads rejected with reasons; JSON + zip themes installed, activated, replaced live, downloaded, deleted');
 });
@@ -742,7 +770,7 @@ test('12g. tools: redirects, export/import, backups, health and cache', async ()
 test('12h. updates and taxonomy management: version page, run updates, categories and tags', async () => {
   const page = await get(`${admin}/updates`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /5\.0\.0|0\.5\.0/, 'the updates page states the running version');
+  assert.match(page.text, /6\.0\.0|0\.6\.0/, 'the updates page states the running version');
   assert.match(page.text, /Database schema/);
   assert.match((await adminPost('/updates/run', {})).location, /\/updates\?ok=/);
 

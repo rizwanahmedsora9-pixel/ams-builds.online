@@ -2,8 +2,11 @@
  * The built-in theme store: themes shipped inside the app, installable from
  * Admin -> Themes with one click. To add one, create a folder like ./pro/ and
  * list it here.
+ *
+ * Each bundled theme is parsed by the same manifest validator an upload goes
+ * through, so a store theme can never be shaped differently from a real one.
  */
-import { defaultTheme, type ThemeBundle } from './default';
+import { defaultTheme } from './default';
 import baseManifest from './default/theme.json';
 import proManifest from './pro/theme.json';
 import proBase from './pro/base.html';
@@ -17,27 +20,42 @@ import premiumManifest from './premium/theme.json';
 import premiumBase from './premium/base.html';
 import premiumHome from './premium/home.html';
 import premiumCss from './premium/style.css';
+import { parseManifest, type ThemeBundle, type ThemeManifest } from '../lib/theme-manifest';
 
 export type StoreTheme = ThemeBundle & { description: string; preview: string[] };
 
-const pro: StoreTheme = {
-  name: proManifest.name, slug: proManifest.slug, version: proManifest.version,
-  description: proManifest.description, preview: proManifest.preview,
-  templates: { base: proBase, home: proHome, page: proPage, post: proPost, archive: proArchive, '404': proNotFound },
-  css: proCss,
-};
+/** Builds a store theme bundle from a manifest plus its files. */
+function bundle(manifest: Record<string, unknown>, templates: Record<string, string>, css: string, partials: Record<string, string> = {}): StoreTheme {
+  const parsed = parseManifest({ ...manifest, templates, partials, css });
+  const m: ThemeManifest = parsed.manifest;
+  return {
+    name: m.name, slug: m.slug, version: m.version,
+    templates: parsed.templates, partials: parsed.partials, css: parsed.css,
+    manifest: m,
+    description: m.description, preview: m.preview,
+  };
+}
 
-// Premium has its own layout, home page and stylesheet; its inner page, post,
-// archive and 404 templates use the same markup as Pro.
-const premium: StoreTheme = {
-  name: premiumManifest.name, slug: premiumManifest.slug, version: premiumManifest.version,
-  description: premiumManifest.description, preview: premiumManifest.preview,
-  templates: { base: premiumBase, home: premiumHome, page: proPage, post: proPost, archive: proArchive, '404': proNotFound },
-  css: premiumCss,
-};
+const pro = bundle(
+  proManifest as unknown as Record<string, unknown>,
+  { base: proBase, home: proHome, page: proPage, post: proPost, archive: proArchive, '404': proNotFound },
+  proCss,
+);
+
+/**
+ * Premium inherits Pro's inner templates explicitly (`"parent": "ams-pro"`)
+ * instead of copying them: the store now demonstrates layout inheritance, and
+ * a fix to Pro's post markup reaches Premium too. Premium ships its own layout,
+ * home page, stylesheet and partials.
+ */
+const premium = bundle(
+  { ...(premiumManifest as unknown as Record<string, unknown>), parent: 'ams-pro' },
+  { base: premiumBase, home: premiumHome },
+  premiumCss,
+);
 
 export const storeThemes: StoreTheme[] = [
-  { ...defaultTheme, description: baseManifest.description, preview: baseManifest.preview },
+  { ...defaultTheme, description: defaultTheme.manifest.description, preview: defaultTheme.manifest.preview },
   pro,
   premium,
 ];

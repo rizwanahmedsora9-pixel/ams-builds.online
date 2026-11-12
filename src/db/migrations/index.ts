@@ -6,7 +6,7 @@ import { resetSchemaCache } from '../../lib/schema';
  * by the installer; each entry here upgrades an already-installed database.
  * Append new entries with the next version number - never edit old ones.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * A migration statement that must not take the whole batch down.
@@ -79,6 +79,52 @@ const EDITOR_WORKFLOW = [
  * the migration exists so a database that ran an early build of version 3 gets
  * a consistent version number.
  */
+/**
+ * Phase 3: theme packages. The asset bytes live in the file store; these tables
+ * are the index, the version snapshots and the per-theme settings.
+ * `themes` gains the columns a v2 manifest fills in.
+ */
+const THEME_PLATFORM = [
+  `CREATE TABLE IF NOT EXISTS theme_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    theme_slug TEXT NOT NULL,
+    path TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    UNIQUE (theme_slug, path)
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_theme_assets_slug ON theme_assets (theme_slug)',
+  `CREATE TABLE IF NOT EXISTS theme_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    theme_slug TEXT NOT NULL,
+    version TEXT NOT NULL,
+    name TEXT NOT NULL,
+    templates TEXT NOT NULL,
+    partials TEXT NOT NULL DEFAULT '{}',
+    css TEXT NOT NULL DEFAULT '',
+    manifest TEXT NOT NULL DEFAULT '{}',
+    assets TEXT NOT NULL DEFAULT '[]',
+    note TEXT NOT NULL DEFAULT '',
+    author_id INTEGER,
+    created_at TEXT NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_theme_versions_slug ON theme_versions (theme_slug, id DESC)',
+  `CREATE TABLE IF NOT EXISTS theme_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    theme_slug TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL DEFAULT '',
+    UNIQUE (theme_slug, key)
+  )`,
+  tolerant("ALTER TABLE themes ADD COLUMN partials TEXT NOT NULL DEFAULT '{}'"),
+  tolerant("ALTER TABLE themes ADD COLUMN manifest TEXT NOT NULL DEFAULT '{}'"),
+  tolerant("ALTER TABLE themes ADD COLUMN parent TEXT"),
+  tolerant("ALTER TABLE themes ADD COLUMN author TEXT NOT NULL DEFAULT ''"),
+  tolerant("ALTER TABLE themes ADD COLUMN description TEXT NOT NULL DEFAULT ''"),
+  tolerant("ALTER TABLE themes ADD COLUMN screenshot TEXT NOT NULL DEFAULT ''"),
+];
+
 const WORKFLOW_FIXES = [
   "INSERT INTO settings (site_id, key, value) VALUES (1, 'pages_order', 'menu_order') ON CONFLICT(site_id, key) DO NOTHING",
 ];
@@ -87,6 +133,7 @@ export const migrations: { version: number; name: string; statements: string[] }
   { version: 2, name: 'Comments', statements: COMMENTS },
   { version: 3, name: 'Revisions, edit locks and page ordering', statements: EDITOR_WORKFLOW },
   { version: 4, name: 'Page ordering default', statements: WORKFLOW_FIXES },
+  { version: 5, name: 'Theme platform: assets, partials, versions', statements: THEME_PLATFORM },
 ];
 
 /** Runs one migration statement, tolerating the errors marked in its comment. */

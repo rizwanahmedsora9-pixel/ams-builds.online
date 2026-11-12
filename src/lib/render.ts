@@ -3,118 +3,29 @@ import type { Settings } from './config';
 import { commentToken, commentsEnabled, approvedComments, renderCommentsHtml, type CommentRow } from './comments';
 import { esc } from './security';
 import { listPages } from './content';
-import { defaultTheme, type ThemeBundle } from '../themes/default';
+import { defaultTheme } from '../themes/default';
+import type { ThemeBundle } from './theme-manifest';
+import { applyLayout, loadTheme, renderWithTheme, themeAssetUrl } from './theme-store';
+import { cspFor, nonceFor } from './security';
 
-/* ---------------------------------------------------------- template engine
- * {{path}}            HTML-escaped value        {{{path}}}   raw value
- * {{#if path}} ... {{else}} ... {{/if}}         {{#unless path}} ... {{/unless}}
- * {{#each path}} ... {{else}} ... {{/each}}     (item fields, {{this}}, outer scope all resolve)
- * Templates are data, never code: nothing in a template can execute.
- */
-type Block = { t: 'block'; k: 'if' | 'unless' | 'each'; p: string; body: Node[]; alt: Node[] };
-type Node = string | { t: 'var'; p: string; raw: boolean } | Block;
+export type { ThemeBundle } from './theme-manifest';
 
-const TOKEN = /\{\{\{\s*([\w.]+)\s*\}\}\}|\{\{\s*([#/]?[\w.]+)(?:\s+([\w.]+))?\s*\}\}/g;
-const compiled = new Map<string, Node[]>();
-
-function parse(src: string): Node[] {
-  const root: Node[] = [];
-  const stack: { node: Block; alt: boolean }[] = [];
-  const cur = (): Node[] => {
-    const top = stack[stack.length - 1];
-    return top ? (top.alt ? top.node.alt : top.node.body) : root;
-  };
-  let last = 0;
-  for (const m of src.matchAll(TOKEN)) {
-    if (m.index > last) cur().push(src.slice(last, m.index));
-    last = m.index + m[0].length;
-    if (m[1]) {
-      cur().push({ t: 'var', p: m[1], raw: true });
-      continue;
-    }
-    const head = m[2];
-    const top = stack[stack.length - 1];
-    if (head[0] === '#') {
-      const k = head.slice(1);
-      if ((k === 'if' || k === 'unless' || k === 'each') && m[3]) {
-        const node: Block = { t: 'block', k, p: m[3], body: [], alt: [] };
-        cur().push(node);
-        stack.push({ node, alt: false });
-      }
-    } else if (head[0] === '/') {
-      if (top && top.node.k === head.slice(1)) stack.pop();
-    } else if (head === 'else' && !m[3] && top) {
-      top.alt = true;
-    } else if (!m[3]) {
-      cur().push({ t: 'var', p: head, raw: false });
-    }
-  }
-  if (last < src.length) cur().push(src.slice(last));
-  return root;
-}
-
-function lookup(scopes: unknown[], path: string): unknown {
-  if (path === 'this') return scopes[scopes.length - 1];
-  const [first, ...rest] = path.split('.');
-  let value: unknown;
-  for (let i = scopes.length - 1; i >= 0; i--) {
-    const s = scopes[i];
-    if (s && typeof s === 'object' && Object.prototype.hasOwnProperty.call(s, first)) {
-      value = (s as Record<string, unknown>)[first];
-      break;
-    }
-  }
-  for (const key of rest) {
-    if (value == null || typeof value !== 'object' || !Object.prototype.hasOwnProperty.call(value, key)) return undefined;
-    value = (value as Record<string, unknown>)[key];
-  }
-  return value;
-}
-
-const truthy = (v: unknown): boolean => (Array.isArray(v) ? v.length > 0 : !!v);
-
-function run(nodes: Node[], scopes: unknown[]): string {
-  let out = '';
-  for (const n of nodes) {
-    if (typeof n === 'string') out += n;
-    else if (n.t === 'var') {
-      const v = lookup(scopes, n.p);
-      if (v != null && typeof v !== 'object') out += n.raw ? String(v) : esc(v);
-    } else {
-      const v = lookup(scopes, n.p);
-      if (n.k === 'each') {
-        if (Array.isArray(v) && v.length) for (const item of v) out += run(n.body, [...scopes, item]);
-        else out += run(n.alt, scopes);
-      } else {
-        out += run(truthy(v) === (n.k === 'if') ? n.body : n.alt, scopes);
-      }
-    }
-  }
-  return out;
-}
-
-export function renderTemplate(src: string, data: Record<string, unknown>): string {
-  let nodes = compiled.get(src);
-  if (!nodes) {
-    nodes = parse(src);
-    if (compiled.size > 64) compiled.clear();
-    compiled.set(src, nodes);
-  }
-  return run(nodes, [data]);
-}
+/** Kept for callers that only need the engine: the v2 implementation. */
+export { render as renderTemplate } from './template';
+export { render as renderTemplateHooks } from './template';
 
 /* -------------------------------------------------------------------- theme */
 
+/** The active theme, merged with its parent; the bundled theme when there is none. */
 export async function activeTheme(env: Env): Promise<ThemeBundle> {
   try {
-    const row = await env.DB.prepare('SELECT slug, name, version, templates, css FROM themes WHERE active=1 LIMIT 1')
-      .first<{ slug: string; name: string; version: string; templates: string; css: string }>();
-    if (row) {
-      const templates = JSON.parse(row.templates) as Record<string, string>;
-      if (typeof templates.base === 'string') return { ...row, templates: { ...defaultTheme.templates, ...templates } };
+    const hit = await env.DB.prepare('SELECT slug FROM themes WHERE active=1 LIMIT 1').first<{ slug: string }>();
+    if (hit) {
+      const theme = await loadTheme(env, { slug: hit.slug });
+      if (theme && (theme.templates.base || theme.manifest.parent)) return theme;
     }
   } catch {
-    /* fall through to the bundled theme */
+    /* no themes table yet: use the bundled theme */
   }
   return defaultTheme;
 }
@@ -139,7 +50,7 @@ export type PageMeta = {
   noindex?: boolean;
 };
 
-function buildHead(meta: PageMeta, settings: Settings, origin: string, extra = ''): string {
+function buildHead(meta: PageMeta, settings: Settings, origin: string, extra = '', nonce = ''): string {
   const tags = [`<title>${esc(meta.title)}</title>`];
   if (meta.description) tags.push(`<meta name="description" content="${esc(meta.description)}">`);
   if (meta.noindex) tags.push('<meta name="robots" content="noindex">');
@@ -151,20 +62,30 @@ function buildHead(meta: PageMeta, settings: Settings, origin: string, extra = '
   // Admin-only custom code (Settings are writable by admins only), injected raw by design.
   // Feed autodiscovery (the RSS plugin can be switched off under Plugins).
   if (settings.plugin_rss !== '0') tags.push(`<link rel="alternate" type="application/rss+xml" title="${esc(settings.site_title || 'RSS')}" href="${esc(origin)}/feed.xml">`);
-  if (settings.custom_css) tags.push(`<style>${settings.custom_css.replace(/<\/style/gi, '<\\/style')}</style>`);
-  if (settings.custom_head) tags.push(settings.custom_head);
+  // Admin-authored CSS/JS carry the per-response CSP nonce, so the Content-Security-Policy
+  // can be strict without breaking the site's own customisations.
+  if (settings.custom_css) tags.push(`<style${nonce ? ` nonce="${nonce}"` : ''}>${settings.custom_css.replace(/<\/style/gi, '<\\/style')}</style>`);
+  if (settings.custom_head) tags.push(withNonce(settings.custom_head, nonce));
   if (extra) tags.push(extra);
   return tags.join('\n');
 }
 
-function buildFooter(settings: Settings, extra = ''): string {
+function buildFooter(settings: Settings, extra = '', nonce = ''): string {
   const parts: string[] = [];
-  if (settings.custom_footer) parts.push(settings.custom_footer);
-  if (extra) parts.push(extra);
+  if (settings.custom_footer) parts.push(withNonce(settings.custom_footer, nonce));
+  if (extra) parts.push(withNonce(extra, nonce));
   const widgets = widgetAreas(settings);
   if (widgets) parts.push(widgets);
-  if (settings.custom_js) parts.push(`<script>${settings.custom_js.replace(/<\/script/gi, '<\\/script')}</script>`);
+  if (settings.custom_js) parts.push(`<script${nonce ? ` nonce="${nonce}"` : ''}>${settings.custom_js.replace(/<\/script/gi, '<\\/script')}</script>`);
   return parts.join('\n');
+}
+
+/** Adds the response's CSP nonce to inline <script>/<style> tags in admin-authored HTML. */
+export function withNonce(fragment: string, nonce: string): string {
+  if (!nonce || !fragment) return fragment;
+  return fragment
+    .replace(/<script(?![^>]*\bnonce=)(?![^>]*\bsrc=)/gi, `<script nonce="${nonce}"`)
+    .replace(/<style(?![^>]*\bnonce=)/gi, `<style nonce="${nonce}"`);
 }
 
 /** Footer widget slots (Admin -> Appearance -> Widgets). Titles are escaped, bodies are admin HTML. */
@@ -192,18 +113,9 @@ async function loadHooks(env: Env): Promise<Record<'head' | 'footer', string[]>>
   return out;
 }
 
-/** Renders `template` inside the active theme's base layout and returns the full HTML document. */
 /** A specific installed theme by slug, for previews. Null when it is not installed. */
 export async function themeBySlug(env: Env, slug: string): Promise<ThemeBundle | null> {
-  try {
-    const row = await env.DB.prepare('SELECT slug, name, version, templates, css FROM themes WHERE slug=? LIMIT 1')
-      .bind(slug).first<{ slug: string; name: string; version: string; templates: string; css: string }>();
-    if (!row) return null;
-    const templates = JSON.parse(row.templates) as Record<string, string>;
-    return { ...row, templates: { ...defaultTheme.templates, ...templates } };
-  } catch {
-    return null;
-  }
+  return (await loadTheme(env, { slug }).catch(() => null)) ?? null;
 }
 
 export async function renderTheme(
@@ -213,6 +125,8 @@ export async function renderTheme(
     data: Record<string, unknown>;
     /** Render with this theme instead of the active one (admin previews). */
     theme?: ThemeBundle;
+    /** Saved values for the theme's declared settings (Appearance screen). */
+    themeSettings?: Record<string, string> | null;
   },
 ): Promise<string> {
   const { settings, url } = opts;
@@ -242,6 +156,19 @@ export async function renderTheme(
     }
   }
 
+  const assetUrl = (path: string): string => themeAssetUrl(theme.slug, path.replace(/^\.?\//, ''));
+  // Themes installed in the panel have their stylesheet stored as an asset, so a
+  // v2 layout can link it (`{{{theme_css_url}}}`) instead of inlining it. The
+  // bundled AMS Base has no assets: its CSS is inlined, and every old layout that
+  // still asks for `{{{theme_css}}}` keeps working either way.
+  const cssUrl = `${assetUrl('style.css')}?v=${encodeURIComponent(theme.version)}`;
+  const source = theme.templates[opts.template] ?? theme.templates.page ?? theme.templates.home ?? '';
+  const nonce = nonceFor();
+  const renderOpts = {
+    settings,
+    assetUrl,
+    themeSettings: opts.themeSettings ?? undefined,
+  };
   const shared = {
     site: { title: settings.site_title || '', tagline: settings.tagline || '', url: url.origin },
     menu,
@@ -256,22 +183,52 @@ export async function renderTheme(
     comments_count: commentRows.length,
     comments_open: commentsEnabled(settings),
     comments_html: commentsHtml,
+    nonce,
     ...opts.data,
   };
-  const source = theme.templates[opts.template] ?? theme.templates.page ?? '';
-  let inner = renderTemplate(source, shared);
-  // A theme that does not use {{{comments_html}}} still gets its comments, after the content.
-  if (commentsHtml && !/\{\{\{?\s*comments_html\s*\}?\}\}/.test(source)) {
-    inner += `\n<div class="comments-fallback">${commentsHtml}</div>`;
+  let inner = '';
+  try {
+    inner = renderWithTheme(theme, source, shared, renderOpts);
+    // A theme that does not use {{{comments_html}}} still gets its comments, after the content.
+    if (commentsHtml && !/\{\{\{?\s*comments_html\s*\}?\}\}/.test(source)) {
+      inner += `\n<div class="comments-fallback">${commentsHtml}</div>`;
+    }
+    return applyLayout(theme, opts.template, inner, {
+      ...shared,
+      content: inner,
+      theme_css: theme.css.replace(/<\/style/gi, '<\\/style'),
+      theme_css_url: cssUrl,
+      head: buildHead(opts.meta, settings, url.origin, hooks.head.join('\n'), nonce),
+      footer: buildFooter(settings, hooks.footer.join('\n'), nonce),
+    }, renderOpts);
+  } catch (err) {
+    // A theme that throws must not take the site down: render the bundled theme
+    // and tell the admins (the banner is rendered by the panel, not here).
+    console.error('theme render failed', theme.slug, err);
+    markThemeFailure(theme.slug, err);
+    const fallbackCss = defaultTheme.css.replace(/<\/style/gi, '<\\/style');
+    const safeInner = source ? renderWithTheme(defaultTheme, source, shared, { ...renderOpts, settings }).replace(/\{\{[\s\S]*?\}\}/g, '') : '';
+    return applyLayout(defaultTheme, opts.template, safeInner || inner || '', {
+      ...shared,
+      content: safeInner,
+      theme_css: fallbackCss,
+      theme_css_url: '',
+      head: buildHead(opts.meta, settings, url.origin, hooks.head.join('\n'), nonce),
+      footer: buildFooter(settings, hooks.footer.join('\n'), nonce),
+    }, { ...renderOpts, settings });
   }
-  return renderTemplate(theme.templates.base, {
-    ...shared,
-    comments_html: commentsHtml,
-    content: inner,
-    theme_css: theme.css.replace(/<\/style/gi, '<\\/style'),
-    head: buildHead(opts.meta, settings, url.origin, hooks.head.join('\n')),
-    footer: buildFooter(settings, hooks.footer.join('\n')),
-  });
+}
+
+/**
+ * Rendering failures are remembered per isolate so the Themes screen can show
+ * "this theme failed, the site is falling back to AMS Base".
+ */
+const themeFailures = new Map<string, { at: string; message: string }>();
+export function markThemeFailure(slug: string, err: unknown): void {
+  themeFailures.set(slug, { at: new Date().toISOString(), message: String(err instanceof Error ? err.message : err).slice(0, 300) });
+}
+export function themeFailureFor(slug: string): { at: string; message: string } | null {
+  return themeFailures.get(slug) ?? null;
 }
 
 /* --------------------------------------------------------------- page cache */

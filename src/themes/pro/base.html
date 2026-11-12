@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>{{{theme_css}}}</style>
+{{#if theme_css_url}}<link rel="stylesheet" href="{{{theme_css_url}}}">{{/if}}
+<style nonce="{{nonce}}">{{{theme_css}}}</style>
 {{{head}}}
 </head>
 <body class="{{body_class}}">

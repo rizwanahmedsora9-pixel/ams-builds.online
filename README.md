@@ -11,6 +11,8 @@ A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) ser
 | 2 | Comments and moderation, users and roles, custom code, redirects, sitemap.xml, robots.txt, RSS | **done** |
 | 3 | Backups, plugins and hooks, import/export, updates and site health | **done** |
 | 3 | Multi-site | later |
+| 4 | Panel overhaul: design system, lists, dashboard (Phase 0–2 of `docs/panel-overhaul-roadmap.md`) — revisions, autosave, edit locks, media picker, page order | **done (0.5.0)** |
+| 5 | Theme platform: theme packages with assets, template engine v2, manifest v2, inheritance, theme versions and CSP (Phase 3 of the roadmap) | **done (0.6.0)** |
 
 The full database schema is created at install. Existing sites upgrade themselves:
 pending tables and columns are added by the cron trigger, by `npm start`, or from
@@ -135,7 +137,11 @@ product over HTTP. `tests/helpers.mjs` holds the shared harness (server lifecycl
 cookie jar, CSRF, install-and-login helper), so a new test starts from a working
 panel in three lines.
 
-`tests/panel.test.mjs` (23 cases) covers the panel itself: the shell renders once,
+`tests/template.test.mjs` (11 cases) tests the template engine directly — escaping, comparisons,
+loops and their helpers, every filter, date patterns, partials, layout blocks and the parser's
+error messages. It runs against `dist/template.mjs`, the same bundle the server uses.
+
+`tests/panel.test.mjs` (30 cases) covers the panel itself: the shell renders once,
 every screen loads, the palette markup and its live region, global search end to end
 (full page, `partial=1` fragment, session guard, escaped query), the rail / scheme /
 density cookies, the shared list pattern and its empty states, the dashboard's
@@ -144,7 +150,12 @@ priority order, and the accessibility floor - including a rule that every
 focus ring. The Phase 2 cases cover revisions and restore, autosave recovery, the edit lock
 (two real sessions), the media picker, quick edit/duplicate/pin, page ordering, theme previews and
 the upgrade path (the schema tables are dropped under the running server, the panel must keep
-working and *Run updates* must bring the features back).
+working and *Run updates* must bring the features back). The Phase 3 cases install a zip theme with
+partials, a logo, a font-free stylesheet and three typed settings, then assert what a visitor sees:
+the partial renders, `{{post.date | date "Y-m-d"}}` formats, `{{asset}}` points at a served file, the
+CSS is linked rather than inlined, settings reach the markup, a snapshot can be reverted, a child
+theme inherits from its parent, the validator reports broken templates, and the CSP header matches
+the nonce on the page.
 
 ## The admin panel
 
@@ -310,44 +321,118 @@ like theme code. Everything they save bumps the page cache.
 
 ## Themes
 
-**Themes** in the admin panel has a built-in theme store and lets an admin upload, activate, download and delete themes.
+**Themes** in the admin panel has a built-in store, a manager for every installed theme, an uploader and a
+validator. A theme package can ship templates, partials, a stylesheet and binary assets (logo, fonts, one
+`theme.js`), and a theme can inherit from another one.
 
 | Store theme | Look |
 | --- | --- |
 | AMS Base | The standard theme: light and minimal. Installed by default. |
 | AMS Pro | Sticky header with pill-style tab navigation, colour hero, post grid, three-column dark footer. |
-| AMS Premium | Dark header with top bar and underlined tabs, serif headlines, large hero, rich footer. |
+| AMS Premium | Dark header with top bar and underlined tabs, serif headlines, large hero, rich footer. Inherits Pro's page, post and archive templates through `"parent": "ams-pro"`. |
 
-All three use system fonts, load nothing from other servers, need no JavaScript and follow the visitor's light or dark setting. Store themes live in `src/themes/`; add a folder and list it in `src/themes/index.ts` to ship another.
+All three use system fonts, load nothing from other servers, need no JavaScript and follow the visitor's
+light or dark setting. Store themes live in `src/themes/`; add a folder and list it in `src/themes/index.ts`
+to ship another.
 
-Download any installed theme to get a working file to edit.
-
-A theme is one JSON file:
+### What a theme package is
 
 ```json
 {
-  "name": "My Theme",
-  "version": "1.0.0",
-  "templates": { "base": "...{{{content}}}...", "home": "...", "page": "...", "post": "...", "archive": "...", "404": "..." },
-  "css": "body { ... }"
+  "name": "Journal",
+  "slug": "journal",
+  "version": "1.2.0",
+  "author": "You",
+  "description": "Single column, serif, generous whitespace.",
+  "layout": "base",
+  "parent": null,
+  "tags": ["blog", "serif"],
+  "templates": { "base": "base.html", "home": "home.html", "post": "post.html" },
+  "partials": { "header": "partials/header.html" },
+  "css": "style.css",
+  "assets": ["assets/logo.png", "fonts/body.woff2"],
+  "screenshot": "assets/screenshot.png",
+  "settings": [
+    { "key": "accent", "type": "color", "label": "Accent", "default": "#b4552d" },
+    { "key": "show_tagline", "type": "toggle", "label": "Show tagline", "default": true },
+    { "key": "archive_layout", "type": "select", "label": "Archive layout", "default": "grid",
+      "options": [ { "value": "grid", "label": "Grid" }, { "value": "list", "label": "List" } ] }
+  ],
+  "changelog": [ { "version": "1.2.0", "notes": "Added the landing template." } ]
 }
 ```
 
-Only `base` is required and it must contain `{{{content}}}`; missing templates fall back to AMS Base. A `.zip` also works: put `theme.json` next to `base.html`, `home.html`, `page.html`, `post.html`, `archive.html`, `404.html` and `style.css` (the layout of `src/themes/default/`).
+Upload a `.zip` with this `theme.json` next to the files it names (or a single `.json` bundle, the way
+themes were written before — those still load). Only `base` — or a `parent` to inherit from — is required;
+anything else falls back to AMS Base. `partials/header.html` is picked up without being declared, and
+everything under `assets/` is stored as a theme asset.
 
-Template tags: `{{value}}` (escaped), `{{{value}}}` (raw HTML), `{{#if x}}…{{else}}…{{/if}}`, `{{#unless x}}…{{/unless}}`, `{{#each list}}…{{/each}}`.
+**Limits:** 6 MB upload, 512 KB per asset, 80 assets, PNG/JPEG/GIF/WebP/AVIF/ICO, WOFF/WOFF2/TTF/OTF and a
+`theme.js`. **SVG and HTML are refused on purpose** — they can carry script, and theme assets are served
+from your own origin.
+
+### Assets are files, not inline text
+
+The stylesheet and every other asset is served from `/theme-assets/{slug}/{path}` with a one-year immutable
+cache, an ETag and `nosniff`. That is why pages are small: the CSS is downloaded once per visitor, not
+shipped in every page view. In a layout:
+
+```html
+{{#if theme_css_url}}<link rel="stylesheet" href="{{{theme_css_url}}}">{{/if}}
+<img src="{{asset "assets/logo.png"}}" alt="Logo">
+<script defer src="{{asset "theme.js"}}"></script>
+```
+
+`{{{theme_css}}}` still renders the same CSS inline for themes that have not moved over yet.
+
+### Template tags
+
+| Category | Syntax |
+| --- | --- |
+| Values | `{{post.title}}` (escaped), `{{{post.content}}}` (raw), `{{this}}`, `{{@index}}`, `{{@first}}`, `{{@last}}`, `{{@key}}` |
+| Conditions | `{{#if x}}…{{else}}…{{/if}}`, `{{#unless x}}…{{/unless}}`, `{{#if n gt 3}}`, `eq ne gt gte lt lte and or not`, parentheses |
+| Loops | `{{#each posts}}…{{else}}no posts{{/each}}`, `{{#each posts limit=3}}`, `{{#each posts limit=3 offset=2}}`, objects too |
+| Partials | `{{> header}}`, `{{> post-card post}}`, `{{> @theme "header"}}` (from the parent theme) |
+| Layout | `{{#block content}}…{{/block}}` in the layout, `{{{content}}}` also works |
+| Filters | `{{post.date \| date "d MMM yyyy"}}`, `truncate`, `strip_html`, `slug`, `json`, `default`, `upper`, `lower`, `capitalize`, `reading_time`, `number_format`, `asset`, `url`, `escape`, `nl2br` |
+| Assets | `{{asset "logo.png"}}`, `{{{theme_css_url}}}` |
+| Settings | `{{theme.accent}}`, `{{#if theme.show_tagline}}` |
+| Meta | `{{{head}}}`, `{{{footer}}}`, `{{{comments_html}}}`, `{{body_class}}`, `{{nonce}}` |
+
+Every helper is a pure function over the data the CMS supplies: a template cannot execute code. An unknown
+filter is a no-op, a missing value renders empty, and a broken template shows up in **Validate a theme**
+(unknown filters, missing partials, assets the manifest promises but does not ship, a layout with no page
+slot) before it ever goes live.
 
 | Available in | Values |
 | --- | --- |
-| every template | `site.title`, `site.tagline`, `site.url`, `year`, `body_class`, `menu.primary` and `menu.footer` (lists of `label`, `url`, `active`) |
-| `base` only | `{{{head}}}` (title, SEO tags, custom code), `{{{theme_css}}}`, `{{{content}}}`, `{{{footer}}}` (footer code and widgets) |
+| every template | `site.title`, `site.tagline`, `site.url`, `year`, `body_class`, `nonce`, `menu.primary` and `menu.footer` (lists of `label`, `url`, `active`), `pages` (published pages in the order set on the Pages screen) |
+| `base` (or the layout) | `{{{head}}}`, `{{{theme_css}}}`, `{{{theme_css_url}}}`, `{{{content}}}`, `{{{footer}}}` |
 | `home` | `page` (the chosen home page, may be empty), `posts` (latest five) |
 | `page` | `page.title`, `{{{page.content}}}` |
-| `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`), `{{{comments_html}}}`, `comments_count`, `comments_open`, `comments` (list of `name`, `body`, `date`) |
+| `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`), `{{{comments_html}}}`, `comments_count`, `comments_open` |
 | `archive` | `archive.title`, `posts`, `pagination.prev`, `pagination.next` |
 | each item of `posts` | `title`, `url`, `excerpt`, `date`, `date_iso`, `featured_image`, `featured_alt` |
 
-A theme can contain scripts, so only install themes you trust.
+### Settings, history and previews
+
+- **Theme settings** a theme declares are editable under **Themes → (your theme)** and available in
+  templates as `{{theme.key}}`. Defaults come from the manifest; changes are stored per theme and
+  **Reset to defaults** throws them away.
+- **History** — every activation or upload snapshots the theme first, so **Revert** brings the previous
+  files back. The revert itself is reversible; ten snapshots are kept per theme.
+- **Preview** any installed theme at `/?preview=1&theme=slug` while signed in (never cached, never public).
+- **A theme that throws** while rendering cannot take the site down: the page falls back to AMS Base and
+  the Themes screen says which theme failed and why.
+- Themes contain markup, so only install themes you trust.
+
+### Content-Security-Policy
+
+The site sends a policy on every page: scripts only from your own site plus inline code carrying that
+page's nonce, images from anywhere over HTTPS, and no plugins or objects. Your own custom CSS/JavaScript and
+snippet hooks are stamped with the nonce automatically, and a theme's script is a served file, so both keep
+working. Set it under **Settings → Content security policy**: *Report only* (default — the browser logs
+what would be blocked and blocks nothing), *Enforce*, or *Off*. Start on report-only for a day, then enforce.
 
 ## How it works
 
@@ -394,6 +479,7 @@ src/
       revisions.ts         save snapshots, line diff, autosave retention, edit locks
       editor-views.ts      revision list, diff and editor banners (server-rendered)
       media-picker.ts      the picker dialog and its client script
+      assets/screens/editor.css   editor-only styles (History, banners, picker)
       assets.ts            route: GET /{admin}/assets/*.css (immutable, ETagged)
       bundles.ts           CSS bundle registry: tokens, app, screens + ETags
       content.ts           pages and posts
@@ -427,6 +513,9 @@ src/
     plugins.ts             built-in plugin list and hook points
     version.ts             app version shown in Updates
     schema.ts              cached "does this table/column exist" probes for upgrade safety
+    template.ts            template engine v2: expressions, filters, partials, layouts
+    theme-manifest.ts      theme.json v2: validation, zip reading, inheritance, settings
+    theme-store.ts         theme rows, assets, version snapshots, layout rendering
     config.ts              KV config, settings
     time.ts                timezone helpers
     ui.ts                  admin HTML helpers and CSS
