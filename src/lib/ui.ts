@@ -162,6 +162,7 @@ export function navGroups(user: { role: string }, pending: number): NavGroup[] {
       key: 'settings', path: '/settings', label: 'Settings', icon: 'settings', show: admin, children: [
         { path: '/settings', label: 'General' },
         { path: '/settings#reading', label: 'Reading' },
+        { path: '/settings#landing', label: 'Landing screen' },
         { path: '/settings#discussion', label: 'Discussion' },
         { path: '/settings#domains', label: 'Domains & URL' },
       ],

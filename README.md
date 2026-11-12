@@ -204,13 +204,13 @@ autosaved and versioned, and no screen needs JavaScript to work.
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
 | Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). **Browser-side WebP compression** before upload, every common image format (JPG/JFIF, PNG/APNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, JXL, ICO, SVG), and a two-tab picker in the editor: already-uploaded images, or upload straight from the device |
-| Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
+| Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; set or clear the page shown on the first-visit landing screen; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes** (store, installed, editor), **Templates**, **Menus**, **Widgets**, **Identity** |
 | Plugins | Built-in XML sitemap, robots.txt, RSS feed and **Search Console Verification** (paste Google/Bing/Yandex meta tag → live in `<head>`) can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects, JSON import/export (v2, includes themes), server-stored backups, site health with performance budgets, audit log, page-cache reset |
-| Settings | Site identity and favicon, reading (home page, posts per page, permalinks, default editor), discussion, domains and the admin URL |
+| Settings | Site identity and favicon, reading, customizable first-visit landing screen, ordered looping audio playlist uploads, discussion, domains and the admin URL |
 
 ## Writing posts and pages
 

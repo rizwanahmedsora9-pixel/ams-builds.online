@@ -10,6 +10,18 @@
    =========================================================================== */
 
 textarea.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9rem;min-height:20rem}
+.landing-audio-fieldset{margin:1.1rem 0 0;padding:.8rem;border:1px solid var(--line);border-radius:var(--radius-sm);min-width:0}
+.landing-audio-fieldset legend{padding:0 .35rem;font-size:var(--text-sm);font-weight:650}
+.landing-audio-list{display:grid;gap:.35rem;max-height:17rem;overflow:auto;padding:.25rem}
+.landing-audio-row{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.5rem .6rem;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
+.landing-audio-row .check{min-width:0;flex:1;align-items:flex-start;overflow-wrap:anywhere}
+.landing-audio-row .check span{display:grid;min-width:0;gap:.1rem}
+.landing-audio-row .check strong{font-size:var(--text-sm);font-weight:600;overflow-wrap:anywhere}
+.landing-audio-row .check small{color:var(--muted);font-size:var(--text-xs)}
+.landing-audio-order{display:flex;align-items:center;gap:.35rem;margin:0;color:var(--muted);font-size:var(--text-xs);font-weight:500}
+.landing-audio-order input{width:4rem;min-height:2rem;padding:.25rem .4rem}
+#landing_audio_files{width:100%;max-width:100%;padding:.45rem;border:1px solid var(--line-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--fg)}
+@media(max-width:480px){.landing-audio-row{align-items:flex-start;flex-direction:column}.landing-audio-order{margin-left:1.8rem}}
 .badge.published{color:var(--ok)}
 .badge.draft{color:var(--muted)}
 .badge.scheduled{color:var(--warn)}
