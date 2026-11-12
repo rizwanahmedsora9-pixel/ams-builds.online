@@ -6,6 +6,7 @@
 // case is a few lines of intent.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import { createHarness } from './helpers.mjs';
 
 const panel = createHarness();
@@ -380,6 +381,59 @@ test('the media picker lists, filters and uploads without leaving the editor', a
   const alt = await panel.adminPost(`/media/${body.item.id}/alt`, { alt: 'Updated description' });
   assert.equal(alt.status, 303);
   assert.match((await panel.get(`${panel.admin}/media/picker?q=updated`)).text, /Updated description/);
+});
+
+test('the picker has a library and an upload tab, takes batches and every common image format', async () => {
+  const page = await panel.get(`${panel.admin}/posts/new`);
+  assert.match(page.text, /role="tab" id="media-picker-tab-library"/, 'the library is its own tab');
+  assert.match(page.text, /role="tab" id="media-picker-tab-upload"/, 'uploading from the device is its own tab');
+  assert.match(page.text, /data-picker-panel="upload"[^>]*hidden/, 'the upload panel starts hidden');
+  assert.match(page.text, /type="file"[^>]*name="files"[^>]*multiple/, 'the upload input takes several images');
+  assert.match(page.text, /\.heic/, 'the file picker offers unusual image formats');
+  assert.match(page.text, /window\.amsCompressImages/, 'images are compressed in the browser before upload');
+  assert.match(page.text, /action="\/admin-panel\/media\/picker\/upload"/, 'the tab posts to the JSON upload endpoint');
+  assert.match(page.text, /id="media-picker-quality"/, 'quality is selectable');
+  assert.match(page.text, /name="_csrf"/, 'the picker form carries the CSRF token');
+
+  const library = await panel.get(`${panel.admin}/media`);
+  assert.match(library.text, /data-compress-status/, 'the library upload reports the compression pass');
+  assert.match(library.text, /accept="[^"]*\.heic/, 'the library accepts the same formats');
+  assert.match(library.text, /window\.amsCompressImages/, 'the library upload compresses in the browser too');
+
+  // One request, three formats the old table refused; alt text applies to the batch.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const form = new FormData();
+  form.set('_csrf', await panel.csrf());
+  form.set('alt', 'Format check');
+  form.append('files', new File([png], 'camera.jfif', { type: 'image/jpeg' }));
+  form.append('files', new File([png], 'scan.tiff', { type: 'image/tiff' }));
+  form.append('files', new File([png], 'phone.heic', { type: 'image/heic' }));
+  form.append('files', new File(['<script>'], 'virus.html', { type: 'text/html' }));
+  form.append('files', new File(['%PDF-1.4'], 'notes.pdf', { type: 'application/pdf' }));
+  const cookie = [...panel.jar].map(([k, v]) => `${k}=${v}`).join('; ');
+  const upload = await fetch(`${panel.base}${panel.admin}/media/picker/upload`, { method: 'POST', body: form, headers: { cookie } });
+  const body = await upload.json();
+  assert.equal(upload.status, 200);
+  assert.equal(body.ok, true);
+  assert.deepEqual(body.items.map((item) => item.mime), ['image/jpeg', 'image/tiff', 'image/heic']);
+  assert.equal(body.items.length, 3, 'the batch is stored in one request');
+  assert.equal(body.items[0].alt, 'Format check');
+  assert.match(body.item.url, /camera\.jfif$/);
+  assert.deepEqual(body.skipped.map((line) => line.split(' ')[0]), ['virus.html', 'notes.pdf'], 'the picker is images-only and refuses unknown types');
+  assert.equal((await fetch(`${panel.base}${body.items[0].url}`)).headers.get('content-type'), 'image/jpeg');
+});
+
+test('every inline panel script parses, so one bad string cannot kill the editor', async () => {
+  // A template literal that eats a \n once broke the whole editor script while
+  // every server-side assertion still passed. The browser is the judge.
+  for (const path of ['/posts/new', '/pages/new', '/media', '/identity', '/appearance', '/settings', '/tools']) {
+    const page = await panel.get(panel.admin + path);
+    const scripts = [...page.text.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+    assert.ok(scripts.length > 0, `${path} ships client code`);
+    scripts.forEach((body, index) => {
+      assert.doesNotThrow(() => new vm.Script(body), `${path} inline script #${index + 1} parses`);
+    });
+  }
 });
 
 test('quick edit, duplicate and pin work from the list', async () => {

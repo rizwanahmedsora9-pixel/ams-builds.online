@@ -869,6 +869,9 @@ const EDITOR_JS = `<script>
       var at=start+snippet.length;
       ta.setSelectionRange(at,at);
     }else{
+      // The toolbar button (or the media dialog) took focus; put it back on the
+      // writing surface first, otherwise execCommand has no editable element.
+      visual.focus();
       restoreSelection();
       document.execCommand('insertHTML',false,snippet);
       rememberSelection();
@@ -1141,7 +1144,7 @@ const EDITOR_JS = `<script>
       picker.open({onPick:function(item){
         var alt=escapeHtml(item.alt||'');
         insertSnippet('<figure class="image-block"><img src="'+escapeHtml(item.url)+'" alt="'+alt+'" loading="lazy">'+
-          (alt?'<figcaption>'+alt+'</figcaption>':'')+'</figure>\n<p></p>');
+          (alt?'<figcaption>'+alt+'</figcaption>':'')+'</figure>\\n<p></p>');
       }});
     });
   }
@@ -1287,7 +1290,7 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
         <button type="button" data-wrap="<blockquote>|</blockquote>" data-command="formatBlock" data-value="blockquote">Quote</button>
         <button type="button" data-wrap="<pre><code>|</code></pre>">Code</button>
         <button type="button" data-wrap='<a href="$1">|</a>' data-ask="Link URL" data-def="https://">Link</button>
-        <button type="button" id="insert-image" data-picker-image title="Insert an image from the library">Image</button>
+        <button type="button" id="insert-image" data-picker-image title="Insert an image from the media library or upload one now">${icon('image', { cls: 'ico--sm' })} Media</button>
         <span class="toolbar-separator" aria-hidden="true"></span>
         <button type="button" id="add-html-block" title="Insert a custom HTML block">&lt;/&gt; HTML block</button>
         <button type="button" id="add-youtube" title="Embed a YouTube video">&#9654; YouTube</button>
@@ -1371,7 +1374,7 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
     <button type="button" class="btn" id="insert-youtube">Embed video</button>
   </div>
 </dialog>
-${raw(mediaPicker({ endpoint: `${base}/media/picker` }))}
+${raw(mediaPicker({ endpoint: `${base}/media/picker`, uploadUrl: `${base}/media/picker/upload`, csrf: c.var.csrf }))}
 ${row ? card({
   title: 'History',
   actions: html`<a class="btn ghost small" href="${base}/${kind}/${row.id}/revisions">All ${revisionCount} version${revisionCount === 1 ? '' : 's'}</a>`,
