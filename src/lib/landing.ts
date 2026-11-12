@@ -50,7 +50,7 @@ export function landingScreenMarkup(opts: {
     : '';
   const copy = tagline ? `<p class="ams-landing-tagline">${tagline}</p>` : '';
   const status = hasTracks
-    ? 'Press play to start the soundtrack.'
+    ? ''
     : 'No soundtrack has been added yet. Upload audio in Settings to enable playback.';
 
   const head = `<style nonce="${nonce}">${LANDING_CSS}</style>
@@ -64,7 +64,7 @@ export function landingScreenMarkup(opts: {
       ${copy}
     </div>
     ${opts.showPlay ? `<div class="ams-landing-equalizer" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-    <p class="ams-landing-status" id="ams-landing-status" role="status" aria-live="polite">${status}</p>` : ''}
+    ${status ? `<p class="ams-landing-status" id="ams-landing-status" role="status" aria-live="polite">${status}</p>` : ''}` : ''}
     <div class="ams-landing-controls">
       ${opts.showPlay ? `<button class="ams-landing-play" type="button" data-landing-play aria-label="Play soundtrack"${hasTracks ? '' : ' disabled'}>
         <svg class="ams-landing-icon ams-landing-icon-play" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8.6 4.9a1 1 0 0 1 1.53-.84l10 7.1a1 1 0 0 1 0 1.68l-10 7.1a1 1 0 0 1-1.53-.84z"/></svg>
@@ -115,7 +115,7 @@ const LANDING_PLAYER = `(function(){
     if(card)card.classList.toggle('is-playing',playing);
     if(playButton)playButton.setAttribute('aria-label',playing?'Pause soundtrack':'Play soundtrack');
     if(muteButton){muteButton.textContent=muted?'Unmute sound':'Mute sound';muteButton.setAttribute('aria-pressed',muted?'true':'false')}
-    if(status&&tracks.length)status.textContent=playing?'Soundtrack playing. It will loop until you enter.':'Soundtrack paused. Press play to continue.';
+    if(status&&tracks.length)status.textContent=playing?'':'Soundtrack paused. Press play to continue.';
   }
   function failed(){
     audio.pause();
@@ -129,7 +129,7 @@ const LANDING_PLAYER = `(function(){
     audio.src=tracks[current];
     audio.muted=muted;
     audio.load();
-    audio.play().then(function(){if(status)status.textContent='Soundtrack playing. It will loop until you enter.';update()}).catch(function(){
+    audio.play().then(function(){if(status)status.textContent='';update()}).catch(function(){
       if(attempts>1)playTrack((current+1)%tracks.length,attempts-1);else failed();
     });
   }
