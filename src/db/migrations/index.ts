@@ -6,7 +6,7 @@ import { resetSchemaCache } from '../../lib/schema';
  * by the installer; each entry here upgrades an already-installed database.
  * Append new entries with the next version number - never edit old ones.
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /**
  * A migration statement that must not take the whole batch down.
@@ -125,6 +125,14 @@ const THEME_PLATFORM = [
   tolerant("ALTER TABLE themes ADD COLUMN screenshot TEXT NOT NULL DEFAULT ''"),
 ];
 
+/**
+ * Phase 4: a page or post may name the theme template that renders it
+ * (`page-landing`). Empty means "the default template for this kind of content".
+ */
+const TEMPLATES = [
+  tolerant("ALTER TABLE content ADD COLUMN template TEXT NOT NULL DEFAULT ''"),
+];
+
 const WORKFLOW_FIXES = [
   "INSERT INTO settings (site_id, key, value) VALUES (1, 'pages_order', 'menu_order') ON CONFLICT(site_id, key) DO NOTHING",
 ];
@@ -134,6 +142,7 @@ export const migrations: { version: number; name: string; statements: string[] }
   { version: 3, name: 'Revisions, edit locks and page ordering', statements: EDITOR_WORKFLOW },
   { version: 4, name: 'Page ordering default', statements: WORKFLOW_FIXES },
   { version: 5, name: 'Theme platform: assets, partials, versions', statements: THEME_PLATFORM },
+  { version: 6, name: 'Per-page templates', statements: TEMPLATES },
 ];
 
 /** Runs one migration statement, tolerating the errors marked in its comment. */

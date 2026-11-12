@@ -1,12 +1,15 @@
 import type { Config, Env } from '../types';
 import type { Settings } from './config';
 import { commentToken, commentsEnabled, approvedComments, renderCommentsHtml, type CommentRow } from './comments';
-import { esc } from './security';
+import { esc, safeUrl } from './security';
 import { listPages } from './content';
 import { defaultTheme } from '../themes/default';
 import type { ThemeBundle } from './theme-manifest';
-import { applyLayout, loadTheme, renderWithTheme, themeAssetUrl } from './theme-store';
+import { activeThemeFor, applyLayout, loadTheme, renderWithTheme, themeAssetUrl } from './theme-store';
+import { variablesFor } from './tokens';
+import { DEFAULT_WIDGET_AREAS, widgetKey } from './theme-manifest';
 import { cspFor, nonceFor } from './security';
+import { readTokens, supportedTokens, tokensCss, schemeMeta } from './tokens';
 
 export type { ThemeBundle } from './theme-manifest';
 
@@ -17,18 +20,8 @@ export { render as renderTemplateHooks } from './template';
 /* -------------------------------------------------------------------- theme */
 
 /** The active theme, merged with its parent; the bundled theme when there is none. */
-export async function activeTheme(env: Env): Promise<ThemeBundle> {
-  try {
-    const hit = await env.DB.prepare('SELECT slug FROM themes WHERE active=1 LIMIT 1').first<{ slug: string }>();
-    if (hit) {
-      const theme = await loadTheme(env, { slug: hit.slug });
-      if (theme && (theme.templates.base || theme.manifest.parent)) return theme;
-    }
-  } catch {
-    /* no themes table yet: use the bundled theme */
-  }
-  return defaultTheme;
-}
+/** The active theme, or the bundled one: see theme-store's activeThemeFor. */
+export const activeTheme = activeThemeFor;
 
 type MenuItem = { label: string; url: string; active: boolean };
 
@@ -50,31 +43,44 @@ export type PageMeta = {
   noindex?: boolean;
 };
 
-function buildHead(meta: PageMeta, settings: Settings, origin: string, extra = '', nonce = ''): string {
+function buildHead(meta: PageMeta, settings: Settings, origin: string, extra = '', nonce = '', tokensCss = '', scheme: string | null = null): string {
   const tags = [`<title>${esc(meta.title)}</title>`];
   if (meta.description) tags.push(`<meta name="description" content="${esc(meta.description)}">`);
   if (meta.noindex) tags.push('<meta name="robots" content="noindex">');
   if (meta.canonical) tags.push(`<link rel="canonical" href="${esc(origin + meta.canonical)}">`);
   tags.push(`<meta property="og:title" content="${esc(meta.title)}">`, `<meta property="og:type" content="${meta.type || 'website'}">`);
   if (meta.description) tags.push(`<meta property="og:description" content="${esc(meta.description)}">`);
-  if (meta.image) tags.push(`<meta property="og:image" content="${esc(meta.image.startsWith('/') ? origin + meta.image : meta.image)}">`);
-  if (settings.favicon) tags.push(`<link rel="icon" href="${esc(settings.favicon)}">`);
+  // A page's own featured image wins; the site's Identity image is the fallback,
+  // so a shared link always has something to show.
+  const social = safeUrl(meta.image || settings.social_image || '');
+  if (social) tags.push(`<meta property="og:image" content="${esc(social.startsWith('/') ? origin + social : social)}">`);
+  // Identity URLs are admin-managed and already sanitised on save; re-checking
+  // here keeps a hand-written `settings` row from putting `javascript:` in <head>.
+  const icon = safeUrl(settings.favicon || '');
+  if (icon) tags.push(`<link rel="icon" href="${esc(icon)}">`);
+  const logo = safeUrl(settings.site_logo || '');
+  if (logo) tags.push(`<link rel="preload" as="image" href="${esc(logo)}">`);
   // Admin-only custom code (Settings are writable by admins only), injected raw by design.
   // Feed autodiscovery (the RSS plugin can be switched off under Plugins).
   if (settings.plugin_rss !== '0') tags.push(`<link rel="alternate" type="application/rss+xml" title="${esc(settings.site_title || 'RSS')}" href="${esc(origin)}/feed.xml">`);
   // Admin-authored CSS/JS carry the per-response CSP nonce, so the Content-Security-Policy
   // can be strict without breaking the site's own customisations.
   if (settings.custom_css) tags.push(`<style${nonce ? ` nonce="${nonce}"` : ''}>${settings.custom_css.replace(/<\/style/gi, '<\\/style')}</style>`);
+  // A site that forces a colour scheme also says so in <head>, so the browser's own
+  // widgets (scrollbars, form controls) agree with the page. `scheme` carries an
+  // unsaved Customizer value when there is one.
+  if (scheme) tags.push(`<meta name="color-scheme" content="${scheme}">`);
+  if (tokensCss) tags.push(`<style${nonce ? ` nonce="${nonce}"` : ''} id="site-tokens">${tokensCss}</style>`);
   if (settings.custom_head) tags.push(withNonce(settings.custom_head, nonce));
   if (extra) tags.push(extra);
   return tags.join('\n');
 }
 
-function buildFooter(settings: Settings, extra = '', nonce = ''): string {
+function buildFooter(settings: Settings, theme: ThemeBundle, extra = '', nonce = ''): string {
   const parts: string[] = [];
   if (settings.custom_footer) parts.push(withNonce(settings.custom_footer, nonce));
   if (extra) parts.push(withNonce(extra, nonce));
-  const widgets = widgetAreas(settings);
+  const widgets = allWidgets(settings, theme);
   if (widgets) parts.push(widgets);
   if (settings.custom_js) parts.push(`<script${nonce ? ` nonce="${nonce}"` : ''}>${settings.custom_js.replace(/<\/script/gi, '<\\/script')}</script>`);
   return parts.join('\n');
@@ -88,16 +94,54 @@ export function withNonce(fragment: string, nonce: string): string {
     .replace(/<style(?![^>]*\bnonce=)/gi, `<style nonce="${nonce}"`);
 }
 
-/** Footer widget slots (Admin -> Appearance -> Widgets). Titles are escaped, bodies are admin HTML. */
-function widgetAreas(settings: Settings): string {
+/**
+ * Widgets, by area (Admin -> Appearance -> Widgets). A theme draws an area with
+ * `{{{widgets.footer}}}`; an area it does not draw arrives with `{{{footer}}}`,
+ * so a filled area is never invisible and a drawn one is never repeated.
+ *
+ * Three slots per area, kept as flat `settings` keys so a page render needs no
+ * join. Titles are escaped, bodies are admin-authored HTML (the same trust level
+ * as the Custom code boxes).
+ */
+const WIDGET_SLOTS = 3;
+
+export function widgetAreaHtml(settings: Settings, area: string): string {
   const slots: string[] = [];
-  for (const n of [1, 2, 3]) {
-    const body = (settings[`widget_footer_${n}_body`] || '').trim();
+  for (let n = 1; n <= WIDGET_SLOTS; n++) {
+    const body = (settings[widgetKey(area, n, 'body')] || '').trim();
     if (!body) continue;
-    const title = (settings[`widget_footer_${n}_title`] || '').trim();
-    slots.push(`<div class="widget site-widget">${title ? `<h2 class="widget-title">${esc(title)}</h2>` : ''}${body}</div>`);
+    const title = (settings[widgetKey(area, n, 'title')] || '').trim();
+    slots.push(`<div class="widget site-widget widget--${esc(area)}">${title ? `<h2 class="widget-title">${esc(title)}</h2>` : ''}${body}</div>`);
   }
-  return slots.length ? `<div class="site-widgets"><div class="wrap"><div class="site-widgets-grid">${slots.join('')}</div></div></div>` : '';
+  return slots.length ? `<div class="site-widgets site-widgets--${esc(area)}"><div class="wrap"><div class="site-widgets-grid">${slots.join('')}</div></div></div>` : '';
+}
+
+/** Every area a theme offers, in manifest order. */
+const themeAreas = (theme: ThemeBundle) => (theme.manifest.widgets?.length ? theme.manifest.widgets : DEFAULT_WIDGET_AREAS);
+
+/**
+ * The areas the theme's layout draws itself, with `{{{widgets.footer}}}` or
+ * `{{{widgets["footer"]}}}`. Those are placed by the theme; the rest are
+ * appended after the footer so a new area is never silently invisible.
+ */
+function drawnAreas(theme: ThemeBundle): Set<string> {
+  const layout = theme.templates[theme.manifest.layout || 'base'] ?? theme.templates.base ?? '';
+  const drawn = new Set<string>();
+  for (const area of themeAreas(theme)) {
+    const key = area.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`widgets\\.${key}\\b|widgets\\[["']${key}["']\\]`).test(layout)) drawn.add(area.key);
+  }
+  return drawn;
+}
+
+/** The areas the theme did not place itself, so nothing an editor fills is lost. */
+function allWidgets(settings: Settings, theme: ThemeBundle): string {
+  const drawn = drawnAreas(theme);
+  return themeAreas(theme)
+    .filter((area) => !drawn.has(area.key))
+    .map((area) => widgetAreaHtml(settings, area.key))
+    .filter(Boolean)
+    .join('\n');
 }
 
 /** Snippet hooks saved under Admin -> Plugins (raw code, admin only). */
@@ -127,6 +171,8 @@ export async function renderTheme(
     theme?: ThemeBundle;
     /** Saved values for the theme's declared settings (Appearance screen). */
     themeSettings?: Record<string, string> | null;
+    /** Token overrides from an unsaved Customizer preview (signed cookie). */
+    tokenOverrides?: Record<string, string>;
   },
 ): Promise<string> {
   const { settings, url } = opts;
@@ -162,15 +208,44 @@ export async function renderTheme(
   // bundled AMS Base has no assets: its CSS is inlined, and every old layout that
   // still asks for `{{{theme_css}}}` keeps working either way.
   const cssUrl = `${assetUrl('style.css')}?v=${encodeURIComponent(theme.version)}`;
+  // A per-item template (content.template) is resolved by the caller into
+  // `opts.template`; when the current theme has no such template the default
+  // one for the kind is used, so switching theme never blanks a page.
   const source = theme.templates[opts.template] ?? theme.templates.page ?? theme.templates.home ?? '';
   const nonce = nonceFor();
+  // Design tokens: only the variables this theme actually reads are emitted, so
+  // changing a brand colour cannot break a theme that hard-codes its palette.
+  const tokenValues = { ...readTokens(settings), ...(opts.tokenOverrides ?? {}) };
+  const only = new Set<string>();
+  for (const field of supportedTokens(theme.css)) {
+    for (const name of variablesFor(field.key)) only.add(name);
+  }
+  const tokensBlock = tokensCss(tokenValues, { only });
+  // The scheme can be changed in the Customizer before it is saved, so it comes
+  // from the merged values rather than from `settings` alone.
+  const scheme = schemeMeta(tokenValues.token_scheme);
+  // A theme may place an area exactly where it wants: `{{{widgets.footer}}}`.
+  const widgetMap: Record<string, string> = {};
+  for (const area of themeAreas(theme)) widgetMap[area.key] = widgetAreaHtml(settings, area.key);
   const renderOpts = {
     settings,
     assetUrl,
     themeSettings: opts.themeSettings ?? undefined,
   };
   const shared = {
-    site: { title: settings.site_title || '', tagline: settings.tagline || '', url: url.origin },
+    site: {
+      title: settings.site_title || '', tagline: settings.tagline || '', url: url.origin,
+      // Identity images, so a theme can draw the logo instead of the title
+      // (`{{#if site.logo}}<img src="{{site.logo}}" alt="{{site.title}}">{{/if}}`).
+      logo: safeUrl(settings.site_logo || ''), social_image: safeUrl(settings.social_image || ''), favicon: safeUrl(settings.favicon || ''),
+    },
+    // Design tokens as data, for a theme that wants to compute from them.
+    tokens: tokenValues,
+    scheme: scheme ?? 'auto',
+    // Widgets: the areas the theme draws with `{{{widgets.footer}}}`, and the
+    // list of area keys for a theme that wants to render its own wrapper.
+    widgets: widgetMap,
+    widget_areas: themeAreas(theme).map((a) => a.key),
     menu,
     // {{#each pages}} - every published page in editor order, for a nav of its own.
     pages: pageRows.map((p) => ({
@@ -198,8 +273,11 @@ export async function renderTheme(
       content: inner,
       theme_css: theme.css.replace(/<\/style/gi, '<\\/style'),
       theme_css_url: cssUrl,
-      head: buildHead(opts.meta, settings, url.origin, hooks.head.join('\n'), nonce),
-      footer: buildFooter(settings, hooks.footer.join('\n'), nonce),
+      tokens_css: tokensBlock,
+      // The site's own tokens go *after* the theme stylesheet so they win, but
+      // before custom CSS so an author's final say still has the last word.
+      head: buildHead(opts.meta, settings, url.origin, hooks.head.join('\n'), nonce, tokensBlock, scheme),
+      footer: buildFooter(settings, theme, hooks.footer.join('\n'), nonce),
     }, renderOpts);
   } catch (err) {
     // A theme that throws must not take the site down: render the bundled theme
@@ -213,8 +291,11 @@ export async function renderTheme(
       content: safeInner,
       theme_css: fallbackCss,
       theme_css_url: '',
-      head: buildHead(opts.meta, settings, url.origin, hooks.head.join('\n'), nonce),
-      footer: buildFooter(settings, hooks.footer.join('\n'), nonce),
+      tokens_css: tokensBlock,
+      // The site's own tokens go *after* the theme stylesheet so they win, but
+      // before custom CSS so an author's final say still has the last word.
+      head: buildHead(opts.meta, settings, url.origin, hooks.head.join('\n'), nonce, tokensBlock, scheme),
+      footer: buildFooter(settings, theme, hooks.footer.join('\n'), nonce),
     }, { ...renderOpts, settings });
   }
 }

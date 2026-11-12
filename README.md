@@ -13,6 +13,7 @@ A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) ser
 | 3 | Multi-site | later |
 | 4 | Panel overhaul: design system, lists, dashboard (Phase 0–2 of `docs/panel-overhaul-roadmap.md`) — revisions, autosave, edit locks, media picker, page order | **done (0.5.0)** |
 | 5 | Theme platform: theme packages with assets, template engine v2, manifest v2, inheritance, theme versions and CSP (Phase 3 of the roadmap) | **done (0.6.0)** |
+| 6 | Appearance hub and live Customizer: design tokens, signed-cookie preview, per-theme settings, widget areas, per-page templates, Identity (Phase 4 of the roadmap) | **done (0.7.0)** |
 
 The full database schema is created at install. Existing sites upgrade themselves:
 pending tables and columns are added by the cron trigger, by `npm start`, or from
@@ -141,7 +142,7 @@ panel in three lines.
 loops and their helpers, every filter, date patterns, partials, layout blocks and the parser's
 error messages. It runs against `dist/template.mjs`, the same bundle the server uses.
 
-`tests/panel.test.mjs` (30 cases) covers the panel itself: the shell renders once,
+`tests/panel.test.mjs` (39 cases) covers the panel itself: the shell renders once,
 every screen loads, the palette markup and its live region, global search end to end
 (full page, `partial=1` fragment, session guard, escaped query), the rail / scheme /
 density cookies, the shared list pattern and its empty states, the dashboard's
@@ -156,6 +157,15 @@ the partial renders, `{{post.date | date "Y-m-d"}}` formats, `{{asset}}` points 
 CSS is linked rather than inlined, settings reach the markup, a snapshot can be reverted, a child
 theme inherits from its parent, the validator reports broken templates, and the CSP header matches
 the nonce on the page.
+
+The Phase 4 cases install a theme that declares settings, two widget areas and an extra template, then prove
+the Appearance work: six screens in one sidebar section, one control per token the theme honours (and a list of
+the ones it does not), an unsaved brand colour reaching `/?preview=1&customize=1` through a signed cookie and
+never the query string, the public site unchanged by a preview, a tampered or session-less cookie ignored, a
+save persisting tokens and theme settings while a bad colour is refused by name, generated controls for a
+manifest that needed no code, widget areas rendering where the theme draws them (titles escaped, bodies raw),
+a page rendering its own template on the public site and falling back when the template is gone, Identity
+writing the favicon and `og:image`, and the Customizer still saving without JavaScript.
 
 ## The admin panel
 
@@ -239,7 +249,7 @@ blank 500.
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). The media picker in the editor uses the same library |
 | Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
-| Appearance | **Customize** (additional CSS, header code, footer code, JavaScript), **Themes**, **Menus**, **Widgets** (three footer areas) |
+| Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes**, **Templates**, **Menus**, **Widgets** (the areas the theme declares), **Identity** (logo, favicon, social image) |
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects (301/302), JSON import/export, server-stored backups, site health, page-cache reset |
@@ -300,9 +310,11 @@ content. Comment bodies are stored as plain text and escaped on output.
   every public page — analytics, verification tags, chat widgets. They run after
   the active theme.
 
-**Appearance → Customize** holds site-wide additional CSS, header code, footer code
-and JavaScript. Both screens are admin-only because the code is saved raw, exactly
-like theme code. Everything they save bumps the page cache.
+**Appearance → Customize → Custom code** holds site-wide additional CSS, header code,
+footer code and JavaScript. Both screens are admin-only because the code is saved
+raw, exactly like theme code. Everything they save bumps the page cache. The rest of
+that screen — colours, type, layout and a live preview of the real site — is described
+under [Appearance](#appearance).
 
 ## Tools, backups and updates
 
@@ -318,6 +330,110 @@ like theme code. Everything they save bumps the page cache.
 - **Updates** — the CMS version, the database schema and pending migrations, theme
   updates from the store, plugin states, and buttons to run migrations or install a
   theme update.
+
+## Appearance
+
+Everything about how the site looks lives under one sidebar section:
+
+```
+Appearance
+├── Customize   tokens · live preview · the theme's own settings · custom code
+├── Themes      store · installed · upload · editor · revisions
+├── Templates   what the active theme offers, and which pages override it
+├── Menus       header and footer links
+├── Widgets     the areas the active theme declares
+└── Identity    logo, favicon, social image, colour scheme default
+```
+
+**Customize is a split pane**: the controls on the left, the real site in an iframe on the right, three
+device widths above it. There is no separate preview renderer — the iframe is the public site, so what you
+see is what a visitor gets.
+
+### Design tokens
+
+A site's brand is a handful of `settings` keys, emitted as one `:root{…}` block **after** the theme's own
+stylesheet and before your custom CSS:
+
+| Control | Emits | Also reaches |
+| --- | --- | --- |
+| Brand colour | `--brand` | `--accent`, `--primary`, `--link`, `--gold` |
+| Second brand colour | `--brand-alt` | `--accent-2`, `--primary-2` |
+| Text on brand | `--on-brand` | `--accent-fg`, `--on-accent` |
+| Text / muted text | `--text`, `--text-muted` | `--fg`, `--ink`, `--muted`, `--subtle` |
+| Background / cards / lines | `--bg`, `--surface`, `--line` | `--card`, `--panel`, `--soft`, `--border`, `--rule` |
+| Corner radius | `--radius` | `--r`, `--radius-md`, `--round` |
+| Type: body stack, headings, size | `--font-body`, `--font-head`, `--type-scale` | `--font`, `--font-sans`, `--serif`, `--font-size` |
+| Content width | `--width` | `--max`, `--container`, `--wrap`, `--read` |
+| Colour scheme | `<meta name="color-scheme">` | every theme follows it |
+
+Two rules make this safe rather than decorative:
+
+1. **Only what the theme reads is emitted.** The Customizer reads the active theme's stylesheet and offers a
+   control only for a variable that stylesheet uses or declares. Themes name the same idea differently, so a
+   brand colour is emitted under whichever of its aliases this theme actually has. A token a theme cannot
+   honour is listed under **Not offered by &lt;theme&gt;** instead of pretending to work.
+2. **Nothing is invented.** An unset token emits no CSS at all, so an untouched site is byte-identical to
+   what it was before this screen existed. A token is validated on save (`#rrggbb` only) and clamped on
+   ranges, so a value pasted into a colour box cannot become CSS injection.
+
+The type stacks are curated and system-first (`system`, `humanist`, `rounded`, `serif`, `mono`, or your own
+stack): no webfont download and nothing from another server.
+
+### The live preview channel
+
+Unsaved values have to reach the renderer, and three rules decided how:
+
+- **Never in the query string.** A URL is logged, shared and cached; `?tokens={…}` would leak half-written
+  settings.
+- **Never trusted from the browser.** `POST /appearance/preview` validates the posted values exactly as a save
+  would, then mints `ams_preview`: an HMAC-signed, `HttpOnly`, `SameSite=Strict` cookie with a 30-minute TTL
+  that carries only the *differences* from what is saved.
+- **Never cached, never public.** It is read only for a signed-in admin, the page it affects is `no-store`,
+  and it is ignored entirely without a session. A tampered signature is discarded.
+
+The iframe reloads on a 300 ms debounce, so typing a colour is smooth and the last change always wins.
+`?preview=1` pages relax `X-Frame-Options` to `SAMEORIGIN` and add `frame-ancestors 'self'`, so the panel can
+frame its own site and nobody else can. **Save** commits tokens, the theme's settings and the custom code;
+**Discard** ends the preview. Without JavaScript the same form still saves, and the preview opens in a tab.
+
+### Per-theme settings, with no code
+
+A theme declares typed settings in `theme.json` (`text`, `textarea`, `toggle`, `color`, `select`, `number`,
+`image`, `url`) and the Customizer renders the right control for each one — a new theme needs no route, no
+form and no code in the panel. Values are stored per theme in `theme_settings`, exposed as `{{theme.key}}`
+and `{{#if theme.key}}`, and edited in the same place as the tokens. They are previewed unsaved too.
+
+### Widget areas
+
+A theme declares the places it puts widgets in:
+
+```json
+{ "widgets": ["footer", "sidebar"] }
+```
+
+or with labels: `[{ "key": "footer", "label": "Footer", "help": "Three columns." }]`. Each area holds three
+slots (title, HTML body), stored as `widget_footer_1_title` and so on. A theme draws one where it wants it:
+
+```html
+{{{widgets.footer}}}
+```
+
+An area the theme does not draw itself is appended with `{{{footer}}}`, so a filled area is never invisible —
+and a drawn area is not repeated. A theme that declares nothing gets the classic footer area, under exactly
+the keys every existing site already has.
+
+### Per-page templates
+
+The editor's **Publish → Template** dropdown lists the templates of the active theme (a theme adds
+`page-landing` by shipping `page-landing.html`). The choice is stored in `content.template` (schema 6) and
+resolved when the page is rendered. It is only stored when the template exists, and a page whose template
+disappears with a theme change falls back to the default template for its kind instead of rendering blank.
+**Appearance → Templates** lists what the theme offers and which pages use an override.
+
+### Custom code
+
+The four raw boxes (CSS, header, footer, JavaScript) moved under a collapsed **Custom code** section with the
+same behaviour: admin-only, added verbatim to every page, stamped with the page's CSP nonce.
 
 ## Themes
 
@@ -358,6 +474,7 @@ to ship another.
     { "key": "archive_layout", "type": "select", "label": "Archive layout", "default": "grid",
       "options": [ { "value": "grid", "label": "Grid" }, { "value": "list", "label": "List" } ] }
   ],
+  "widgets": ["footer", "sidebar"],
   "changelog": [ { "version": "1.2.0", "notes": "Added the landing template." } ]
 }
 ```
@@ -397,6 +514,7 @@ shipped in every page view. In a layout:
 | Filters | `{{post.date \| date "d MMM yyyy"}}`, `truncate`, `strip_html`, `slug`, `json`, `default`, `upper`, `lower`, `capitalize`, `reading_time`, `number_format`, `asset`, `url`, `escape`, `nl2br` |
 | Assets | `{{asset "logo.png"}}`, `{{{theme_css_url}}}` |
 | Settings | `{{theme.accent}}`, `{{#if theme.show_tagline}}` |
+| Widgets | `{{{widgets.footer}}}` (an area the manifest declares), `{{#each widget_areas}}` |
 | Meta | `{{{head}}}`, `{{{footer}}}`, `{{{comments_html}}}`, `{{body_class}}`, `{{nonce}}` |
 
 Every helper is a pure function over the data the CMS supplies: a template cannot execute code. An unknown
@@ -406,8 +524,8 @@ slot) before it ever goes live.
 
 | Available in | Values |
 | --- | --- |
-| every template | `site.title`, `site.tagline`, `site.url`, `year`, `body_class`, `nonce`, `menu.primary` and `menu.footer` (lists of `label`, `url`, `active`), `pages` (published pages in the order set on the Pages screen) |
-| `base` (or the layout) | `{{{head}}}`, `{{{theme_css}}}`, `{{{theme_css_url}}}`, `{{{content}}}`, `{{{footer}}}` |
+| every template | `site.title`, `site.tagline`, `site.url`, `site.logo`, `site.social_image`, `site.favicon`, `year`, `body_class`, `nonce`, `tokens` (the design tokens as data), `scheme`, `widget_areas`, `menu.primary` and `menu.footer` (lists of `label`, `url`, `active`), `pages` (published pages in the order set on the Pages screen) |
+| `base` (or the layout) | `{{{head}}}`, `{{{theme_css}}}`, `{{{theme_css_url}}}`, `{{{content}}}`, `{{{footer}}}`, `{{{widgets.footer}}}`, `{{{widgets.sidebar}}}` |
 | `home` | `page` (the chosen home page, may be empty), `posts` (latest five) |
 | `page` | `page.title`, `{{{page.content}}}` |
 | `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`), `{{{comments_html}}}`, `comments_count`, `comments_open` |
@@ -416,7 +534,8 @@ slot) before it ever goes live.
 
 ### Settings, history and previews
 
-- **Theme settings** a theme declares are editable under **Themes → (your theme)** and available in
+- **Theme settings** a theme declares are editable in the Customizer (**Appearance → Customize**) and under
+  **Themes → (your theme)** — the same values, two doors — and available in
   templates as `{{theme.key}}`. Defaults come from the manifest; changes are stored per theme and
   **Reset to defaults** throws them away.
 - **History** — every activation or upload snapshots the theme first, so **Revert** brings the previous
@@ -468,7 +587,8 @@ src/
       assets/tokens.css    design tokens: colour, space, radius, type, schemes
       assets/app.css       shell (top bar, rail, palette) and component kit
       assets/screens/      one file per screen family as it is rebuilt
-                           (dashboard.css, lists.css, editor.css, legacy.css)
+                           (dashboard.css, lists.css, editor.css,
+                           appearance.css, legacy.css)
       components.ts        pageHead, card, table, tabs, emptyState, notice, ...
       icons.ts             inline SVG sprite
       preferences.ts       colour scheme, density, rail state (per browser)

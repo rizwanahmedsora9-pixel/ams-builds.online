@@ -122,3 +122,4 @@ h1{font-size:clamp(1.9rem,5vw,2.8rem);margin:0}
 .site-widget{font-size:.92rem;color:var(--muted)}
 .site-widget .widget-title,.site-widget h2{font-size:.95rem;margin:0 0 .4rem;color:var(--fg)}
 .site-widget p{margin:.3rem 0}
+.brand--logo{display:inline-flex;align-items:center;gap:.5rem}.brand-logo{height:1.8rem;width:auto;display:block}

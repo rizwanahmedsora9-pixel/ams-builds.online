@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS content (
   updated_by INTEGER,
   menu_order INTEGER NOT NULL DEFAULT 0,
   pinned INTEGER NOT NULL DEFAULT 0,
+  -- Phase 4: the theme template that renders this item ('' = the default one).
+  template TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (site_id, type, slug)

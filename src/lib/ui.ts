@@ -78,6 +78,8 @@ const ADMIN_SECTIONS: Record<string, string> = {
   '/menus': 'appearance',
   '/widgets': 'appearance',
   '/appearance': 'appearance',
+  '/templates': 'appearance',
+  '/identity': 'appearance',
   '/plugins': 'plugins',
   '/users': 'users',
   '/tools': 'tools',
@@ -123,11 +125,16 @@ export function navGroups(user: { role: string }, pending: number): NavGroup[] {
       ],
     },
     {
+      // The Appearance hub: one place for how the site looks. A theme is what
+      // renders it, a template is what renders one page, and widgets are the
+      // places the theme opens up — the order below follows that question.
       key: 'appearance', path: admin ? '/appearance' : '/menus', label: 'Appearance', icon: 'palette', show: admin || editor, children: [
         { path: '/appearance', label: 'Customize', show: admin },
         { path: '/themes', label: 'Themes', show: admin },
+        { path: '/templates', label: 'Templates', show: admin },
         { path: '/menus', label: 'Menus', show: editor },
         { path: '/widgets', label: 'Widgets', show: admin },
+        { path: '/identity', label: 'Identity', show: admin },
       ],
     },
     {

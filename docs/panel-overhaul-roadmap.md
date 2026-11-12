@@ -14,7 +14,7 @@ esbuild). What already works and should not be regressed:
   model, sanitizer for non-admin HTML, sandboxed media responses.
 - **Cache story is coherent**: generation-stamped KV keys, every mutation bumps the generation.
 - **Deployment story is honest**: one Worker or one Node process, D1 + KV, no vendor SDK sprawl.
-- **Tests exist and are behavioural** (25 end-to-end cases across two runtimes).
+- **Tests exist and are behavioural** (38 end-to-end/template cases plus 39 panel cases).
 - **Themes are data, never code** — the template engine cannot execute anything.
 
 The problem is not quality, it is **ceiling**. The panel was built screen-by-screen, so every route
@@ -368,7 +368,7 @@ Shipped in 0.6.0 (schema version 5):
 authored for the test ships a partial, a PNG logo, a linked stylesheet and three typed settings, and is
 installed, configured, rendered, versioned, inherited and validated entirely through the panel.
 
-### Phase 4 — Appearance hub & live Customizer (8 d)
+### Phase 4 — Appearance hub & live Customizer (8 d) — ✅ shipped in 0.7.0
 
 New information architecture, replacing four flat pages:
 
@@ -403,6 +403,51 @@ Appearance
 **Acceptance:** change brand colour in the Customizer and see it in the preview without saving; a
 newly uploaded theme's manifest settings appear as controls with no code change; per-page template
 override renders on the public site.
+
+**What shipped**
+
+- **The hub** — one Appearance section with six children (Customize, Themes, Templates, Menus, Widgets,
+  Identity). `/themes` and `/menus` keep their URLs, so bookmarks and existing links are unchanged.
+- **Tokens** — `src/lib/tokens.ts` is the single table (group, label, control type, default, help) that drives
+  both the controls and the emitted CSS. Emitted as one `:root{…}` block after the theme stylesheet and before
+  custom CSS, **filtered to the variables the active theme's stylesheet reads or declares**, under whichever
+  alias that theme uses (`--accent`, `--primary`, `--link`, `--gold` for brand). A token a theme cannot honour
+  is listed under *Not offered by ⟨theme⟩* rather than offered as a dead control. An unset token emits
+  nothing, so an untouched site is byte-identical to 0.6.0. Colours are validated (`#rgb`–`#rrggbbaa`),
+  numbers clamped, the custom font stack stripped of `<>{};\`. The colour scheme is applied as
+  `<meta name="color-scheme">` and honoured by every theme.
+- **Live preview** — `POST /{admin}/appearance/preview` validates the posted control values exactly as a save
+  would and mints `ams_preview`: HMAC-signed, `HttpOnly`, `SameSite=Strict`, path `/`, 30-minute TTL, carrying
+  *only* the differences (a typical preview is a ~150-byte cookie; past 3.5 KB the reply says so instead of
+  silently dropping the preview). Read only for a signed-in admin. The iframe is the real site
+  (`/?preview=1&customize=1`), reloaded on a 300 ms debounce; `X-Frame-Options: SAMEORIGIN` plus
+  `frame-ancestors 'self'` apply to preview responses only, so the public site stays unframeable. Desktop /
+  tablet / mobile widths change the frame's width, so the site's own breakpoints decide. No-JS: the form
+  saves and *Open preview in a tab* shows the same signed preview. **Discard** clears the cookie.
+- **Per-theme settings, no code** — `settings[]` from `theme.json` renders the matching control (text,
+  textarea, toggle, color, select, number, image with the media picker, url). Stored in `theme_settings`,
+  previewed unsaved, saved from the Customizer, and still editable on the theme's own screen.
+- **Widgets from the manifest** — `"widgets": ["footer", "sidebar"]` (or objects with `label`/`help`). Three
+  slots per area as `widget_{area}_{n}_{title,body}`; the theme places an area with `{{{widgets.footer}}}`.
+  Areas the layout does not draw are appended with `{{{footer}}}`, so a filled area is never invisible and a
+  drawn one is never repeated. A theme that declares none gets the classic `footer` area under the exact keys
+  existing sites already have — verified by the 0.6.0-era e2e case, which still passes unchanged.
+- **Per-page templates** — the editor's *Publish → Template* dropdown lists the active theme's templates
+  (`content.template`, migration **6**); resolved in `resolve()`; only stored when the template exists; a page
+  whose template disappears with a theme change falls back to the default for its kind. Templates screen lists
+  what the theme offers and which pages override it.
+- **Identity** — logo, favicon and social image (URLs from Media via the picker, sanitised) plus the scheme and
+  brand defaults. `og:image` falls back to the social image when a page has no featured image; `site.logo` is
+  available to themes and all three bundled themes draw it.
+- **Custom code** folded under a collapsed disclosure, unchanged in behaviour.
+- **Panel CSS** — a new `screens/appearance.css` under a 10 KB / 3 KB budget (6.8 KB / 1.9 KB actual).
+
+**Measured in 0.7.0:** `tests/panel.test.mjs` 39 cases (9 new), `tests/e2e.mjs` 27 cases (13b new, 12f
+rewritten for the hub's messages and the area-scoped widget markup), `tests/template.test.mjs` 11 cases — all
+green on Node; panel CSS budgets met (largest bundle 29.6 KB). The new e2e case proves the three acceptance
+criteria over HTTP: an unsaved brand colour and an unsaved theme setting reach the preview and reach nothing
+else, the save keeps both, the same manifest settings become controls with no code, and a page with its own
+template renders it publicly while a page without one keeps the default.
 
 ### Phase 5 — Theme store & lifecycle (6 d)
 
@@ -449,7 +494,7 @@ show screenshots; zip export round-trips through upload byte-for-byte for templa
 | 1 | Panel shell, palette, list tables, dashboard | 7 | 0 |
 | 2 | Revisions, autosave, locks, editor v2, media picker, list v2 | 11 | 0, 1 |
 | 3 ✅ | Theme platform v2 (assets, partials, filters, manifest, CSP) | 9 | 0 |
-| 4 | Appearance hub, tokens, live preview (per-theme settings shipped early, in 0.6.0) | 8 | 1, 3 |
+| 4 ✅ | Appearance hub, tokens, live preview, per-page templates, widget areas, Identity | 8 | 1, 3 |
 | 5 | Store lifecycle, authoring, rollback, 2 new themes | 6 | 3, 4 |
 | 6 | Audit log, capabilities, budgets, i18n, docs | 7 | 1–5 |
 | | **Total** | **52** | |
@@ -556,7 +601,7 @@ Every helper is a pure function over data; the engine still cannot execute code.
 | 3 ✅ | Revisions & workflow | `content_revisions`, `content_lock`, `content.updated_by`, `content.menu_order`, `content.pinned` (`content.template` moved to Phase 3) |
 | 4 ✅ | Page ordering default | the `pages_order` setting (a database that ran an early build of v3 lands on a consistent version) |
 | 5 ✅ | Theme platform | `theme_assets`, `theme_versions`, `theme_settings`, `themes.partials/manifest/parent/author/description/screenshot` (assets themselves live in the file store) |
-| 6 | Appearance hub | `theme_presets` (brand tokens, presets) if the settings table is not enough |
+| 6 ✅ | Appearance hub | `content.template` (per-page template override). Tokens and widget slots needed no new table: they are rows in `settings`, and per-theme settings already had `theme_settings` from v5 |
 | 7 | Governance | `audit_log`, `role_caps`, `user_prefs` |
 
 Forward-only, each applied by the existing `migrate()` and surfaced on the Updates screen.

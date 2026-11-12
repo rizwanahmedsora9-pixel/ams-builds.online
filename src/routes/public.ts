@@ -9,6 +9,8 @@ import { getFile } from '../lib/files';
 import { pluginOn } from '../lib/plugins';
 import { PAGE_CACHE_TTL, activeTheme, cacheKey, renderTheme, themeBySlug, type PageMeta } from '../lib/render';
 import { resolveSettings } from '../lib/theme-manifest';
+import { previewFor } from '../lib/preview';
+import { can } from '../lib/auth';
 import type { ThemeBundle } from '../lib/theme-manifest';
 import { clientIp, cspFor, rateCount, rateHit, sameOrigin, stripTags, type CspMode } from '../lib/security';
 import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
@@ -102,7 +104,7 @@ async function resolve(c: Ctx, settings: Settings, path: string, preview: boolea
     const [page] = row ? await toViews(env, [row], settings) : [];
     const { rows } = await listPosts(env, { page: 1, perPage: 5 });
     return {
-      status: 200, template: 'home',
+      status: 200, template: row ? templateFor(row, 'home') : 'home',
       meta: {
         title: page?.seo_title || (settings.tagline ? `${siteTitle} – ${settings.tagline}` : siteTitle),
         description: page?.seo_description || settings.tagline || undefined, canonical: '/',
@@ -146,7 +148,7 @@ async function resolve(c: Ctx, settings: Settings, path: string, preview: boolea
     if (row) {
       if (row.id === homeId) return { redirect: '/' };
       const [page] = await toViews(env, [row], settings);
-      return { status: 200, template: 'page', meta: metaFor(page, settings, 'website'), data: { page } };
+      return { status: 200, template: templateFor(row, 'page'), meta: metaFor(page, settings, 'website'), data: { page } };
     }
   }
 
@@ -157,10 +159,22 @@ async function resolve(c: Ctx, settings: Settings, path: string, preview: boolea
       const canonical = postUrl(row, style);
       if (canonical !== path) return { redirect: canonical };
       const [post] = await toViews(env, [row], settings);
-      return { status: 200, template: 'post', meta: metaFor(post, settings, 'article'), data: { post } };
+      return { status: 200, template: templateFor(row, 'post'), meta: metaFor(post, settings, 'article'), data: { post } };
     }
   }
   return notFound(siteTitle);
+}
+
+/**
+ * A page or post may name the theme template that renders it (the editor's
+ * Template dropdown, `content.template`). The name is stored only after it
+ * matched a template the active theme had, and renderTheme falls back to the
+ * default template when the current theme does not have it, so a theme switch
+ * cannot leave a page with no template.
+ */
+function templateFor(row: { template?: string | null }, fallback: string): string {
+  const wanted = (row.template || '').trim();
+  return /^[a-z][a-z0-9-]{1,30}$/.test(wanted) ? wanted : fallback;
 }
 
 const notFound = (siteTitle: string): Resolved => ({
@@ -318,8 +332,12 @@ site.get('*', async (c) => {
   const hasSession = !!getCookie(c, SESSION_COOKIE);
   const signedIn = hasSession ? await sessionUser(c, c.var.cfg) : null;
   const preview = hasSession && url.searchParams.has('preview') && !!signedIn;
+  // The Customizer's channel: unsaved values live in a signed cookie, never in
+  // the query string, and are read only for a signed-in admin.
+  const unsaved = preview ? await previewFor(c, !!signedIn && can(signedIn, 'admin')) : null;
   let previewTheme: ThemeBundle | undefined;
-  const wantedTheme = url.searchParams.get('theme');
+  // `&customize=1` only labels the preview for the Customizer's own script.
+  const wantedTheme = url.searchParams.get('theme') ?? unsaved?.theme;
   if (preview && wantedTheme) previewTheme = (await themeBySlug(c.env, wantedTheme.slice(0, 60))) ?? undefined;
   const cacheable = !hasSession && path.length <= 200 && !url.searchParams.has('comment') && !url.searchParams.has('reply_to');
   const key = cacheKey(c.var.cfg, url);
@@ -332,7 +350,9 @@ site.get('*', async (c) => {
       // A cached page still needs its policy. The nonce is the one baked into the
       // cached HTML, so it rotates with the page (an hour at most) rather than
       // per request — long enough to matter only if someone can read the cache.
-      return c.html(hit, 200, { ...headers, 'X-Cache': 'HIT', ...cspHeaders(settings, hit) });
+      const cached = c.html(hit, 200, { ...headers, 'X-Cache': 'HIT', ...cspHeaders(settings, hit) });
+      if (url.searchParams.has('preview')) frameable(cached);
+      return cached;
     }
   }
 
@@ -344,6 +364,7 @@ site.get('*', async (c) => {
   if ('redirect' in result) return preview ? c.redirect(result.redirect + '?preview=1', 302) : c.redirect(result.redirect, 301);
   if (preview) result.meta.noindex = true;
 
+  const framed = url.searchParams.has('preview');
   const body = await renderTheme(c.env, {
     cfg: c.var.cfg,
     settings,
@@ -351,7 +372,11 @@ site.get('*', async (c) => {
     template: result.template,
     meta: result.meta,
     theme: previewTheme,
-    themeSettings: previewTheme ? await themeValues(c.env, previewTheme.slug) : themeSettings,
+    // Unsaved theme settings (a Customizer preview) sit on top of the saved ones.
+    themeSettings: unsaved?.settings
+      ? { ...(previewTheme ? await themeValues(c.env, previewTheme.slug) : themeSettings ?? {}), ...unsaved.settings }
+      : previewTheme ? await themeValues(c.env, previewTheme.slug) : themeSettings,
+    tokenOverrides: unsaved?.tokens,
     data: {
       ...result.data,
       comment_notice: url.searchParams.get('comment') || undefined,
@@ -364,12 +389,28 @@ site.get('*', async (c) => {
   // Content-Security-Policy: a per-response nonce, so the site's own custom
   // JS/CSS (which the renderer stamps with it) keeps working while nothing else
   // inline can run. `report` is the safe first step after upgrading.
-  return c.html(body, result.status, { ...headers, 'X-Cache': 'MISS', ...cspHeaders(settings, body) });
+  const response = c.html(body, result.status, { ...headers, 'X-Cache': 'MISS', ...cspHeaders(settings, body) });
+  if (framed) frameable(response);
+  return response;
 });
 
 site.all('*', (c) => c.text('Method not allowed', 405));
 
 /* --------------------------------------------------------------- helpers */
+
+/**
+ * A `?preview=1` page is shown in the Customizer's iframe, so it may be framed
+ * by this site only. The panel keeps its `X-Frame-Options: DENY`; the public
+ * page it frames relaxes it for itself, and `frame-ancestors` keeps anyone else
+ * from framing the site.
+ */
+function frameable(response: Response): void {
+  response.headers.set('X-Frame-Options', 'SAMEORIGIN');
+  const blocking = response.headers.has('Content-Security-Policy');
+  const key = blocking ? 'Content-Security-Policy' : 'Content-Security-Policy-Report-Only';
+  const csp = response.headers.get(key);
+  if (csp && !csp.includes('frame-ancestors')) response.headers.set(key, `${csp}; frame-ancestors 'self'`);
+}
 
 /**
  * The Content-Security-Policy for one response. The nonce is read out of the

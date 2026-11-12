@@ -16,6 +16,7 @@ import {
   pruneLocks, pruneRevisions, readLock, recordRevision, releaseLock, sameContent, type RevisionRow,
 } from '../../admin/revisions';
 import { hasColumn, hasPhase2Schema } from '../../lib/schema';
+import { activeThemeTemplates } from '../../lib/theme-store';
 import { lockBanner, restoreBanner, revisionDiff, revisionList } from '../../admin/editor-views';
 import { csrfField, errorPage, go, html, layout, raw, type Raw } from '../../lib/ui';
 
@@ -1229,6 +1230,10 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
   }
 
   const status = row?.status ?? 'draft';
+  // Templates the active theme offers. The kind's own template is the default;
+  // `page` is not offered to a post (it would drop its date, author and comments).
+  const templateOptions = (await activeThemeTemplates(c.env)).templates
+    .filter((t) => !['home', 'archive', '404', type, ...(type === 'post' ? ['page'] : [])].includes(t));
   // Pages: one tick puts the page in the header menu (new pages and drafts start ticked).
   const pageUrl = row ? (settings.home_page_id === String(row.id) ? '/' : '/' + row.slug) : null;
   const inMenu = type === 'page' && (!row || row.status === 'draft' || (await isInPrimaryMenu(c.env, pageUrl!)));
@@ -1314,6 +1319,12 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
     </div>` : ''}
     ${type === 'page' ? html`<label class="check" style="margin-top:.9rem"><input type="checkbox" name="in_menu" value="1"${inMenu ? raw(' checked') : ''}> Show in the main menu</label>
     <p class="hint">Adds a link to this page in the site header once it is published. Reorder or rename links under <a href="${base}/menus">Menus</a>.</p>` : ''}
+    ${templateOptions.length ? html`<label for="template">Template</label>
+    <select id="template" name="template">
+      <option value="">Default (${type})</option>
+      ${templateOptions.map((t) => html`<option value="${t}"${row?.template === t ? raw(' selected') : ''}>${t}</option>`)}
+    </select>
+    <p class="hint">Templates come from the active theme. Browse them under <a href="${base}/templates">Appearance → Templates</a>.</p>` : ''}
     <p class="row" style="margin:1.1rem 0 0"><button class="btn" type="submit">Save</button></p>
   </div>
 </form>
@@ -1479,9 +1490,9 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/duplicate', async (c) => {
     slug = `${base}-${n}`;
   }
   const res = await c.env.DB.prepare(
-    `INSERT INTO content (site_id,type,title,slug,body,excerpt,status,seo_title,seo_description,featured_media_id,author_id,published_at,created_at,updated_at)
-     VALUES (1,?,?,?,?,?,'draft',?,?,?,?,NULL,?,?)`,
-  ).bind(row.type, `${row.title} (copy)`, slug, row.body, row.excerpt, row.seo_title, row.seo_description, row.featured_media_id, c.var.user.id, now, now).run();
+    `INSERT INTO content (site_id,type,title,slug,body,excerpt,status,seo_title,seo_description,featured_media_id,author_id,published_at,template,created_at,updated_at)
+     VALUES (1,?,?,?,?,?,'draft',?,?,?,?,NULL,?,?,?)`,
+  ).bind(row.type, `${row.title} (copy)`, slug, row.body, row.excerpt, row.seo_title, row.seo_description, row.featured_media_id, c.var.user.id, now, row.template ?? '', now).run();
   const copyId = Number(res.meta.last_row_id);
   await c.env.DB.prepare('INSERT OR IGNORE INTO content_terms (content_id,term_id) SELECT ?,term_id FROM content_terms WHERE content_id=?').bind(copyId, id).run();
   return go(c, `/${kind}/${copyId}`, { ok: 'Duplicated as a draft. The original is untouched.' });
@@ -1671,6 +1682,9 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   const excerpt = type === 'post' ? str('excerpt').trim().slice(0, 500) : '';
   const seoTitle = str('seo_title').trim().slice(0, 200);
   const seoDesc = str('seo_description').trim().slice(0, 320);
+  // A per-page template: only a template the active theme really has, else ''.
+  const wantedTemplate = str('template').trim().slice(0, 40);
+  const template = wantedTemplate && (await activeThemeTemplates(c.env)).templates.includes(wantedTemplate) ? wantedTemplate : '';
 
   // Snapshot the pre-save state first: this is what makes a save reversible.
   // Skipped when nothing a person can see has changed (a re-save of the same
@@ -1684,16 +1698,16 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   let savedId = id;
   const trackEditor = await hasColumn(c.env, 'content', 'updated_by');
   if (existing) {
-    await db.prepare(`UPDATE content SET title=?, slug=?, body=?, excerpt=?, status=?, seo_title=?, seo_description=?, featured_media_id=?, published_at=?, updated_at=?${trackEditor ? ', updated_by=?' : ''} WHERE id=?`)
-      .bind(title, slug, body, excerpt, status, seoTitle, seoDesc, featured, publishedAt, now, ...(trackEditor ? [c.var.user.id] : []), id).run();
+    await db.prepare(`UPDATE content SET title=?, slug=?, body=?, excerpt=?, status=?, seo_title=?, seo_description=?, featured_media_id=?, published_at=?, template=?, updated_at=?${trackEditor ? ', updated_by=?' : ''} WHERE id=?`)
+      .bind(title, slug, body, excerpt, status, seoTitle, seoDesc, featured, publishedAt, template, now, ...(trackEditor ? [c.var.user.id] : []), id).run();
   } else {
     // 13 columns plus the optional updated_by; the placeholder count has to match
     // exactly, and SQLite will not tell you which one is missing.
-    const columns = 'site_id,type,title,slug,body,excerpt,status,seo_title,seo_description,featured_media_id,author_id,published_at,created_at,updated_at'
+    const columns = 'site_id,type,title,slug,body,excerpt,status,seo_title,seo_description,featured_media_id,author_id,published_at,template,created_at,updated_at'
       + (trackEditor ? ',updated_by' : '');
-    const placeholders = '1,' + Array.from({ length: 13 }, () => '?').join(',') + (trackEditor ? ',?' : '');
+    const placeholders = '1,' + Array.from({ length: 14 }, () => '?').join(',') + (trackEditor ? ',?' : '');
     const res = await db.prepare(`INSERT INTO content (${columns}) VALUES (${placeholders})`)
-      .bind(type, title, slug, body, excerpt, status, seoTitle, seoDesc, featured, c.var.user.id, publishedAt, now, now, ...(trackEditor ? [c.var.user.id] : [])).run();
+      .bind(type, title, slug, body, excerpt, status, seoTitle, seoDesc, featured, c.var.user.id, publishedAt, template, now, now, ...(trackEditor ? [c.var.user.id] : [])).run();
     savedId = Number(res.meta.last_row_id);
   }
   if (existing) await pruneRevisions(c.env, savedId);

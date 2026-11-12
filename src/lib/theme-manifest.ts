@@ -89,6 +89,12 @@ export type ThemeManifest = {
   /** Colour preview [background, text, accent], used by the store. */
   preview: string[];
   settings: ThemeSetting[];
+  /**
+   * Named widget areas a theme renders with `{{{widgets "footer"}}}`. A theme
+   * that declares none gets the classic footer slots, so no existing theme
+   * changes behaviour.
+   */
+  widgets: ThemeWidgetArea[];
   changelog: { version: string; notes: string }[];
   assets: string[];
   /** What the theme asked for; `version` 1 manifests are upgraded on load. */
@@ -114,11 +120,49 @@ export const TEMPLATE_NAMES = ['base', 'home', 'page', 'post', 'archive', '404']
 /** Templates a theme may declare beyond the standard set (`page-landing`, `search`, …). */
 const EXTRA_TEMPLATE = /^[a-z][a-z0-9-]{1,30}$/;
 
+/** A place a theme puts widgets: the panel renders one editor per area. */
+export type ThemeWidgetArea = { key: string; label: string; help?: string };
+
+/**
+ * What a theme without a `widgets` declaration offers: one footer area with
+ * three slots. The key is `footer` on purpose — the slots are stored as
+ * `widget_footer_1_body`, exactly the keys every site installed before this
+ * release already has, so old widgets keep rendering.
+ */
+export const DEFAULT_WIDGET_AREAS: ThemeWidgetArea[] = [
+  { key: 'footer', label: 'Footer', help: 'Three columns after the theme footer.' },
+];
+
+/** Storage key for one widget: `widget_<area>_<slot>_<field>`. */
+export const widgetKey = (area: string, slot: number, field: 'title' | 'body'): string =>
+  `widget_${area.replace(/-/g, '_')}_${slot}_${field}`;
+
 const SETTING_TYPES: ThemeSettingType[] = ['text', 'textarea', 'toggle', 'color', 'select', 'number', 'image', 'url'];
 const COLOR = /^#[0-9a-f]{3,8}$/i;
 
 function str(v: unknown, max = 200): string {
   return typeof v === 'string' ? v.trim().slice(0, max) : '';
+}
+
+/**
+ * Widget areas. `"widgets": ["footer", "sidebar"]` is the short form; the long
+ * form gives each area a label and a hint. Keys become part of a settings key,
+ * so they are restricted to `[a-z0-9-]`.
+ */
+function parseWidgetAreas(input: unknown): ThemeWidgetArea[] {
+  if (input === undefined) return DEFAULT_WIDGET_AREAS;
+  if (!Array.isArray(input)) throw new ThemeError('"widgets" must be a list of area names.');
+  if (input.length > 8) throw new ThemeError('A theme may declare at most 8 widget areas.');
+  const seen = new Set<string>();
+  return input.map((raw, i) => {
+    const o = (typeof raw === 'string' ? { key: raw } : raw) as Record<string, unknown>;
+    if (!o || typeof o !== 'object') throw new ThemeError(`Widget area ${i + 1} must be a name or an object.`);
+    const key = str(o.key, 24).toLowerCase();
+    if (!/^[a-z][a-z0-9-]{0,22}$/.test(key)) throw new ThemeError(`Widget area ${i + 1} needs a key like "footer" or "sidebar-left".`);
+    if (seen.has(key)) throw new ThemeError(`The widget area "${key}" is declared twice.`);
+    seen.add(key);
+    return { key, label: str(o.label, 40) || key.replace(/-/g, ' '), ...(str(o.help, 120) ? { help: str(o.help, 120) } : {}) };
+  });
 }
 
 function parseSettings(input: unknown): ThemeSetting[] {
@@ -190,6 +234,8 @@ export function parseManifest(input: unknown): { manifest: ThemeManifest; templa
     .filter(Boolean)
     .slice(0, MAX_ASSETS_PER_THEME);
 
+  const widgets = parseWidgetAreas(o.widgets);
+
   const templatesDecl = o.templates ?? {};
   if (typeof templatesDecl !== 'object' || Array.isArray(templatesDecl)) throw new ThemeError('The theme needs a "templates" object.');
   const templates: Record<string, string> = {};
@@ -230,7 +276,7 @@ export function parseManifest(input: unknown): { manifest: ThemeManifest; templa
     description: str(o.description, 400),
     parent, layout, tags, supports,
     screenshot: cleanAssetPath(str(o.screenshot, 120)),
-    preview, settings: parseSettings(o.settings), changelog, assets,
+    preview, settings: parseSettings(o.settings), widgets, changelog, assets,
     manifestVersion: 2,
   };
   return { manifest, templates, partials, css };
@@ -413,6 +459,7 @@ export function inherit(child: ThemeBundle, parent: ThemeBundle | null): ThemeBu
       ...child.manifest,
       supports: [...new Set([...parent.manifest.supports, ...child.manifest.supports])],
       settings: child.manifest.settings.length ? child.manifest.settings : parent.manifest.settings,
+      widgets: child.manifest.widgets?.length ? child.manifest.widgets : parent.manifest.widgets,
     },
   };
 }

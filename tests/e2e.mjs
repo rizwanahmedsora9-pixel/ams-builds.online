@@ -712,7 +712,7 @@ test('12f. plugins and appearance: snippets, built-ins, custom CSS and widgets',
   assert.match((await adminPost('/appearance', {
     custom_css: '.e2e-custom{color:red}', custom_head: '<meta name="e2e-head" content="1">',
     custom_footer: '<div class="e2e-footer"></div>', custom_js: '',
-  })).location, /Appearance.saved/);
+  })).location, /\/appearance\?ok=Saved/);
   const styled = await anon('/');
   assert.match(styled.text, /\.e2e-custom\{color:red\}/);
   assert.match(styled.text, /name="e2e-head"/);
@@ -720,9 +720,9 @@ test('12f. plugins and appearance: snippets, built-ins, custom CSS and widgets',
 
   assert.match((await adminPost('/widgets', {
     widget_footer_1_title: 'E2E Widget', widget_footer_1_body: '<p class="e2e-widget">Hello from a widget</p>',
-  })).location, /Widgets.saved/);
+  })).location, /\/widgets\?ok=Widgets saved/);
   const widgetPage = await anon('/');
-  assert.match(widgetPage.text, /class="site-widgets"/);
+  assert.match(widgetPage.text, /class="site-widgets site-widgets--footer"/, 'the classic footer area still renders');
   assert.match(widgetPage.text, /E2E Widget/);
   assert.match(widgetPage.text, /e2e-widget/);
 
@@ -770,7 +770,7 @@ test('12g. tools: redirects, export/import, backups, health and cache', async ()
 test('12h. updates and taxonomy management: version page, run updates, categories and tags', async () => {
   const page = await get(`${admin}/updates`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /6\.0\.0|0\.6\.0/, 'the updates page states the running version');
+  assert.match(page.text, /7\.0\.0|0\.7\.0/, 'the updates page states the running version');
   assert.match(page.text, /Database schema/);
   assert.match((await adminPost('/updates/run', {})).location, /\/updates\?ok=/);
 
@@ -991,6 +991,78 @@ test('16. revisions, autosave, edit locks, quick edit and media picker', async (
   await adminPost('/pages/save', { title: 'Ordered Two', slug: 'ordered-two', body: '', status: 'published' });
   assert.match((await get(`${admin}/pages`)).text, new RegExp(`action="${admin}/pages/order"`), 'the pages screen carries the order form');
   log('revisions/restore, autosave, edit lock, quick edit, duplicate, pin, media picker and page order all work');
+});
+
+// Phase 4, over the wire, from the public site's side: a brand colour chosen in
+// the Customizer changes a page without a save; a new theme's manifest settings
+// become controls with no code change; a per-page template override renders.
+test('13b. appearance: live preview, manifest settings, per-page template and widgets', async () => {
+  // A theme that declares two settings, two widget areas and an extra template.
+  const atlas = {
+    name: 'Atlas E2E', slug: 'atlas-e2e', version: '1.0.0',
+    templates: {
+      base: '<!doctype html><html><head>{{{head}}}</head><body data-theme="atlas-e2e">{{{content}}}{{{widgets.footer}}}{{{footer}}}</body></html>',
+      home: '<h1 class="atlas-hero">{{theme.hero}}</h1>',
+      page: '<h1 class="atlas-page">{{page.title}}</h1>',
+      'page-landing': '<section class="atlas-landing">{{{page.content}}}</section>',
+    },
+    css: ':root{--accent:#0055aa;--fg:#111;--bg:#fff} body{color:var(--fg)}',
+    settings: [
+      { key: 'hero', type: 'text', label: 'Hero words', default: 'Hello there' },
+      { key: 'badge', type: 'toggle', label: 'Show a badge', default: true },
+    ],
+    widgets: ['footer', 'sidebar'],
+  };
+  assert.match((await uploadTheme('atlas-e2e.json', JSON.stringify(atlas))).location, /v1\.0\.0 installed/);
+  const rows = (await get(`${admin}/themes`)).text;
+  const id = rows.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="atlas-e2e"/)[1];
+  await adminPost(`/themes/${id}/activate`, {});
+
+  // 1. Unsaved brand colour and theme setting → preview only.
+  const preview = await request(`${admin}/appearance/preview`, {
+    method: 'POST', body: form({ _csrf: await csrf(), token_brand: '#ff0066', hero: 'Preview hero' }),
+  });
+  assert.equal(preview.status, 200);
+  assert.equal(JSON.parse(preview.text).ok, true);
+  const framed = await get('/?preview=1&customize=1');
+  assert.match(framed.text, /id="site-tokens">[^<]*#ff0066/, 'the unsaved colour is in the preview');
+  assert.match(framed.text, /class="atlas-hero">Preview hero</, 'so is the unsaved theme setting');
+  assert.equal(framed.headers.get('x-frame-options'), 'SAMEORIGIN', 'the panel may frame its own preview');
+  const pub = await anon('/');
+  assert.doesNotMatch(pub.text, /#ff0066/, 'nothing was saved by previewing');
+  assert.match(pub.text, /class="atlas-hero">Hello there</);
+  assert.equal(pub.headers.get('x-frame-options'), null, 'the public site stays unframeable');
+
+  // 2. Save from the Customizer: the colour and the theme setting persist.
+  await adminPost('/appearance', { token_brand: '#ff0066', hero: 'Saved hero', badge: '1', start_path: '/' });
+  const saved = await anon('/');
+  assert.match(saved.text, /--accent:#ff0066/);
+  assert.match(saved.text, /class="atlas-hero">Saved hero</);
+
+  // 3. Per-page template override renders on the public site.
+  assert.match((await get(`${admin}/pages/new`)).text, /<option value="page-landing">/);
+  await adminPost('/pages/save', {
+    title: 'E2E Landing', slug: 'e2e-landing', body: '<p>Landing body</p>', status: 'published', template: 'page-landing',
+  });
+  assert.match((await anon('/e2e-landing')).text, /class="atlas-landing"><p>Landing body<\/p>/);
+  await adminPost('/pages/save', { title: 'E2E Plain', slug: 'e2e-plain', body: '<p>Plain</p>', status: 'published' });
+  assert.match((await anon('/e2e-plain')).text, /class="atlas-page">E2E Plain</, 'a page without an override keeps the default');
+
+  // 4. Widget areas come from theme.json, and render where the theme allows.
+  await adminPost('/widgets', {
+    widget_footer_1_title: 'About', widget_footer_1_body: '<p>Footer widget</p>',
+    widget_sidebar_1_body: '<p>Sidebar widget</p>',
+  });
+  const withWidgets = await anon('/e2e-plain');
+  assert.match(withWidgets.text, /site-widgets--footer[\s\S]*Footer widget/);
+  assert.match(withWidgets.text, /site-widgets--sidebar[\s\S]*Sidebar widget/);
+
+  // 5. Identity: the social image and scheme reach every page.
+  await adminPost('/identity', { site_logo: '', favicon: '/media/fav.png', social_image: '/media/share.png', token_scheme: 'dark', token_brand: '#ff0066' });
+  const identity = await anon('/e2e-plain');
+  assert.match(identity.text, /<meta property="og:image" content="[^"]*\/media\/share.png">/);
+  assert.match(identity.text, /<meta name="color-scheme" content="dark">/);
+  log('preview shows unsaved tokens + theme settings (never saved), the Customizer save persists both, a page renders its own template, widget areas from theme.json render, Identity reaches every page');
 });
 
 test('14. logout ends the session and repeated bad logins are rate limited', async () => {

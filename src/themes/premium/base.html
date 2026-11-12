@@ -12,7 +12,7 @@
 <header class="hdr">
   {{#if site.tagline}}<div class="topbar"><div class="wrap">{{site.tagline}}</div></div>{{/if}}
   <div class="wrap hdr-in">
-    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">&#9670;</span>{{site.title}}</a>
+    {{#if site.logo}}<a class="brand brand--logo" href="/"><img src="{{site.logo}}" alt="{{site.title}}" class="brand-logo">{{site.title}}</a>{{else}}<a class="brand" href="/"><span class="brand-mark" aria-hidden="true">&#9670;</span>{{site.title}}</a>{{/if}}
     {{#if menu.primary}}
     <nav class="tabs" aria-label="Primary">
       {{#each menu.primary}}<a href="{{url}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>{{/each}}

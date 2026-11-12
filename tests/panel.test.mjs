@@ -753,3 +753,214 @@ test('phase 3: the content security policy is emitted, and the nonce matches the
   assert.equal(off.headers.get('content-security-policy'), null);
   assert.equal(off.headers.get('content-security-policy-report-only'), null);
 });
+
+/* ---------------------------------------------------- phase 4: appearance */
+
+// The Appearance hub: the live Customizer and its preview channel, per-theme
+// settings rendered as controls with no code, widget areas from theme.json,
+// per-page templates, and Identity. The fixture theme below is installed by the
+// first test so every case states its own palette instead of inheriting one.
+
+const previewCookie = () => panel.jar.get('ams_preview');
+
+const ATLAS = {
+  'atlas/theme.json': JSON.stringify({
+    name: 'Atlas', slug: 'atlas', version: '1.0.0',
+    templates: {
+      // The theme draws `footer` where it likes; every other area arrives with
+      // `{{{footer}}}`, so an area can never be silently invisible.
+      base: '<!doctype html><html><head>{{{head}}}</head><body data-theme="atlas">{{{content}}}{{{widgets.footer}}}{{{footer}}}</body></html>',
+      home: '<h1 class="atlas-hero">{{theme.hero}}</h1>{{#if theme.badge}}<span class="atlas-badge">on</span>{{/if}}',
+      page: '<h1 class="atlas-page">{{page.title}}</h1>',
+      'page-wide': '<section class="atlas-wide">{{{page.content}}}</section>',
+    },
+    css: ':root{--accent:#0055aa;--primary:#0055aa;--fg:#111;--bg:#fff;--max:40rem} body{color:var(--fg)}',
+    settings: [
+      { key: 'hero', type: 'text', label: 'Hero words', default: 'Hello' },
+      { key: 'badge', type: 'toggle', label: 'Show a badge', default: true },
+      { key: 'tone', type: 'color', label: 'Accent tone', default: '#0055aa' },
+    ],
+    widgets: ['footer', 'sidebar'],
+  }),
+};
+
+test('phase 4: the appearance hub has six screens in one sidebar section', async () => {
+  assert.match((await uploadZip('atlas.zip', ATLAS)).location, /Atlas/);
+  const row = (await panel.get(`${panel.admin}/themes`)).text.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="atlas"/);
+  assert.ok(row, 'the fixture theme is listed');
+  await panel.adminPost(`/themes/${row[1]}/activate`, {});
+
+  const page = await panel.get(`${panel.admin}/appearance`);
+  const rail = page.text.match(/<nav class="rail"[\s\S]*?<\/nav>/)[0];
+  for (const label of ['Customize', 'Themes', 'Templates', 'Menus', 'Widgets', 'Identity']) {
+    assert.ok(rail.includes(`>${label}</a>`), `${label} is in the Appearance sub-menu`);
+  }
+  for (const path of ['/appearance', '/templates', '/identity', '/widgets']) {
+    assert.equal((await panel.get(panel.admin + path)).status, 200, `${path} renders`);
+  }
+});
+
+test('phase 4: the Customizer renders one control per token the theme reads', async () => {
+  const page = await panel.get(`${panel.admin}/appearance`);
+  assert.match(page.text, /id="customizer-frame"[\s\S]*src="\/\?preview=1&amp;customize=1"/, 'the preview is the real site');
+  assert.match(page.text, /data-preview-url="[^"]*\/appearance\/preview"/);
+  for (const name of ['token_brand', 'token_text', 'token_bg', 'token_scheme']) {
+    assert.ok(page.text.includes(`name="${name}"`), `${name} has a control`);
+  }
+  // A token this theme cannot honour is listed, not offered as a dead control.
+  assert.match(page.text, /Not offered by Atlas/);
+  assert.match(page.text, /<code>--surface<\/code>/);
+  assert.doesNotMatch(page.text, /name="token_surface"/, 'no control for a variable the theme never reads');
+  assert.match(page.text, /data-device="mobile"/, 'device widths are offered');
+  assert.match(page.text, /<summary><b>Custom code<\/b>/, 'raw code folded under a disclosure');
+});
+
+test('phase 4: an unsaved brand colour reaches the preview through a signed cookie only', async () => {
+  const res = await panel.adminPost('/appearance/preview', { token_brand: '#e11d48' });
+  assert.equal(res.status, 200);
+  const json = JSON.parse(res.text);
+  assert.equal(json.ok, true);
+  assert.match(json.css, /--accent:#e11d48/, 'the reply carries the CSS to swatch');
+  assert.equal(json.changed, 1);
+
+  const cookie = previewCookie();
+  assert.ok(cookie && cookie.length > 40, 'a preview cookie was minted');
+  assert.doesNotMatch(cookie, /e11d48/, 'the value is signed, not readable');
+
+  const preview = await panel.get('/?preview=1&customize=1');
+  assert.match(preview.text, /id="site-tokens">[^<]*#e11d48/, 'the unsaved colour is in the preview');
+  assert.equal(preview.headers.get('x-frame-options'), 'SAMEORIGIN', 'the preview may be framed by the panel');
+  // A policy that is on (the default) names the frame's allowed parent.
+  const policy = preview.headers.get('content-security-policy-report-only') || preview.headers.get('content-security-policy');
+  if (policy) assert.match(policy, /frame-ancestors 'self'/, 'the policy allows this site to frame its own preview');
+
+  // Nothing was saved: the public site is untouched, and it stays unframeable.
+  const publicPage = await panel.anon('/');
+  assert.doesNotMatch(publicPage.text, /#e11d48/);
+  assert.equal(publicPage.headers.get('x-frame-options'), null);
+
+  // The cookie is ignored without a session, and a tampered one is refused.
+  assert.doesNotMatch((await panel.anon('/?preview=1&customize=1')).text, /#e11d48/);
+  panel.jar.set('ams_preview', cookie.slice(0, -6) + 'AAAAAA');
+  assert.doesNotMatch((await panel.get('/?preview=1&customize=1')).text, /#e11d48/, 'a tampered signature is ignored');
+
+  // Ending the preview removes the cookie.
+  panel.jar.set('ams_preview', cookie);
+  await panel.adminPost('/appearance/preview/end', {});
+  assert.equal(previewCookie(), undefined, 'the preview cookie is cleared');
+});
+
+test('phase 4: saving in the Customizer persists tokens; a bad colour is refused', async () => {
+  const res = await panel.adminPost('/appearance', {
+    token_brand: '#123456', token_scheme: 'light',
+    custom_css: 'body{outline:0}', custom_head: '', custom_footer: '', custom_js: '', start_path: '/',
+  });
+  assert.equal(res.status, 303);
+  const publicPage = await panel.anon('/');
+  assert.match(publicPage.text, /--accent:#123456/, 'the saved brand colour is emitted');
+  assert.match(publicPage.text, /<meta name="color-scheme" content="light">/);
+  assert.match(publicPage.text, /body\{outline:0\}/, 'advanced CSS still works');
+
+  const bad = await panel.adminPost('/appearance', { token_brand: 'not-a-colour' });
+  assert.match(bad.location, /err=/, 'an invalid colour is rejected');
+  assert.match(decodeURIComponent(bad.location), /Brand colour/);
+  assert.match((await panel.anon('/')).text, /--accent:#123456/, 'the refused save changed nothing');
+
+  await panel.adminPost('/appearance', { token_brand: '#0055aa', token_scheme: 'auto', custom_css: '' });
+});
+
+test('phase 4: an uploaded theme gets controls and widget areas with no code change', async () => {
+  // No route, no form field was written for Atlas: both come from theme.json.
+  const page = await panel.get(`${panel.admin}/appearance`);
+  assert.match(page.text, /<label for="th-hero">Hero words/);
+  assert.ok(page.text.includes('name="badge"'), 'a toggle control is generated');
+  assert.ok(page.text.includes('name="tone"'), 'a colour control is generated');
+  assert.match(page.text, /Atlas<\/b> v1\.0\.0/);
+
+  const widgets = await panel.get(`${panel.admin}/widgets`);
+  assert.match(widgets.text, /widgets\.footer/);
+  assert.match(widgets.text, /widgets\.sidebar/);
+  assert.match(widgets.text, /name="widget_footer_1_body"/);
+  assert.match(widgets.text, /name="widget_sidebar_2_body"/);
+
+  // An unsaved theme setting is previewed before it is saved.
+  await panel.adminPost('/appearance/preview', { hero: 'Preview words', badge: '' });
+  const preview = await panel.get('/?preview=1&customize=1');
+  assert.match(preview.text, /class="atlas-hero">Preview words</);
+  assert.doesNotMatch(preview.text, /atlas-badge/, 'the unsaved toggle is off');
+  assert.match((await panel.get('/')).text, /class="atlas-hero">Hello</, 'the saved value is unchanged');
+  assert.ok((previewCookie() || '').length < 3500, 'the preview cookie stays small');
+
+  // Saving the theme's own settings keeps works the same as the Themes screen.
+  await panel.adminPost('/appearance', { hero: 'Saved words', badge: '1', start_path: '/' });
+  assert.match((await panel.anon('/')).text, /class="atlas-hero">Saved words</);
+  assert.match((await panel.anon('/')).text, /atlas-badge/);
+});
+
+test('phase 4: widget areas render where the theme draws them, with escaped titles', async () => {
+  // The layout draws `footer`; `sidebar` is appended so a filled area is never
+  // lost. One post carries every area, exactly as the form does.
+  await panel.adminPost('/widgets', {
+    widget_footer_1_title: 'About', widget_footer_1_body: '<p>Footer body</p>',
+    widget_sidebar_1_title: '<b>Not markup</b>', widget_sidebar_1_body: '<p>Sidebar body</p>',
+  });
+  const home = await panel.anon('/');
+  assert.match(home.text, /site-widgets--footer[\s\S]*Footer body/);
+  assert.match(home.text, /site-widgets--sidebar[\s\S]*Sidebar body/);
+  assert.equal((home.text.match(/site-widgets--footer/g) || []).length, 1, 'a drawn area is not repeated');
+  assert.match(home.text, /&lt;b&gt;Not markup&lt;\/b&gt;/, 'a widget title is escaped');
+  assert.match(home.text, /<p>Sidebar body<\/p>/, 'a widget body is admin HTML');
+});
+
+test('phase 4: a page template override is offered in the editor and renders publicly', async () => {
+  const editor = await panel.get(`${panel.admin}/pages/new`);
+  assert.match(editor.text, /<select id="template" name="template">/, 'the editor offers a Template dropdown');
+  assert.match(editor.text, /<option value="page-wide">page-wide<\/option>/, 'the theme template is listed');
+  assert.doesNotMatch(editor.text, /<option value="base">/, 'the layout is not offered as a page template');
+
+  assert.equal((await panel.adminPost('/pages/save', {
+    title: 'Atlas Landing', slug: 'atlas-landing', body: '<p>Wide body</p>', status: 'published', template: 'page-wide',
+  })).status, 303);
+  assert.match((await panel.anon('/atlas-landing')).text, /class="atlas-wide"><p>Wide body<\/p>/, 'the chosen template renders');
+
+  // A template the theme does not have is not stored: the default renders instead.
+  const list = (await panel.get(`${panel.admin}/pages`)).text;
+  const id = list.match(/Atlas Landing[\s\S]{0,300}?\/pages\/(\d+)/)?.[1];
+  assert.ok(id, 'the page is listed');
+  await panel.adminPost('/pages/save', {
+    id, title: 'Atlas Landing', slug: 'atlas-landing', body: '<p>Wide body</p>', status: 'published', template: 'no-such-template',
+  });
+  const fallback = await panel.anon('/atlas-landing');
+  assert.doesNotMatch(fallback.text, /atlas-wide/);
+  assert.match(fallback.text, /class="atlas-page">Atlas Landing/, 'the default page template is used');
+
+  const templates = await panel.get(`${panel.admin}/templates`);
+  assert.match(templates.text, /tile--template[\s\S]*page-wide/, 'the Templates screen lists it');
+});
+
+test('phase 4: Identity writes the logo, favicon and social image the page uses', async () => {
+  await panel.adminPost('/identity', {
+    site_logo: '/media/logo.png', favicon: '/media/icon.png', social_image: '/media/share.png',
+    token_scheme: 'dark', token_brand: '#334455',
+  });
+  const home = await panel.anon('/');
+  assert.match(home.text, /<link rel="icon" href="\/media\/icon.png">/);
+  assert.match(home.text, /<meta property="og:image" content="[^"]*\/media\/share.png">/);
+  assert.match(home.text, /<meta name="color-scheme" content="dark">/);
+  assert.match((await panel.get(`${panel.admin}/identity`)).text, /value="\/media\/logo.png"/);
+
+  // A script URL is refused, like every other admin-managed URL.
+  await panel.adminPost('/identity', { site_logo: 'javascript:alert(1)', favicon: '', social_image: '', token_scheme: 'auto' });
+  assert.doesNotMatch((await panel.get(`${panel.admin}/identity`)).text, /javascript:/);
+  assert.doesNotMatch((await panel.anon('/')).text, /<link rel="icon"/);
+});
+
+test('phase 4: the Customizer keeps working without JavaScript', async () => {
+  // The form posts every control, so a no-JS save is a normal form submission
+  // and the preview link opens the real site in a tab.
+  const page = await panel.get(`${panel.admin}/appearance`);
+  assert.match(page.text, /<form method="post" action="[^"]*\/appearance" id="customizer"/);
+  assert.match(page.text, /Open preview in a tab/);
+  assert.match(page.text, /With JavaScript off, save first/);
+  assert.match(page.text, /\/assets\/screens\.css\?v=/, 'the split pane CSS is a cacheable asset');
+});

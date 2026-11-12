@@ -12,7 +12,8 @@ import { putFile, deleteFile, getFile } from './files';
 import { hasTable } from './schema';
 import { render, type RenderHooks, type Scope } from './template';
 import {
-  MAX_ASSETS_PER_THEME, inherit, resolveSettings, type ThemeBundle, type ThemeManifest, type UploadedAsset,
+  DEFAULT_WIDGET_AREAS, MAX_ASSETS_PER_THEME, inherit, resolveSettings,
+  type ThemeBundle, type ThemeManifest, type UploadedAsset,
 } from './theme-manifest';
 
 type ThemeRow = {
@@ -60,7 +61,7 @@ function toBundle(row: ThemeRow): ThemeBundle {
     name: row.name, slug: row.slug, version: row.version,
     author: '', authorUrl: '', homepage: '', description: '', parent: null,
     layout: 'base', tags: [], supports: [], screenshot: '', preview: [],
-    settings: [], changelog: [], assets: [], manifestVersion: 2,
+    settings: [], widgets: DEFAULT_WIDGET_AREAS, changelog: [], assets: [], manifestVersion: 2,
   };
   return {
     name: row.name, slug: row.slug, version: row.version,
@@ -229,6 +230,48 @@ export async function restoreThemeVersion(env: Env, slug: string, versionId: num
   } catch {
     return false;
   }
+}
+
+/**
+ * Template names the active theme offers, for the editor's Template dropdown
+ * and the Templates screen. The layout is excluded: it is a wrapper, not
+ * something a page can be rendered with.
+ */
+export async function activeThemeTemplates(env: Env): Promise<{ slug: string; name: string; templates: string[] }> {
+  const theme = await activeThemeFor(env);
+  const skip = new Set(['base', theme.manifest.layout || 'base']);
+  return { slug: theme.slug, name: theme.name, templates: Object.keys(theme.templates).filter((t) => !skip.has(t)).sort(sortTemplates) };
+}
+
+/** The layout name too, so the Templates screen can explain what wraps a page. */
+export async function activeLayoutName(env: Env): Promise<string> {
+  return (await activeThemeFor(env)).manifest.layout || 'base';
+}
+
+/** Standard templates first, then anything custom, alphabetically. */
+const ORDER = ['home', 'page', 'post', 'archive', '404'];
+function sortTemplates(a: string, b: string): number {
+  const ia = ORDER.indexOf(a), ib = ORDER.indexOf(b);
+  if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  return a.localeCompare(b);
+}
+
+/**
+ * The active theme, or the bundled one. This lives here (rather than in
+ * render.ts) so the panel and the renderer share one definition.
+ */
+export async function activeThemeFor(env: Env): Promise<ThemeBundle> {
+  const { defaultTheme } = await import('../themes/default');
+  try {
+    const hit = await env.DB.prepare('SELECT slug FROM themes WHERE active=1 LIMIT 1').first<{ slug: string }>();
+    if (hit) {
+      const theme = await loadTheme(env, { slug: hit.slug });
+      if (theme && (theme.templates.base || theme.manifest.parent)) return theme;
+    }
+  } catch {
+    /* no themes table yet: the bundled theme */
+  }
+  return defaultTheme;
 }
 
 /* ------------------------------------------------------------------ render */
