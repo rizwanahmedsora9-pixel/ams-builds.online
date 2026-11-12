@@ -36,7 +36,6 @@ settings.get('/settings', async (c) => {
     ...selectedAudioIds.map((id) => audioById.get(id)).filter((item): item is typeof audioLibrary[number] => !!item),
     ...audioLibrary.filter((item) => !selectedSet.has(item.id)),
   ];
-  const landingPageId = s.landing_page_id || '';
   const audioAccept = Object.entries(FILE_TYPES).filter(([, mime]) => mime.startsWith('audio/')).map(([ext]) => '.' + ext).join(',');
   const fmtSize = (n: number) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
   const sel = (on: boolean) => (on ? raw(' selected') : '');
@@ -90,14 +89,8 @@ settings.get('/settings', async (c) => {
   </div>
   <div class="card" id="landing">
     <h2>Landing screen</h2>
-    <p class="hint" style="margin-top:0">Choose a page to show first when someone opens your domain. Its title and page content are editable under Pages. After a visitor enters, the normal home page is revealed and this screen stays dismissed for that tab until it is closed.</p>
-    <label for="landing_page_id">Page to show before the home page</label>
-    <select id="landing_page_id" name="landing_page_id">
-      <option value="">Disabled — open the home page directly</option>
-      ${pages.map((p) => html`<option value="${p.id}"${sel(String(p.id) === landingPageId)}>${p.title}${p.status === 'published' ? '' : ' — draft (not visible publicly)'}</option>`)}
-    </select>
-    <p class="hint">Only a published page is shown to visitors. Saving this form applies the choice immediately.</p>
-    ${landingPageId ? html`<p class="hint">Live now: <b>${pages.find((p) => String(p.id) === landingPageId)?.title ?? 'the selected page'}</b>. <button class="linkish" type="submit" formaction="${c.var.base}/settings/landing-page" formnovalidate>Turn the landing screen off</button></p>` : ''}
+    <p class="hint" style="margin-top:0">This built-in screen opens at your home address on a visitor's first visit. It is not a Page and has no sample content: the company name comes from <b>Site title</b>, the welcome line from <b>Tagline</b>, and the optional logo from <b>Appearance → Identity</b>. After a visitor enters, the normal home page is revealed.</p>
+    <p class="hint"><a href="/?landing=1" target="_blank" rel="noopener">Preview the landing screen</a> — the preview reopens it even after you have entered in this tab.</p>
     <label for="landing_audio_files">Add soundtrack files</label>
     <input type="file" id="landing_audio_files" name="landing_audio_files" accept="${audioAccept}" multiple>
     <p class="hint">MP3, OGG, WAV, M4A, AAC, FLAC or Opus. Up to 20 MB per file and 20 tracks in the playlist. Files upload as soon as you pick them, one at a time, so a slow connection only has to carry one track. Audio starts only after the visitor presses Play, then plays in order and loops.</p>
@@ -180,18 +173,6 @@ async function storeLandingAudio(c: Ctx, file: File, now: Date): Promise<{ id: n
  * byte is written; a refused file answers JSON instead of a redirect, so the
  * page can say which track failed and why.
  */
-/**
- * Switch the landing screen off from Settings without touching the rest of the
- * form. The page's content is kept; only the pointer is cleared, so turning it
- * back on costs one dropdown.
- */
-settings.post('/settings/landing-page', async (c) => {
-  await setSettings(c.env, { landing_page_id: '' });
-  await bumpCache(c.env, c.var.cfg);
-  await audit(c, 'settings', 'setting', 'Turned the landing screen off');
-  return go(c, '/settings', { ok: 'The landing screen is off. Visitors go straight to the home page.' });
-});
-
 settings.post('/settings/landing-audio', async (c) => {
   const files = [
     ...c.var.form.getAll('audio'),
@@ -244,11 +225,6 @@ settings.post('/settings', async (c) => {
   const favicon = str('favicon');
   const homeId = Number(str('home_page_id')) || 0;
   const homeOk = homeId && (await c.env.DB.prepare("SELECT 1 AS x FROM content WHERE id=? AND site_id=1 AND type='page'").bind(homeId).first());
-  const landingValue = str('landing_page_id');
-  const landingPageId = landingValue ? Number(landingValue) : 0;
-  if (landingValue && (!Number.isSafeInteger(landingPageId) || landingPageId < 1 || !(await c.env.DB.prepare("SELECT 1 AS x FROM content WHERE id=? AND site_id=1 AND type='page'").bind(landingPageId).first()))) {
-    return go(c, '/settings', { err: 'Choose a valid page for the landing screen.' });
-  }
 
   const submittedAudioIds = [...new Set(f.getAll('landing_audio_ids')
     .map((value) => Number(String(value)))
@@ -257,9 +233,9 @@ settings.post('/settings', async (c) => {
   const audioFiles = f.getAll('landing_audio_files').filter((value): value is File => typeof value !== 'string' && value.size > 0);
   if (audioFiles.length > 20) return go(c, '/settings', { err: 'Upload no more than 20 audio files at a time.' });
   // A file this form cannot take (wrong type, too large) is left out and named in
-  // the notice. Everything else in the form — the title, the landing page, the
-  // playlist — still saves, because losing all of it is far worse than losing a
-  // file the admin can pick again.
+  // the notice. Everything else in the form — the title and the playlist —
+  // still saves, because losing all of it is far worse than losing a file the
+  // admin can pick again.
   const refusedAudio: string[] = [];
   const acceptedAudio = audioFiles.filter((file) => {
     const dot = file.name.lastIndexOf('.');
@@ -314,7 +290,6 @@ settings.post('/settings', async (c) => {
     favicon: favicon ? safeUrl(favicon) : '',
     timezone,
     home_page_id: homeOk ? String(homeId) : '',
-    landing_page_id: landingPageId ? String(landingPageId) : '',
     landing_audio_ids: JSON.stringify([...orderedAudioIds, ...addedAudio.map((item) => item.id)]),
     posts_per_page: String(Math.min(50, Math.max(1, Number(str('posts_per_page')) || 10))),
     permalink_style: style,
@@ -324,6 +299,9 @@ settings.post('/settings', async (c) => {
     comments_require_approval: str('comments_require_approval') === '1' ? '1' : '0',
     csp: ['off', 'report', 'enforce'].includes(str('csp')) ? str('csp') : 'report',
   });
+  // Older installs may still carry the old "choose a Page" pointer. The fixed
+  // screen ignores it; drop it here so exports never show a stale choice.
+  await c.env.DB.prepare("DELETE FROM settings WHERE site_id=1 AND key='landing_page_id'").run();
   await c.env.DB.prepare('UPDATE sites SET hostname=?, name=? WHERE id=1').bind(primary, siteTitle).run();
 
   // One KV write: new config + new cache generation (every cached page is now stale).

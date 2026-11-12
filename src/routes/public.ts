@@ -12,7 +12,7 @@ import { resolveSettings } from '../lib/theme-manifest';
 import { previewFor } from '../lib/preview';
 import { can } from '../lib/capabilities';
 import type { ThemeBundle } from '../lib/theme-manifest';
-import { clientIp, cspFor, nonceFor, rateCount, rateHit, sameOrigin, stripTags, type CspMode } from '../lib/security';
+import { clientIp, cspFor, nonceFor, rateCount, rateHit, safeUrl, sameOrigin, stripTags, type CspMode } from '../lib/security';
 import { landingScreenMarkup, parseLandingAudioIds, type LandingAudioTrack } from '../lib/landing';
 import { titleFor } from '../lib/origin';
 import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
@@ -389,27 +389,30 @@ site.get('*', async (c) => {
     },
   });
 
-  // The landing screen is a first-visit layer over the existing home page. The
-  // visitor enters the site in-place, so / remains the normal home URL/content.
-  const landingPageId = Number(settings.landing_page_id) || 0;
-  if (path === '/' && landingPageId && !preview) {
-    const landingPage = await findContent(c.env, { type: 'page', id: landingPageId });
-    if (landingPage) {
-      const ids = parseLandingAudioIds(settings.landing_audio_ids);
-      let tracks: LandingAudioTrack[] = [];
-      if (ids.length) {
-        const placeholders = ids.map(() => '?').join(',');
-        const { results: audioRows } = await c.env.DB.prepare(
-          `SELECT id, r2_key, filename FROM media WHERE site_id=1 AND mime LIKE 'audio/%' AND id IN (${placeholders})`,
-        ).bind(...ids).all<{ id: number; r2_key: string; filename: string }>();
-        const byId = new Map(audioRows.map((item) => [item.id, item]));
-        tracks = ids.map((id) => byId.get(id)).filter((item): item is NonNullable<typeof item> => !!item)
-          .map((item) => ({ id: item.id, url: mediaUrl(item.r2_key), filename: item.filename }));
-      }
-      const nonce = body.match(/<(?:script|style)\b[^>]*\bnonce="([^"]+)"/i)?.[1] || nonceFor();
-      const markup = landingScreenMarkup({ page: landingPage, siteTitle: settings.site_title || '', tracks, nonce });
-      body = injectLandingScreen(body, markup);
+  // The fixed landing screen is a first-visit layer over the existing home
+  // page. It is built from saved settings, never from a CMS Page; the visitor
+  // enters the site in-place, so / remains the normal home URL/content.
+  if (path === '/' && result.status === 200 && !preview) {
+    const ids = parseLandingAudioIds(settings.landing_audio_ids);
+    let tracks: LandingAudioTrack[] = [];
+    if (ids.length) {
+      const placeholders = ids.map(() => '?').join(',');
+      const { results: audioRows } = await c.env.DB.prepare(
+        `SELECT id, r2_key, filename FROM media WHERE site_id=1 AND mime LIKE 'audio/%' AND id IN (${placeholders})`,
+      ).bind(...ids).all<{ id: number; r2_key: string; filename: string }>();
+      const byId = new Map(audioRows.map((item) => [item.id, item]));
+      tracks = ids.map((id) => byId.get(id)).filter((item): item is NonNullable<typeof item> => !!item)
+        .map((item) => ({ id: item.id, url: mediaUrl(item.r2_key), filename: item.filename }));
     }
+    const nonce = body.match(/<(?:script|style)\b[^>]*\bnonce="([^"]+)"/i)?.[1] || nonceFor();
+    const markup = landingScreenMarkup({
+      siteTitle: settings.site_title || '',
+      tagline: settings.tagline || '',
+      logoUrl: safeUrl(settings.site_logo || ''),
+      tracks,
+      nonce,
+    });
+    body = injectLandingScreen(body, markup);
   }
 
   if (cacheable && result.status === 200) {

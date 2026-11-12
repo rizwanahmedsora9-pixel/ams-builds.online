@@ -48,7 +48,7 @@ export function commandsFor(base: string, user: User): Command[] {
       { label: 'Widgets', href: `${base}/widgets`, icon: 'grid', keys: ['widgets', 'footer'], group: 'Go to' },
       { label: 'Plugins', href: `${base}/plugins`, icon: 'plug', keys: ['plugins', 'snippets', 'code'], group: 'Go to' },
       { label: 'Users', href: `${base}/users`, icon: 'users', keys: ['users', 'accounts', 'roles', 'people'], group: 'Go to' },
-      { label: 'Settings', href: `${base}/settings`, icon: 'settings', keys: ['settings', 'title', 'tagline', 'timezone', 'permalink', 'domain'], group: 'Go to' },
+      { label: 'Settings', href: `${base}/settings`, icon: 'settings', keys: ['settings', 'title', 'tagline', 'timezone', 'permalink', 'domain', 'landing', 'soundtrack', 'audio'], group: 'Go to' },
       { label: 'Updates', href: `${base}/updates`, icon: 'refresh', keys: ['updates', 'migrations', 'version'], group: 'Go to' },
       { label: 'Redirects', href: `${base}/tools/redirects`, icon: 'refresh', keys: ['redirects', 'redirect', '301'], group: 'Go to' },
       { label: 'Import / Export', href: `${base}/tools/export`, icon: 'download', keys: ['export', 'import', 'backup', 'json'], group: 'Go to' },

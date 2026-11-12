@@ -448,17 +448,31 @@ test('10. settings: timezone, permalinks and a moved admin URL take effect at on
   log('title/tagline live, posts moved to /YYYY/MM/slug with redirect, admin moved to /control-room, default editor saved');
 });
 
-test('10b. landing screen: choose a page, upload a looping soundtrack and enter the home page', async () => {
-  const selected = await adminPost(`/pages/${state.pageId}/landing`, {});
-  assert.equal(selected.status, 303);
-  assert.match(selected.location, /Landing screen set/);
+test('10b. fixed landing screen uses settings, without a landing Page, and loops the soundtrack', async () => {
+  // The built-in screen is present before any page is assigned and before any
+  // soundtrack is uploaded. Its copy comes from the saved site identity only.
+  const before = await anon('/');
+  assert.match(before.text, /id="ams-landing-screen"[^]*role="dialog"/);
+  assert.ok(before.text.includes('<h1 id="ams-landing-title">Renamed Site</h1>'), 'the company name comes from Settings');
+  const cardStart = before.text.indexOf('<div class="ams-landing-card">');
+  const cardEnd = before.text.indexOf('<audio class="ams-landing-audio"', cardStart);
+  assert.ok(cardStart >= 0 && cardEnd > cardStart, 'the fixed card is in the home response');
+  const landingCard = before.text.slice(cardStart, cardEnd);
+  assert.match(landingCard, /Now with a tagline/, 'the tagline comes from Settings');
+  assert.doesNotMatch(landingCard, /We build better things\./, 'no CMS Page or sample body is used');
+  assert.doesNotMatch(before.text, /<h1 id="ams-landing-title">About Us<\/h1>/, 'a Page title cannot replace the fixed heading');
+  assert.match(before.text, /data-landing-play[^>]*disabled/, 'the Play control is visible even before tracks are added');
+
   const pages = await get(`${admin}/pages`);
-  assert.match(pages.text, /class="badge published">landing screen/);
-  assert.match(pages.text, new RegExp(`action="${admin}\\/pages\\/${state.pageId}\\/landing"`));
+  assert.doesNotMatch(pages.text, /Set as landing screen|Remove landing screen/);
+  assert.doesNotMatch(pages.text, new RegExp(`action="${admin}\\/pages\\/\\d+\\/landing"`), 'Pages no longer assign a landing screen');
+  const panel = await get(`${admin}/settings`);
+  assert.doesNotMatch(panel.text, /id="landing_page_id"/, 'Settings no longer asks for a landing Page');
+  assert.match(panel.text, /Preview the landing screen/);
 
   const upload = new FormData();
   upload.set('_csrf', await csrf());
-  for (const [key, value] of Object.entries({ ...SITE_SETTINGS, landing_page_id: state.pageId })) upload.set(key, String(value));
+  for (const [key, value] of Object.entries(SITE_SETTINGS)) upload.set(key, String(value));
   upload.append('landing_audio_files', new File(['sample audio bytes'], 'Welcome Track.MP3', { type: 'audio/mpeg' }));
   upload.append('landing_audio_files', new File(['second track bytes'], 'Ambient Loop.ogg', { type: 'audio/ogg' }));
   const saved = await request(`${admin}/settings`, { method: 'POST', body: upload });
@@ -466,21 +480,22 @@ test('10b. landing screen: choose a page, upload a looping soundtrack and enter 
   assert.match(saved.location, /Settings saved/);
 
   const panelSettings = await get(`${admin}/settings`);
-  assert.match(panelSettings.text, /id="landing_page_id"/);
   assert.match(panelSettings.text, /name="landing_audio_ids"[^>]*checked/);
   assert.match(panelSettings.text, /welcome-track\.mp3/);
   assert.match(panelSettings.text, /name="landing_audio_files"[^]*multiple/);
 
   const home = await anon('/');
   assert.match(home.text, /id="ams-landing-screen"[^]*role="dialog"/);
-  assert.ok(home.text.includes('<h1 id="ams-landing-title">About Us</h1>'));
-  assert.ok(home.text.includes('We build better things.'));
-  assert.match(home.text, /data-landing-play/);
+  assert.ok(home.text.includes('<h1 id="ams-landing-title">Renamed Site</h1>'));
+  assert.ok(home.text.includes('Now with a tagline'));
+  const playButton = home.text.match(/<button[^>]*data-landing-play[^>]*>/)?.[0];
+  assert.ok(playButton && !/\sdisabled/.test(playButton), 'saving tracks enables the Play button');
   assert.match(home.text, /data-landing-mute/);
   assert.match(home.text, /data-landing-enter/);
   assert.match(home.text, /data-ams-landing/);
   assert.match(home.text, /sessionStorage\.setItem\('ams-landing-entered','1'\)/);
   assert.match(home.text, /audio\.pause\(\)/);
+  assert.match(home.text, /audio\.loop=tracks\.length===1/, 'a single track loops natively');
   assert.match(home.text, /audio\.addEventListener\('ended'/, 'the playlist advances and loops');
   assert.match(home.text, /place-items:center/, 'the responsive landing layout centers its play button');
   const audioUrl = home.text.match(/\/media\/\d{4}\/\d{2}\/[^"&]+-welcome-track\.mp3/);
@@ -506,6 +521,11 @@ test('10b. landing screen: choose a page, upload a looping soundtrack and enter 
   player.dispatchEvent(new landingWindow.Event('ended'));
   await new Promise((resolve) => setImmediate(resolve));
   assert.notEqual(player.src, firstTrack, 'the playlist advances to the next uploaded track');
+  const secondTrack = player.src;
+  player.dispatchEvent(new landingWindow.Event('ended'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(player.src, firstTrack, 'the second track wraps back to the first');
+  assert.notEqual(secondTrack, firstTrack);
   landingWindow.document.querySelector('[data-landing-mute]').click();
   assert.equal(landingWindow.document.querySelector('[data-landing-mute]').getAttribute('aria-pressed'), 'true');
   landingWindow.document.querySelector('[data-landing-enter]').click();
@@ -521,8 +541,14 @@ test('10b. landing screen: choose a page, upload a looping soundtrack and enter 
   });
   assert.equal(returningDom.window.document.documentElement.hasAttribute('data-ams-landing'), false, 'the landing screen stays hidden in the same session');
   returningDom.window.close();
-  await adminPost(`/pages/${state.pageId}/landing`, {}); // leave later theme tests on their normal home page
-  log('Pages assignment, in-Settings upload/playlist, first-visit splash, responsive Play/mute/Enter, session reset and audio storage work');
+  const previewDom = new JSDOM(home.text, {
+    url: base + '/?landing=1', runScripts: 'dangerously',
+    virtualConsole: landingVirtualConsole,
+    beforeParse(window) { window.sessionStorage.setItem('ams-landing-entered', '1'); },
+  });
+  assert.equal(previewDom.window.document.documentElement.getAttribute('data-ams-landing'), 'show', 'the Settings preview reopens the fixed screen');
+  previewDom.window.close();
+  log('fixed settings-driven landing, no page selector, enabled Play button, looping playlist, Enter and preview work');
 });
 
 test('10c. landing soundtrack: one file per request, and a bad file never costs the rest of the form', async () => {
@@ -533,6 +559,12 @@ test('10c. landing soundtrack: one file per request, and a bad file never costs 
     return request(`${admin}/settings/landing-audio`, { method: 'POST', body });
   };
 
+  // Start from an empty playlist: a stand-alone upload is the exact path the
+  // Settings file picker uses, and it must put an enabled Play button on the
+  // fixed landing screen without a second Save settings.
+  await adminPost('/settings', SITE_SETTINGS);
+  assert.match((await anon('/')).text, /data-landing-play[^>]*disabled/, 'the fixed screen shows a disabled Play control with no tracks');
+
   // The panel posts tracks one at a time, so this is the path a real upload takes.
   const one = await uploadAudio('Night Drive.MP3', new Uint8Array(4096));
   assert.equal(one.status, 200);
@@ -541,6 +573,10 @@ test('10c. landing soundtrack: one file per request, and a bad file never costs 
   assert.match(saved.item.url, /^\/media\/\d{4}\/\d{2}\/.+night-drive\.mp3$/);
   assert.equal((await anon(saved.item.url)).headers.get('content-type'), 'audio/mpeg');
   assert.match((await get(`${admin}/settings`)).text, /name="landing_audio_ids"[^>]*checked/, 'a newly uploaded track joins the playlist');
+  const afterUpload = await anon('/');
+  const uploadedPlay = afterUpload.text.match(/<button[^>]*data-landing-play[^>]*>/)?.[0];
+  assert.ok(uploadedPlay && !/\sdisabled/.test(uploadedPlay), 'a stand-alone soundtrack upload enables the Play button');
+  assert.ok(afterUpload.text.includes(saved.item.url), 'the uploaded track is in the landing screen playlist');
 
   // The page wires that endpoint into the form: files go up as soon as they are
   // picked, one request each, and the form still works without JavaScript.
@@ -571,7 +607,7 @@ test('10c. landing soundtrack: one file per request, and a bad file never costs 
   const after = await get(`${admin}/settings`);
   assert.match(after.text, /value="Saved Despite A Bad File"/, 'the rest of the form was saved anyway');
   assert.match(after.text, /second-track\.mp3/, 'the good track in the same batch was stored');
-  log('per-file soundtrack upload, refused files reported individually, settings saved regardless');
+  log('per-file soundtrack upload enables Play, refused files reported individually, settings saved regardless');
 });
 
 test('10d. an explicit site title reaches the panel and the public page; the default follows the host', async () => {
@@ -764,7 +800,16 @@ test('12c. theme store: five bundled themes install and switch with one click', 
       assert.match(res.text, /<nav class="tabs"[^]*<a href="\/"[^>]*>Home<\/a>/, `${path} has the tab navigation`);
       assert.match(res.text, /<footer class="ftr">[^]*All rights reserved|<footer class="ftr">[^]*Back to top/, `${path} has the footer`);
       assert.doesNotMatch(res.text, /\{\{/, `${path} has no unrendered template tags`);
-      assert.doesNotMatch(res.text, /<script|https?:\/\/(?!127\.0\.0\.1|example\.)/, `${path} loads nothing external`);
+      assert.doesNotMatch(res.text, /https?:\/\/(?!127\.0\.0\.1|example\.)/, `${path} loads nothing external`);
+      if (path === '/') {
+        // The fixed landing screen is part of this page. Its own scripts are
+        // nonce-stamped; no theme or third-party script may join them.
+        for (const tag of res.text.match(/<script\b[^>]*>/g) || []) {
+          assert.match(tag, /\bnonce="/, `${path} only ships nonce-stamped landing scripts`);
+        }
+      } else {
+        assert.doesNotMatch(res.text, /<script/, `${path} loads no scripts`);
+      }
     }
   };
   await check(/class="brand-mark" aria-hidden="true"><\/span>/);
