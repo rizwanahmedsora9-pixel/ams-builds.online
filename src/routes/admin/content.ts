@@ -632,76 +632,252 @@ content.post('/posts/bulk', async (c) => {
 });
 
 /* ------------------------------------------------------------------ editor */
+/**
+ * Editor styles live here rather than in the shared ADMIN_CSS so the
+ * classic/modern choice and the Text/HTML toggle look right on both skins.
+ */
+const EDITOR_CSS = `<style>
+.ams-editor{margin-bottom:.4rem}
+.ams-editor-bar{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-bottom:.45rem}
+.ams-editor-switch{display:inline-flex;border:1px solid var(--line);border-radius:.45rem;overflow:hidden;background:var(--card)}
+.ams-editor-switch button{padding:.3rem .8rem;border:0;border-left:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-size:.82rem;cursor:pointer;line-height:1.5}
+.ams-editor-switch button:first-child{border-left:0}
+.ams-editor-switch button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
+.ams-editor-bar .hint{margin:0;flex:1 1 12rem}
+.ams-editor-pane[hidden]{display:none!important}
+.ams-editor .toolbar{margin-bottom:.4rem}
+.ams-editor textarea.code,.ams-editor .visual-editor{min-height:22rem;margin:0}
+.ams-editor-status{margin:.35rem 0 0;color:var(--muted);font-size:.78rem;min-height:1.1em}
+/* Classic: compact WP-style chrome — small square buttons over a plain box. */
+.ams-editor.is-classic .ams-editor-bar{display:none}
+.ams-editor.is-classic .toolbar{gap:.15rem;margin:0;padding:.35rem;border:1px solid var(--line);border-bottom:0;border-radius:.35rem .35rem 0 0;background:var(--bg)}
+.ams-editor.is-classic .toolbar button{padding:.2rem .45rem;font-size:.8rem;border-radius:.2rem;background:var(--card)}
+.ams-editor.is-classic textarea.code,.ams-editor.is-classic .visual-editor{border-radius:0 0 .35rem .35rem;min-height:24rem}
+.ams-editor.is-classic .ams-editor-status{padding:0 .2rem}
+/* Modern: roomy writing surface, a framed toolbar and generous spacing. */
+.ams-editor.is-modern textarea.code,.ams-editor.is-modern .visual-editor{min-height:26rem;padding:1.1rem 1.2rem;font-size:1rem;line-height:1.7}
+.ams-editor.is-modern .toolbar{gap:.35rem;padding:.5rem;border:1px solid var(--line);border-radius:.55rem;background:var(--bg)}
+.ams-editor.is-modern textarea.code{font-size:.92rem;line-height:1.65}
+.ams-mode-dialog .ams-mode-options{display:grid;gap:.5rem;margin:1rem 0}
+.ams-mode-dialog .ams-mode-option{display:block;width:100%;padding:.75rem .85rem;border:1px solid var(--line);border-radius:.5rem;background:var(--card);color:var(--fg);font:inherit;text-align:left;cursor:pointer}
+.ams-mode-dialog .ams-mode-option:hover,.ams-mode-dialog .ams-mode-option:focus-visible{border-color:var(--accent);outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
+.ams-mode-dialog .ams-mode-option b{display:block;font-size:.95rem;margin:0 0 .2rem}
+.ams-mode-dialog .ams-mode-option span{display:block;color:var(--muted);font-size:.82rem;font-weight:400}
+.ams-mode-dialog .ams-mode-note{display:flex;align-items:center;gap:.5rem;font-weight:400;font-size:.85rem;color:var(--muted);margin:.2rem 0 0}
+</style>`;
+
+/**
+ * One editor for pages and posts with two skins (classic / modern) and a
+ * Text <-> HTML switch that keeps content, caret and scroll position.
+ * The markup stays a plain form: without JavaScript the HTML textarea still
+ * submits, so nothing can be lost.
+ */
 const EDITOR_JS = `<script>
 (function(){
+  var form=document.getElementById('edit');
+  if(!form)return;
   var ta=document.getElementById('body'),visual=document.getElementById('visual-editor');
-  var mode='html',visualRange=null;
-  var htmlDialog=document.getElementById('html-block-dialog'),youtubeDialog=document.getElementById('youtube-dialog');
+  var box=document.getElementById('content-editor');
+  var toolbar=document.getElementById('editor-toolbar'),status=document.getElementById('editor-status');
+  var modeSwitch=document.getElementById('editor-mode-switch');
+  var modeDialog=document.getElementById('editor-mode-dialog');
+  var SKIN_KEY='cms-editor-skin';
+  var isNew=form.dataset.isNew==='1';
+  var initial=form.dataset.initialSkin==='classic'?'classic':'modern';
+  var preferred=(form.dataset.preferredSkin==='classic'||form.dataset.preferredSkin==='modern')?form.dataset.preferredSkin:'';
+  var skin=initial,mode='html',savedRange=null;
+
   function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+
+  // Content that starts with a <style>/<script> block is source, not markup:
+  // loading it into a contenteditable would run or hide it, so it stays in HTML.
+  function hasRawBlock(src){return /^\\s*(?:<!--[\\s\\S]*?-->\\s*)*(?:<style[\\s>]|<script[\\s>])/i.test(src||'')}
+
+  /* ------------------------------------------------------- selection */
   function rememberSelection(){
     var sel=window.getSelection();
-    if(sel.rangeCount&&visual.contains(sel.anchorNode))visualRange=sel.getRangeAt(0).cloneRange();
+    if(sel&&sel.rangeCount&&visual.contains(sel.anchorNode))savedRange=sel.getRangeAt(0).cloneRange();
   }
   function restoreSelection(){
-    visual.focus();
-    var sel=window.getSelection(),range=visualRange;
-    if(!range||!visual.contains(range.commonAncestorContainer)){range=document.createRange();range.selectNodeContents(visual);range.collapse(false)}
+    var sel=window.getSelection(),range=savedRange;
+    if(!range||!visual.contains(range.commonAncestorContainer)){
+      range=document.createRange();range.selectNodeContents(visual);range.collapse(false);
+    }
     sel.removeAllRanges();sel.addRange(range);
   }
+  function caretOffset(){
+    var sel=window.getSelection();
+    if(!sel||!sel.rangeCount)return 0;
+    var range=sel.getRangeAt(0),probe=range.cloneRange();
+    if(!visual.contains(range.commonAncestorContainer))return 0;
+    probe.selectNodeContents(visual);
+    probe.setEnd(range.startContainer,range.startOffset);
+    return probe.toString().length;
+  }
+  function placeCaretAt(offset){
+    var walker=document.createTreeWalker(visual,NodeFilter.SHOW_TEXT,null,false);
+    var node,seen=0,last=null;
+    while((node=walker.nextNode())){
+      var len=node.nodeValue.length;
+      if(seen+len>=offset){
+        var range=document.createRange();
+        range.setStart(node,Math.max(0,Math.min(len,offset-seen)));
+        range.collapse(true);
+        var sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);
+        savedRange=range.cloneRange();
+        return;
+      }
+      seen+=len;last=node;
+    }
+    var end=document.createRange();
+    if(last)end.setStart(last,last.nodeValue.length);else end.selectNodeContents(visual);
+    end.collapse(false);
+    var s=window.getSelection();s.removeAllRanges();s.addRange(end);
+    savedRange=end.cloneRange();
+  }
+
+  /* ------------------------------------------------------------ modes */
+  function syncMode(){
+    if(box)box.classList.toggle('is-html',mode==='html');
+    if(status&&!status.dataset.locked){
+      status.textContent=mode==='html'
+        ?'Editing HTML source. The Text tab shows the same content visually.'
+        :'Editing text. The HTML tab shows the same content as source.';
+    }
+    if(modeSwitch){
+      modeSwitch.querySelectorAll('[data-editor-mode]').forEach(function(btn){
+        btn.setAttribute('aria-pressed',String(btn.dataset.editorMode===mode));
+      });
+    }
+    if(visual)visual.setAttribute('aria-hidden',mode==='html'?'true':'false');
+    if(ta)ta.setAttribute('aria-hidden',mode==='text'?'true':'false');
+  }
+  function note(text){
+    if(!status)return;
+    status.dataset.locked='1';
+    status.textContent=text;
+    setTimeout(function(){delete status.dataset.locked;syncMode()},4000);
+  }
+
+  // Both panes hold the same document at all times: the textarea is the
+  // source of truth for HTML, the contenteditable mirrors it when visible.
+  function toText(){
+    var caret=caretOffset();
+    visual.innerHTML=ta.value;
+    mode='text';
+    ta.hidden=true;visual.hidden=false;
+    syncMode();
+    visual.focus();
+    placeCaretAt(caret);
+    visual.scrollTop=ta.scrollTop;
+  }
+  function toHtml(){
+    ta.value=visual.innerHTML;
+    mode='html';
+    visual.hidden=true;ta.hidden=false;
+    syncMode();
+    ta.focus();
+    var end=ta.value.length;
+    ta.setSelectionRange(end,end);
+  }
+  function setMode(next,focusIt){
+    if(next!=='text'&&next!=='html')return;
+    if(next===mode){
+      syncMode();
+      if(focusIt){if(mode==='text')visual.focus();else ta.focus()}
+      return;
+    }
+    if(next==='text'&&hasRawBlock(ta.value)){
+      toHtml();
+      note('This content starts with a <style> or <script> block, so it stays in HTML mode.');
+      return;
+    }
+    if(next==='text')toText();else toHtml();
+  }
+
+  if(modeSwitch){
+    modeSwitch.querySelectorAll('[data-editor-mode]').forEach(function(btn){
+      btn.addEventListener('click',function(){setMode(btn.dataset.editorMode,true)});
+    });
+  }
+
+  /* ---------------------------------------------------------- toolbar */
   function insertSnippet(snippet){
     if(mode==='html'){
-      var s=ta.selectionStart,e=ta.selectionEnd,v=ta.value;
-      ta.value=v.slice(0,s)+snippet+v.slice(e);ta.focus();ta.selectionStart=ta.selectionEnd=s+snippet.length;
+      var start=ta.selectionStart==null?ta.value.length:ta.selectionStart;
+      var end=ta.selectionEnd==null?start:ta.selectionEnd;
+      ta.value=ta.value.slice(0,start)+snippet+ta.value.slice(end);
+      ta.focus();
+      var at=start+snippet.length;
+      ta.setSelectionRange(at,at);
     }else{
-      restoreSelection();document.execCommand('insertHTML',false,snippet);rememberSelection();
+      restoreSelection();
+      document.execCommand('insertHTML',false,snippet);
+      rememberSelection();
     }
   }
-  function setMode(next){
-    if(next===mode)return;
-    if(next==='html'){ta.value=visual.innerHTML;visual.hidden=true;ta.hidden=false;ta.focus()}
-    else{visual.innerHTML=ta.value;ta.hidden=true;visual.hidden=false;visual.focus();restoreSelection()}
-    mode=next;
-    document.querySelectorAll('[data-editor-mode]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.editorMode===next))});
+  if(toolbar){
+    toolbar.querySelectorAll('[data-wrap]').forEach(function(btn){
+      btn.addEventListener('mousedown',function(e){if(mode==='text')e.preventDefault()});
+      btn.addEventListener('click',function(){
+        if(mode==='text')rememberSelection();
+        var parts=btn.getAttribute('data-wrap').split('|'),open=parts[0],close=parts[1]||'';
+        if(btn.dataset.ask){
+          var value=prompt(btn.dataset.ask,btn.dataset.def||'');
+          if(!value)return;
+          open=open.replace('$1',escapeHtml(value));
+        }
+        if(mode==='text'){
+          restoreSelection();
+          if(btn.dataset.command){document.execCommand(btn.dataset.command,false,btn.dataset.value||null)}
+          else{
+            var sel=window.getSelection(),selected='';
+            if(sel&&sel.rangeCount){var holder=document.createElement('div');holder.appendChild(sel.getRangeAt(0).cloneContents());selected=holder.innerHTML}
+            document.execCommand('insertHTML',false,open+selected+close);
+          }
+          rememberSelection();
+        }else{
+          var start=ta.selectionStart==null?ta.value.length:ta.selectionStart;
+          var end=ta.selectionEnd==null?start:ta.selectionEnd;
+          ta.value=ta.value.slice(0,start)+open+ta.value.slice(start,end)+close+ta.value.slice(end);
+          ta.focus();
+          ta.setSelectionRange(start+open.length,end+open.length);
+        }
+      });
+    });
   }
-  document.querySelectorAll('[data-editor-mode]').forEach(function(b){b.addEventListener('click',function(){setMode(b.dataset.editorMode)})});
-  visual.addEventListener('keyup',rememberSelection);visual.addEventListener('mouseup',rememberSelection);
+  visual.addEventListener('keyup',rememberSelection);
+  visual.addEventListener('mouseup',rememberSelection);
   visual.addEventListener('paste',function(e){
-    e.preventDefault();var text=(e.clipboardData||window.clipboardData).getData('text/plain');
+    if(mode!=='text')return;
+    e.preventDefault();
+    var text=((e.clipboardData||window.clipboardData).getData('text/plain')||'');
     document.execCommand('insertText',false,text);
   });
-  document.querySelectorAll('[data-wrap]').forEach(function(b){
-    b.addEventListener('mousedown',function(e){if(mode==='text')e.preventDefault()});
-    b.addEventListener('click',function(){
-      if(mode==='text')rememberSelection();
-      var parts=b.getAttribute('data-wrap').split('|'),open=parts[0],close=parts[1]||'';
-      if(b.dataset.ask){var u=prompt(b.dataset.ask,b.dataset.def||'');if(!u)return;open=open.replace('$1',escapeHtml(u))}
-      if(mode==='text'){
-        restoreSelection();
-        if(b.dataset.command){document.execCommand(b.dataset.command,false,b.dataset.value||null)}
-        else{
-          var sel=window.getSelection(),selected='';
-          if(sel.rangeCount){var holder=document.createElement('div');holder.appendChild(sel.getRangeAt(0).cloneContents());selected=holder.innerHTML}
-          document.execCommand('insertHTML',false,open+selected+close);
-        }
-        rememberSelection();
-      }else{
-        var s=ta.selectionStart,e=ta.selectionEnd,v=ta.value;
-        ta.value=v.slice(0,s)+open+v.slice(s,e)+close+v.slice(e);ta.focus();ta.selectionStart=s+open.length;ta.selectionEnd=e+open.length;
-      }
-    })
-  });
+
+  /* ---------------------------------------------------------- dialogs */
+  var htmlDialog=document.getElementById('html-block-dialog'),youtubeDialog=document.getElementById('youtube-dialog');
   function openDialog(dialog,focus){
-    rememberSelection();dialog.showModal();setTimeout(function(){focus.focus()},0);
+    rememberSelection();
+    if(!dialog)return;
+    dialog.showModal();
+    setTimeout(function(){focus.focus()},0);
   }
-  document.querySelectorAll('[data-close-dialog]').forEach(function(b){b.addEventListener('click',function(){b.closest('dialog').close()})});
-  document.getElementById('add-html-block').addEventListener('click',function(){openDialog(htmlDialog,document.getElementById('html-block-input'))});
-  document.getElementById('insert-html-block').addEventListener('click',function(){
-    var input=document.getElementById('html-block-input'),code=input.value.trim();if(!code){input.focus();return}
-    insertSnippet('<div class="html-block">\n'+code+'\n</div>');input.value='';htmlDialog.close();
+  document.querySelectorAll('[data-close-dialog]').forEach(function(btn){
+    btn.addEventListener('click',function(){var d=btn.closest('dialog');if(d)d.close()});
   });
+  if(htmlDialog){
+    document.getElementById('add-html-block').addEventListener('click',function(){openDialog(htmlDialog,document.getElementById('html-block-input'))});
+    document.getElementById('insert-html-block').addEventListener('click',function(){
+      var input=document.getElementById('html-block-input'),code=input.value.trim();
+      if(!code){input.focus();return}
+      insertSnippet('<div class="html-block">\\n'+code+'\\n</div>');
+      input.value='';htmlDialog.close();
+    });
+  }
   function youtubeId(value){
     try{
-      var url=new URL(value),host=url.hostname.toLowerCase().replace(/^(www|m)\./,''),id='';
+      var url=new URL(value),host=url.hostname.toLowerCase().replace(/^(www|m)\\./,''),id='';
       if(url.protocol!=='https:'&&url.protocol!=='http:')return '';
       if(host==='youtu.be')id=url.pathname.split('/')[1];
       else if(host==='youtube.com'||host==='youtube-nocookie.com'){
@@ -711,29 +887,99 @@ const EDITOR_JS = `<script>
       return /^[A-Za-z0-9_-]{11}$/.test(id||'')?id:'';
     }catch(e){return ''}
   }
-  document.getElementById('add-youtube').addEventListener('click',function(){
-    document.getElementById('youtube-error').hidden=true;openDialog(youtubeDialog,document.getElementById('youtube-url'));
+  if(youtubeDialog){
+    document.getElementById('add-youtube').addEventListener('click',function(){
+      document.getElementById('youtube-error').hidden=true;
+      openDialog(youtubeDialog,document.getElementById('youtube-url'));
+    });
+    document.getElementById('insert-youtube').addEventListener('click',function(){
+      var input=document.getElementById('youtube-url'),id=youtubeId(input.value.trim()),error=document.getElementById('youtube-error');
+      if(!id){error.hidden=false;input.focus();return}
+      var title=document.getElementById('youtube-title').value.trim()||'YouTube video player';
+      var embed='<figure class="video-block youtube-video"><div class="video-responsive"><iframe src="https://www.youtube-nocookie.com/embed/'+id+'" title="'+escapeHtml(title)+'" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div></figure>';
+      insertSnippet(embed);
+      input.value='';document.getElementById('youtube-title').value='';youtubeDialog.close();
+    });
+  }
+  ['youtube-url','youtube-title','html-block-input'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(!el)return;
+    el.addEventListener('keydown',function(e){
+      if(e.key==='Enter'&&(id!=='html-block-input'||e.ctrlKey||e.metaKey)){
+        e.preventDefault();
+        document.getElementById(id==='html-block-input'?'insert-html-block':'insert-youtube').click();
+      }
+    });
   });
-  document.getElementById('insert-youtube').addEventListener('click',function(){
-    var input=document.getElementById('youtube-url'),id=youtubeId(input.value.trim()),error=document.getElementById('youtube-error');
-    if(!id){error.hidden=false;input.focus();return}
-    var title=document.getElementById('youtube-title').value.trim()||'YouTube video player';
-    var embed='<figure class="video-block youtube-video"><div class="video-responsive"><iframe src="https://www.youtube-nocookie.com/embed/'+id+'" title="'+escapeHtml(title)+'" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div></figure>';
-    insertSnippet(embed);input.value='';document.getElementById('youtube-title').value='';youtubeDialog.close();
+
+  /* ------------------------------------------------------------ skins */
+  function applySkin(next){
+    skin=next==='classic'?'classic':'modern';
+    if(box){
+      box.dataset.skin=skin;
+      box.classList.toggle('is-classic',skin==='classic');
+      box.classList.toggle('is-modern',skin==='modern');
+    }
+    document.querySelectorAll('[data-editor-skin-set]').forEach(function(btn){
+      btn.setAttribute('aria-pressed',String(btn.dataset.editorSkinSet===skin));
+    });
+  }
+
+  function useSkin(next){
+    applySkin(next);
+    try{localStorage.setItem(SKIN_KEY,skin)}catch(e){}
+  }
+  document.querySelectorAll('[data-editor-skin-set]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      useSkin(btn.dataset.editorSkinSet);
+      note((skin==='classic'?'Classic':'Modern')+' editor. Remembered on this device.');
+    });
   });
-  ['youtube-url','youtube-title','html-block-input'].forEach(function(id){document.getElementById(id).addEventListener('keydown',function(e){
-    if(e.key==='Enter'&&(id!=='html-block-input'||e.ctrlKey||e.metaKey)){e.preventDefault();document.getElementById(id==='html-block-input'?'insert-html-block':'insert-youtube').click()}
-  })});
-  document.getElementById('edit').addEventListener('submit',function(){if(mode==='text')ta.value=visual.innerHTML});
-  // Text is the friendly visual editor; HTML mode always exposes the same underlying markup.
-  visual.innerHTML=ta.value;setMode('text');
+
+  /* ---------------------------------------- classic/modern chooser */
+  // "Add New" asks which editor to use unless a preference is remembered.
+  function startWriting(){if(mode==='text')visual.focus();else ta.focus()}
+  if(modeDialog){
+    modeDialog.querySelectorAll('[data-skin-choice]').forEach(function(btn){
+      btn.addEventListener('click',function(){
+        useSkin(btn.dataset.skinChoice);
+        modeDialog.close();
+        startWriting();
+      });
+    });
+    modeDialog.addEventListener('cancel',function(){applySkin(initial)});
+    var remembered=preferred;
+    try{remembered=remembered||localStorage.getItem(SKIN_KEY)||''}catch(e){}
+    if(remembered==='classic'||remembered==='modern')applySkin(remembered);
+    else modeDialog.showModal();
+  }
+
+  /* ----------------------------------------------------------- submit */
+  form.addEventListener('submit',function(){
+    if(mode==='text')ta.value=visual.innerHTML;
+  });
+
+  /* ------------------------------------------------------------- boot */
+  visual.innerHTML=ta.value;
+  mode='html';
+  // Existing content opens in the visual editor; a new post has nothing to
+  // preview yet, so it starts on the HTML tab with the cursor in the source.
+  if(!isNew&&!hasRawBlock(ta.value))toText();else syncMode();
+  applySkin(initial);
+
+  /* -------------------------------------------- title, slug, publish */
   var title=document.getElementById('title'),slug=document.getElementById('slug');
-  if(slug&&!slug.value){title.addEventListener('input',function(){if(slug.dataset.touched)return;
-    slug.value=title.value.toLowerCase().normalize('NFKD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80)});
-    slug.addEventListener('input',function(){slug.dataset.touched=1})}
+  if(slug&&!slug.value){
+    title.addEventListener('input',function(){
+      if(slug.dataset.touched)return;
+      slug.value=title.value.toLowerCase().normalize('NFKD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80);
+    });
+    slug.addEventListener('input',function(){slug.dataset.touched=1});
+  }
   var st=document.getElementById('status'),when=document.getElementById('when');
   if(st&&when){var sync=function(){when.hidden=st.value==='draft'};st.addEventListener('change',sync);sync()}
-  var del=document.getElementById('delete');if(del)del.addEventListener('submit',function(e){if(!confirm('Delete this permanently?'))e.preventDefault()});
+  var del=document.getElementById('delete');
+  if(del)del.addEventListener('submit',function(e){if(!confirm('Delete this permanently?'))e.preventDefault()});
 })();
 </script>`;
 
@@ -781,9 +1027,14 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
   const inMenu = type === 'page' && (!row || row.status === 'draft' || (await isInPrimaryMenu(c.env, pageUrl!)));
   const opt = (v: string, label: string) => html`<option value="${v}"${status === v ? raw(' selected') : ''}>${label}</option>`;
   const title = row ? `Edit ${type}` : `New ${type}`;
+  // Which editor opens: the site default, else the classic/modern chooser on Add New.
+  const preferred = settings.default_editor === 'classic' || settings.default_editor === 'modern' ? settings.default_editor : '';
+  const initialSkin = preferred || 'modern';
   return layout(c, title, html`
+${raw(EDITOR_CSS)}
 <div class="row between" style="margin-bottom:1rem"><h1 style="margin:0">${title}</h1><a href="${base}/${kind}">&larr; All ${kind}</a></div>
-<form method="post" action="${base}/${kind}/save" id="edit">
+<form method="post" action="${base}/${kind}/save" id="edit"
+      data-is-new="${row ? '0' : '1'}" data-initial-skin="${initialSkin}" data-preferred-skin="${preferred}"${row ? raw(` data-rowid="${row.id}"`) : ''}>
   ${csrfField(c)}
   <input type="hidden" name="id" value="${row?.id ?? ''}">
   <div class="card">
@@ -793,29 +1044,39 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
     <input type="text" id="slug" name="slug" value="${row?.slug ?? ''}" maxlength="80" autocapitalize="none" placeholder="generated from the title">
     <div class="editor-heading row between">
       <label for="body" id="content-label">Content</label>
-      <div class="editor-modes" role="group" aria-label="Editor mode">
+      <div class="ams-editor-switch" id="editor-mode-switch" role="group" aria-label="Editor mode">
         <button type="button" data-editor-mode="text" aria-pressed="false">Text</button>
         <button type="button" data-editor-mode="html" aria-pressed="true">HTML</button>
       </div>
     </div>
-    <div class="toolbar" aria-label="Content formatting">
-      <button type="button" data-wrap="<strong>|</strong>" data-command="bold" title="Bold"><b>B</b></button>
-      <button type="button" data-wrap="<em>|</em>" data-command="italic" title="Italic"><i>I</i></button>
-      <button type="button" data-wrap="<h2>|</h2>" data-command="formatBlock" data-value="h2">H2</button>
-      <button type="button" data-wrap="<h3>|</h3>" data-command="formatBlock" data-value="h3">H3</button>
-      <button type="button" data-wrap="<p>|</p>" data-command="formatBlock" data-value="p" title="Paragraph">&para;</button>
-      <button type="button" data-wrap="<ul>&#10;  <li>|</li>&#10;</ul>" data-command="insertUnorderedList">List</button>
-      <button type="button" data-wrap="<blockquote>|</blockquote>" data-command="formatBlock" data-value="blockquote">Quote</button>
-      <button type="button" data-wrap="<pre><code>|</code></pre>">Code</button>
-      <button type="button" data-wrap='<a href="$1">|</a>' data-ask="Link URL" data-def="https://">Link</button>
-      <button type="button" data-wrap='<img src="$1" alt="">|' data-ask="Image URL (copy it from Media)" data-def="/media/">Image</button>
-      <span class="toolbar-separator" aria-hidden="true"></span>
-      <button type="button" id="add-html-block" title="Insert a custom HTML block">&lt;/&gt; HTML block</button>
-      <button type="button" id="add-youtube" title="Embed a YouTube video">&#9654; YouTube</button>
+    <div class="ams-editor is-modern" id="content-editor" data-skin="${initialSkin}">
+      <div class="ams-editor-bar">
+        <div class="ams-editor-switch" role="group" aria-label="Editor style">
+          <button type="button" data-editor-skin-set="classic" aria-pressed="${initialSkin === 'classic' ? 'true' : 'false'}">Classic</button>
+          <button type="button" data-editor-skin-set="modern" aria-pressed="${initialSkin === 'modern' ? 'true' : 'false'}">Modern</button>
+        </div>
+        <p class="hint">Classic shows the original toolbar; Modern keeps the same tools in a wider bar.</p>
+      </div>
+      <div class="toolbar" id="editor-toolbar" aria-label="Content formatting">
+        <button type="button" data-wrap="<strong>|</strong>" data-command="bold" title="Bold"><b>B</b></button>
+        <button type="button" data-wrap="<em>|</em>" data-command="italic" title="Italic"><i>I</i></button>
+        <button type="button" data-wrap="<h2>|</h2>" data-command="formatBlock" data-value="h2">H2</button>
+        <button type="button" data-wrap="<h3>|</h3>" data-command="formatBlock" data-value="h3">H3</button>
+        <button type="button" data-wrap="<p>|</p>" data-command="formatBlock" data-value="p" title="Paragraph">&para;</button>
+        <button type="button" data-wrap="<ul>&#10;  <li>|</li>&#10;</ul>" data-command="insertUnorderedList">List</button>
+        <button type="button" data-wrap="<blockquote>|</blockquote>" data-command="formatBlock" data-value="blockquote">Quote</button>
+        <button type="button" data-wrap="<pre><code>|</code></pre>">Code</button>
+        <button type="button" data-wrap='<a href="$1">|</a>' data-ask="Link URL" data-def="https://">Link</button>
+        <button type="button" data-wrap='<img src="$1" alt="">|' data-ask="Image URL (copy it from Media)" data-def="/media/">Image</button>
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button type="button" id="add-html-block" title="Insert a custom HTML block">&lt;/&gt; HTML block</button>
+        <button type="button" id="add-youtube" title="Embed a YouTube video">&#9654; YouTube</button>
+      </div>
+      <div id="visual-editor" class="visual-editor ams-editor-pane" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="content-label" data-placeholder="Write your content here…" hidden></div>
+      <textarea id="body" name="body" class="code ams-editor-pane" spellcheck="true">${row?.body ?? ''}</textarea>
+      <p class="ams-editor-status" id="editor-status" role="status" aria-live="polite"></p>
     </div>
-    <div id="visual-editor" class="visual-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="content-label" data-placeholder="Write your content here…" hidden></div>
-    <textarea id="body" name="body" class="code" spellcheck="true">${row?.body ?? ''}</textarea>
-    <p class="hint">Use Text for visual editing or HTML to edit the source. You can add as many HTML and YouTube blocks as you need.</p>
+    <p class="hint">Text and HTML always show the same content: switch freely, nothing is lost. Add as many HTML and YouTube blocks as you need.</p>
     ${can(c.var.user, 'admin') ? html`<p class="hint">Admin HTML is not sanitized when you save.</p>` : html`<p class="hint">Unsafe HTML is removed when you save. YouTube embeds added with the YouTube button are allowed.</p>`}
   </div>
   ${postFields}
@@ -842,6 +1103,24 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
     <p class="row" style="margin:1.1rem 0 0"><button class="btn" type="submit">Save</button></p>
   </div>
 </form>
+<dialog id="editor-mode-dialog" class="ams-mode-dialog" aria-labelledby="editor-mode-title" aria-describedby="editor-mode-desc">
+  <h2 id="editor-mode-title">Choose your editor</h2>
+  <p class="hint" id="editor-mode-desc">Both editors edit the same content. You can switch again at any time from the Classic / Modern buttons in the editor.</p>
+  <div class="ams-mode-options">
+    <button type="button" class="ams-mode-option" data-skin-choice="modern">
+      <b>Modern editor</b>
+      <span>Wide writing area, Text and HTML tabs, a formatting bar with HTML block and YouTube buttons.</span>
+    </button>
+    <button type="button" class="ams-mode-option" data-skin-choice="classic">
+      <b>Classic editor</b>
+      <span>The original compact editor: small formatting buttons above a plain editing box.</span>
+    </button>
+  </div>
+  <p class="ams-mode-note">Your choice is remembered on this device. Change the site default under <a href="${base}/settings#reading">Settings → Reading</a>.</p>
+  <div class="row dialog-actions">
+    <button type="button" class="btn ghost small" data-close-dialog>Not now</button>
+  </div>
+</dialog>
 <dialog id="html-block-dialog" aria-labelledby="html-block-title">
   <h2 id="html-block-title">Add HTML block</h2>
   <p class="hint">Paste a complete HTML snippet. It will be inserted at your cursor, and you can repeat this for more blocks.</p>

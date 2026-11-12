@@ -268,6 +268,19 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   assert.match(editor.text, /id="add-youtube"/);
   assert.match(editor.text, /id="youtube-dialog"/);
 
+  // Every post/page picks its editor: a classic/modern chooser on Add New and
+  // on Edit (until a preference is remembered), plus a switch inside the page.
+  const newPost = await get(`${admin}/posts/new`);
+  assert.match(newPost.text, /id="editor-mode-dialog"/, 'Add New offers the editor chooser');
+  assert.match(newPost.text, /data-skin-choice="modern"/);
+  assert.match(newPost.text, /data-skin-choice="classic"/);
+  assert.match(newPost.text, /data-editor-skin-set="classic"/, 'the editor can switch skin in place');
+  assert.match(newPost.text, /data-editor-skin-set="modern"/);
+  assert.match(newPost.text, /data-is-new="1"/);
+  assert.match(editor.text, /data-is-new="0"/, 'edit has its own state');
+  assert.match(editor.text, /id="editor-mode-switch"/, 'Text/HTML switch is present');
+  assert.match(editor.text, /id="editor-status" role="status"/, 'the switch reports its state');
+
   const pageList = await get(`${admin}/pages`);
   for (const label of ['Add Page', 'All', 'Published', 'Draft', 'Search Pages', 'Bulk actions', 'Comments', 'Date']) {
     assert.ok(pageList.text.includes(label), `pages list includes ${label}`);
@@ -448,7 +461,17 @@ test('10. settings: timezone, permalinks and a moved admin URL take effect at on
   assert.equal((await anon('/1999/01/launch-day-more')).location, `/${y}/${m}/launch-day-more`);
   const editor = await get(`${admin}/posts/${state.postId}`);
   assert.match(editor.text, /Publish date \(Asia\/Karachi\)/);
-  log('title/tagline live, posts moved to /YYYY/MM/slug with redirect, admin moved to /control-room');
+
+  // The site-wide default decides which editor the chooser starts on.
+  await adminPost('/settings', { ...SITE_SETTINGS, default_editor: 'classic' });
+  assert.match((await get(`${admin}/posts/new`)).text, /data-initial-skin="classic"/, 'settings pick the default editor');
+  assert.match((await get(`${admin}/pages/new`)).text, /data-initial-skin="classic"/, 'pages use the same default');
+  await adminPost('/settings', { ...SITE_SETTINGS, default_editor: 'modern' });
+  assert.match((await get(`${admin}/posts/new`)).text, /data-initial-skin="modern"/);
+  await adminPost('/settings', { ...SITE_SETTINGS, default_editor: 'ask' });
+  assert.match((await get(`${admin}/posts/new`)).text, /data-initial-skin="modern"/, 'ask falls back to the modern editor');
+  assert.match((await get(`${admin}/settings`)).text, /value="ask" selected/, 'the choice is stored');
+  log('title/tagline live, posts moved to /YYYY/MM/slug with redirect, admin moved to /control-room, default editor saved');
 });
 
 test('11. profile: password change keeps this session and old password stops working', async () => {
