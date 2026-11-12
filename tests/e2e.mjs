@@ -255,6 +255,8 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   await adminPost('/pages/save', { id: state.pageId, title: 'About Us', slug: 'about-us', body: '<p>We build better things.</p>', status: 'published' });
   pub = await anon('/about-us');
   assert.match(pub.text, /We build better things\./, 'edit is visible immediately');
+  const pagesWithoutDrafts = await get(`${admin}/pages`);
+  assert.match(pagesWithoutDrafts.text, /Draft <b>\(0\)<\/b>/, 'all status tabs remain available when a status has no pages');
   const reserved = await adminPost('/pages/save', { title: 'Blog', slug: 'blog', body: '', status: 'draft' });
   const editor = await get(reserved.location.split('?')[0]);
   assert.match(editor.text, /<title>Edit page/, 'edit URL opens the editor, not the list');
@@ -265,13 +267,33 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   assert.match(editor.text, /id="add-html-block"/);
   assert.match(editor.text, /id="add-youtube"/);
   assert.match(editor.text, /id="youtube-dialog"/);
-  assert.equal((await get(`${admin}/pages`)).text.includes('About Us'), true);
+
+  const pageList = await get(`${admin}/pages`);
+  for (const label of ['Add Page', 'All', 'Published', 'Draft', 'Search Pages', 'Bulk actions', 'Comments', 'Date']) {
+    assert.ok(pageList.text.includes(label), `pages list includes ${label}`);
+  }
+  assert.match(pageList.text, /class="posts-table pages-table"/);
+  assert.match((await get(`${admin}/pages?q=About`)).text, /About Us/);
+  assert.match((await get(`${admin}/pages?status=draft`)).text, /Blog/);
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  assert.match((await get(`${admin}/pages?month=${currentMonth}`)).text, /About Us/);
+  const reservedId = idFrom(reserved.location);
+  assert.equal((await adminPost('/pages/bulk', { action: 'publish', ids: [reservedId] })).status, 303);
+  assert.equal((await anon('/blog-page')).status, 200);
+  assert.equal((await adminPost('/pages/bulk', { action: 'draft', ids: [reservedId] })).status, 303);
+  assert.equal((await anon('/blog-page')).status, 404);
+  assert.equal((await adminPost('/pages/bulk', { action: 'delete', ids: [reservedId] })).status, 303);
+  assert.equal((await get(`${admin}/pages/${reservedId}`)).status, 404);
   assert.equal((await get(`${admin}/pages/999`)).status, 404);
   assert.equal((await get(`${admin}/pagesx`)).status, 404);
   log(`page #${state.pageId} live at /about-us, SEO tags rendered, edit visible without waiting`);
 });
 
 test('7. media: upload to storage, serve identical bytes, refuse unsafe types', async () => {
+  const emptyMedia = await get(`${admin}/media`);
+  for (const label of ['Media Library', 'Add Media File', 'All media items', 'All dates', 'Bulk select', 'Search media', 'No media items found.']) {
+    assert.ok(emptyMedia.text.includes(label), `media library includes ${label}`);
+  }
   const body = new FormData();
   body.set('_csrf', await csrf());
   body.append('files', new File([PNG], 'Team Photo.PNG', { type: 'image/png' }));
@@ -287,8 +309,27 @@ test('7. media: upload to storage, serve identical bytes, refuse unsafe types', 
   assert.equal(file.headers.get('content-type'), 'image/png');
   assert.equal(file.headers.get('x-content-type-options'), 'nosniff');
   assert.deepEqual(Buffer.from(await file.arrayBuffer()), PNG);
+  assert.match(lib.text, /List view/);
+  assert.match(lib.text, /Grid view/);
+  assert.match((await get(`${admin}/media?q=team-photo&type=images`)).text, /team-photo\.png/);
+  assert.match((await get(`${admin}/media?view=list`)).text, /class="media-list-table"/);
+  assert.match((await get(`${admin}/media?type=audio`)).text, /No media items found\./);
+  const month = new Date().toISOString().slice(0, 7);
+  assert.match((await get(`${admin}/media?month=${month}`)).text, /team-photo\.png/);
+
+  const extra = new FormData();
+  extra.set('_csrf', await csrf());
+  extra.append('files', new File(['temporary test file'], 'Delete Me.txt', { type: 'text/plain' }));
+  await request(`${admin}/media/upload`, { method: 'POST', body: extra });
+  const bulkList = await get(`${admin}/media?bulk=1`);
+  const bulkFigure = bulkList.text.match(/<figure class="media-item">[^]*?delete-me\.txt[^]*?<\/figure>/)?.[0];
+  assert.ok(bulkFigure, 'bulk mode shows the selected file and its checkbox');
+  const bulkId = Number(bulkFigure.match(/name="ids" value="(\d+)" form="media-bulk-form"/)[1]);
+  const bulkUrl = bulkFigure.match(/data-copy="([^"]+)"/)[1];
+  assert.match((await adminPost('/media/bulk', { ids: [bulkId] })).location, /deleted/);
+  assert.equal((await anon(bulkUrl)).status, 404);
   assert.equal((await anon('/media/..%2F..%2Fcms.sqlite')).status, 404);
-  log(`uploaded ${state.mediaUrl}, bytes match, .html upload skipped, path traversal blocked`);
+  log(`uploaded ${state.mediaUrl}, list/grid, search and filters work, bulk delete removes selected file, path traversal blocked`);
 });
 
 test('8. posts: categories, tags, featured image, archives and JSON API', async () => {
@@ -328,6 +369,46 @@ test('8. posts: categories, tags, featured image, archives and JSON API', async 
   assert.match(videoPage.text, /aspect-ratio:16\/9/, 'video embed is responsive');
   await adminPost(`/posts/${videoId}/delete`, {});
   log(`post #${state.postId} on /blog, 2 category pages, tag page, home page and API; HTML blocks and YouTube embed rendered`);
+});
+
+test('8a. posts list searches, filters and applies bulk actions', async () => {
+  const all = await get(`${admin}/posts`);
+  for (const label of ['Add Post', 'All', 'Published', 'Categories', 'Tags', 'Comments', 'Date', 'Bulk actions']) {
+    assert.ok(all.text.includes(label), `posts list includes ${label}`);
+  }
+  assert.match(all.text, /class="posts-table"/);
+  assert.match(all.text, /Launch Day &amp; More/);
+  assert.match(all.text, /name="ids"/);
+  assert.match(all.text, /name="action" form="posts-bulk-form"/);
+
+  const searched = await get(`${admin}/posts?q=Launch+Day`);
+  assert.match(searched.text, /Launch Day &amp; More/);
+  const empty = await get(`${admin}/posts?q=not-a-real-title`);
+  assert.doesNotMatch(empty.text, /Launch Day &amp; More/);
+  assert.match(empty.text, /No posts found/);
+  const editor = await get(`${admin}/posts/${state.postId}`);
+  const categoryId = editor.text.match(/name="cat" value="(\d+)" checked/)[1];
+  const byCategory = await get(`${admin}/posts?category=${categoryId}`);
+  assert.match(byCategory.text, /Launch Day &amp; More/);
+  assert.doesNotMatch(byCategory.text, /Video Post/);
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  assert.match((await get(`${admin}/posts?month=${currentMonth}`)).text, /Launch Day &amp; More/);
+  assert.match((await get(`${admin}/posts?sort=title&dir=asc`)).text, /aria-sort="ascending"/);
+
+  const draft = await adminPost('/posts/save', { title: 'Bulk Action Candidate', status: 'draft' });
+  const id = idFrom(draft.location);
+  assert.match((await get(`${admin}/posts?status=draft`)).text, /Bulk Action Candidate/);
+  const published = await adminPost('/posts/bulk', { action: 'publish', ids: [id] });
+  assert.equal(published.status, 303);
+  assert.match(published.location, /posts\?ok=/);
+  assert.equal((await anon('/blog/bulk-action-candidate')).status, 200);
+  const movedToDraft = await adminPost('/posts/bulk', { action: 'draft', ids: [id] });
+  assert.equal(movedToDraft.status, 303);
+  assert.equal((await anon('/blog/bulk-action-candidate')).status, 404);
+  const deleted = await adminPost('/posts/bulk', { action: 'delete', ids: [id] });
+  assert.equal(deleted.status, 303);
+  assert.equal((await get(`${admin}/posts/${id}`)).status, 404);
+  log('posts table renders, search and category filters narrow results, bulk publish/delete update content');
 });
 
 test('9. drafts and scheduled posts stay hidden; preview needs a login', async () => {
@@ -604,6 +685,11 @@ test('12e. users: create an author, role limits, switch roles and delete', async
 
   await adminPost('/login', { login: 'author-e2e', password: 'author password' });
   assert.equal((await get(`${admin}/posts`)).status, 200, 'authors keep their posts');
+  const authorPosts = await get(`${admin}/posts`);
+  assert.doesNotMatch(authorPosts.text, /Launch Day &amp; More/, 'authors only see their own posts in the table');
+  const hiddenBulk = await adminPost('/posts/bulk', { action: 'delete', ids: [state.postId] });
+  assert.match(hiddenBulk.location, /err=/, 'bulk actions cannot change another author’s post');
+  assert.equal((await anon(currentPostUrl())).status, 200, 'the other author’s post remains published');
   assert.equal((await get(`${admin}/pages`)).status, 403, 'authors cannot manage pages');
   assert.equal((await get(`${admin}/settings`)).status, 403, 'authors cannot open settings');
   assert.equal((await get(`${admin}/users`)).status, 403, 'authors cannot open users');

@@ -145,9 +145,9 @@ and the pending-comment count is shown as a badge.
 | --- | --- |
 | Dashboard | Counts, quick actions, recently edited content, latest comments, version and moderation status |
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
-| Posts | All posts, add new, **Categories** and **Tags**; editor, excerpt, categories, tags, featured image, SEO, draft/published/scheduled |
-| Media | Upload images, PDF, audio, video and fonts to KV (Cloudflare) or `data/media/` (Node), copy URLs, delete |
-| Pages | All pages and add new; a tick adds the page to the header menu |
+| Posts | Searchable post table with status, date and category filters, sortable columns and bulk publish/draft/delete; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
+| Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs and upload images, PDF, audio, video and fonts to KV (Cloudflare) or `data/media/` (Node) |
+| Pages | Searchable, sortable page table with status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (additional CSS, header code, footer code, JavaScript), **Themes**, **Menus**, **Widgets** (three footer areas) |
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
