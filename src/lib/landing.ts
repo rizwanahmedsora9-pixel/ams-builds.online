@@ -1,4 +1,4 @@
-import { esc, sanitizeHtml } from './security';
+import { esc } from './security';
 
 export type LandingAudioTrack = { id: number; url: string; filename: string };
 
@@ -15,38 +15,47 @@ export function parseLandingAudioIds(value: string | undefined): number[] {
 }
 
 /**
- * The splash is added only to the public home response. Its content comes from
- * a published Page, while its soundtrack is explicitly started by the visitor
- * (browsers commonly block audible autoplay). `head` decides whether the
- * splash is visible before the page paints; `body` supplies the accessible UI
- * and the playlist player.
+ * The splash is a fixed part of the public home response — it is never built
+ * from a CMS Page or sample content. Its identity comes from saved settings
+ * (site title, tagline and logo), while its soundtrack is explicitly started
+ * by the visitor (browsers commonly block audible autoplay). `head` decides
+ * whether the splash is visible before the page paints; `body` supplies the
+ * accessible UI and the looping playlist player.
  */
 export function landingScreenMarkup(opts: {
-  page: { title: string; body: string };
   siteTitle: string;
+  tagline: string;
+  logoUrl: string;
   tracks: LandingAudioTrack[];
   nonce: string;
 }): { head: string; body: string } {
   const nonce = esc(opts.nonce);
   const hasTracks = opts.tracks.length > 0;
   const urls = JSON.stringify(opts.tracks.map((track) => track.url));
-  const copy = opts.page.body.trim()
-    ? sanitizeHtml(opts.page.body)
-    : '<p class="ams-landing-empty-copy">Welcome. Explore the site when you are ready.</p>';
+  const siteTitle = esc(opts.siteTitle.trim());
+  const tagline = esc(opts.tagline.trim());
+  const logo = opts.logoUrl.trim()
+    ? `<img class="ams-landing-logo" src="${esc(opts.logoUrl.trim())}" alt="${siteTitle}">`
+    : '';
+  const copy = tagline ? `<p class="ams-landing-tagline">${tagline}</p>` : '';
+  const status = hasTracks
+    ? 'Press play to start the soundtrack.'
+    : 'No soundtrack has been added yet. Upload audio in Settings to enable playback.';
 
   const head = `<style nonce="${nonce}">${LANDING_CSS}</style>
 <script nonce="${nonce}">${LANDING_BOOTSTRAP}</script>`;
   const body = `<div class="ams-landing-screen" id="ams-landing-screen" role="dialog" aria-modal="true" aria-labelledby="ams-landing-title" data-audio-tracks="${esc(urls)}">
   <div class="ams-landing-card">
-    <p class="ams-landing-brand">${esc(opts.siteTitle)}</p>
+    ${logo}
+    <p class="ams-landing-brand">Welcome to</p>
     <div class="ams-landing-copy">
-      <h1 id="ams-landing-title">${esc(opts.page.title)}</h1>
+      <h1 id="ams-landing-title">${siteTitle}</h1>
       ${copy}
     </div>
     <div class="ams-landing-equalizer" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-    ${hasTracks ? '<p class="ams-landing-status" id="ams-landing-status" role="status" aria-live="polite">Press play to start the soundtrack.</p>' : ''}
+    <p class="ams-landing-status" id="ams-landing-status" role="status" aria-live="polite">${status}</p>
     <div class="ams-landing-controls">
-      ${hasTracks ? '<button class="ams-landing-play" type="button" data-landing-play aria-label="Play soundtrack">Play audio</button>' : ''}
+      <button class="ams-landing-play" type="button" data-landing-play aria-label="Play soundtrack"${hasTracks ? '' : ' disabled'}>Play audio</button>
       <div class="ams-landing-secondary">
         ${hasTracks ? '<button class="ams-landing-mute" type="button" data-landing-mute aria-pressed="false">Mute sound</button>' : ''}
         <button class="ams-landing-enter" type="button" data-landing-enter>Enter site</button>
@@ -60,7 +69,7 @@ export function landingScreenMarkup(opts: {
   return { head, body };
 }
 
-const LANDING_BOOTSTRAP = `(function(){var show=true;try{show=sessionStorage.getItem('ams-landing-entered')!=='1'}catch(e){}if(show)document.documentElement.setAttribute('data-ams-landing','show')})();`;
+const LANDING_BOOTSTRAP = `(function(){var forced=/(?:^|[?&])landing=1(?:&|$)/.test(location.search);var show=true;try{if(forced)sessionStorage.removeItem('ams-landing-entered');show=forced||sessionStorage.getItem('ams-landing-entered')!=='1'}catch(e){}if(show)document.documentElement.setAttribute('data-ams-landing','show')})();`;
 
 const LANDING_PLAYER = `(function(){
   var screen=document.getElementById('ams-landing-screen');
@@ -73,6 +82,8 @@ const LANDING_PLAYER = `(function(){
   var status=screen.querySelector('#ams-landing-status');
   var tracks=[];try{tracks=JSON.parse(screen.getAttribute('data-audio-tracks')||'[]')}catch(e){}
   if(!Array.isArray(tracks))tracks=[];
+  // One track loops natively; a playlist loops by wrapping in the ended handler.
+  audio.loop=tracks.length===1;
   var current=0;
   var muted=false;
   var card=screen.querySelector('.ams-landing-card');
@@ -81,12 +92,13 @@ const LANDING_PLAYER = `(function(){
     if(card)card.classList.toggle('is-playing',playing);
     if(playButton){playButton.textContent=playing?'Pause audio':'Play audio';playButton.setAttribute('aria-label',playing?'Pause soundtrack':'Play soundtrack')}
     if(muteButton){muteButton.textContent=muted?'Unmute sound':'Mute sound';muteButton.setAttribute('aria-pressed',muted?'true':'false')}
+    if(status&&tracks.length)status.textContent=playing?'Soundtrack playing. It will loop until you enter.':'Soundtrack paused. Press play to continue.';
   }
   function failed(){
     audio.pause();
-    screen.classList.remove('is-playing');
-    if(status)status.textContent='This audio file could not be played. Try another format in Settings.';
+    if(card)card.classList.remove('is-playing');
     update();
+    if(status)status.textContent='This audio file could not be played. Try another format in Settings.';
   }
   function playTrack(index,attempts){
     if(!tracks.length)return;
@@ -115,7 +127,14 @@ const LANDING_PLAYER = `(function(){
   if(enterButton)enterButton.addEventListener('click',function(){
     audio.pause();
     try{audio.currentTime=0;audio.removeAttribute('src');audio.load()}catch(e){}
-    try{sessionStorage.setItem('ams-landing-entered','1')}catch(e){}
+    try{
+      sessionStorage.setItem('ams-landing-entered','1');
+      var url=new URL(location.href);
+      if(url.searchParams.get('landing')==='1'){
+        url.searchParams.delete('landing');
+        history.replaceState(null,'',url.pathname+url.search+url.hash);
+      }
+    }catch(e){}
     document.documentElement.removeAttribute('data-ams-landing');
     screen.remove();
     var main=document.getElementById('main');
@@ -140,13 +159,12 @@ html[data-ams-landing="show"],html[data-ams-landing="show"] body{overflow:hidden
 .ams-landing-screen{display:none;position:fixed;z-index:2147483000;inset:0;place-items:center;overflow-y:auto;overscroll-behavior:contain;padding:clamp(1rem,4vw,3.5rem);background:radial-gradient(ellipse at 50% 0%,rgba(47,80,138,.34),transparent 58%),radial-gradient(ellipse at 100% 100%,rgba(114,68,125,.24),transparent 50%),linear-gradient(145deg,#090d16 0%,#111827 55%,#10121c 100%);color:#f5f7fb;font:500 16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
 html[data-ams-landing="show"] .ams-landing-screen{display:grid}
 .ams-landing-card{width:min(100%,42rem);margin:auto;padding:clamp(1.5rem,5vw,3.5rem);border:1px solid rgba(255,255,255,.13);border-radius:clamp(1.2rem,3vw,2rem);background:rgba(10,14,23,.76);box-shadow:0 2rem 7rem rgba(0,0,0,.45),inset 0 1px rgba(255,255,255,.08);backdrop-filter:blur(22px);text-align:center}
+.ams-landing-logo{display:block;max-width:min(15rem,75%);max-height:5.5rem;width:auto;height:auto;margin:0 auto 1.25rem;object-fit:contain}
 .ams-landing-brand{margin:0 0 1.3rem;color:#b7c7e8;font-size:.75rem;font-weight:750;letter-spacing:.2em;text-transform:uppercase;overflow-wrap:anywhere}
 .ams-landing-copy{max-width:34rem;margin:0 auto}
 .ams-landing-copy h1{margin:0 0 .75rem;color:#fff;font-size:clamp(2rem,7vw,4.1rem);font-weight:750;letter-spacing:-.055em;line-height:1.04;overflow-wrap:anywhere}
 .ams-landing-copy p{margin:.55rem 0;color:#c3cad8;font-size:clamp(.98rem,2.7vw,1.12rem)}
-.ams-landing-copy a{color:#c7d7ff;text-underline-offset:.2em}
-.ams-landing-copy img{max-height:12rem;width:auto;border-radius:.8rem;object-fit:contain}
-.ams-landing-empty-copy{color:#c3cad8}
+.ams-landing-tagline{overflow-wrap:anywhere}
 .ams-landing-equalizer{height:3.3rem;display:flex;align-items:center;justify-content:center;gap:.28rem;margin:1.6rem auto .9rem}
 .ams-landing-equalizer span{display:block;width:clamp(.2rem,1vw,.38rem);height:var(--bar-height,1rem);border-radius:99px;background:linear-gradient(180deg,#d6e6ff,#739cff 55%,#b67be6);opacity:.74;transform-origin:center;animation:none}
 .ams-landing-equalizer span:nth-child(1){--bar-height:1rem}.ams-landing-equalizer span:nth-child(2){--bar-height:2.1rem}.ams-landing-equalizer span:nth-child(3){--bar-height:2.8rem}.ams-landing-equalizer span:nth-child(4){--bar-height:1.5rem}.ams-landing-equalizer span:nth-child(5){--bar-height:2.4rem}.ams-landing-equalizer span:nth-child(6){--bar-height:3.1rem}.ams-landing-equalizer span:nth-child(7){--bar-height:2.2rem}.ams-landing-equalizer span:nth-child(8){--bar-height:1.3rem}.ams-landing-equalizer span:nth-child(9){--bar-height:2.6rem}.ams-landing-equalizer span:nth-child(10){--bar-height:1.8rem}.ams-landing-equalizer span:nth-child(11){--bar-height:1rem}

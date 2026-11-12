@@ -208,13 +208,13 @@ autosaved and versioned, and no screen needs JavaScript to work.
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
 | Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). **Browser-side WebP compression** before upload, every common image format (JPG/JFIF, PNG/APNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, JXL, ICO, SVG), and a two-tab picker in the editor: already-uploaded images, or upload straight from the device |
-| Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; set or clear the page shown on the first-visit landing screen; a tick adds a page to the header menu |
+| Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes** (store, installed, editor), **Templates**, **Menus**, **Widgets**, **Identity** |
 | Plugins | Built-in XML sitemap, robots.txt, RSS feed and **Search Console Verification** (paste Google/Bing/Yandex meta tag → live in `<head>`) can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects, JSON import/export (v2, includes themes), server-stored backups, site health with performance budgets, audit log, page-cache reset |
-| Settings | Site identity and favicon, reading, customizable first-visit landing screen with an ordered looping soundtrack (each file uploads on its own, with progress, so a slow connection cannot lose the rest of the form), discussion, domains and the admin URL |
+| Settings | Site identity and favicon, reading, a fixed first-visit landing screen that uses the saved site title/tagline/logo (no Page or sample content) and an ordered looping soundtrack (each file uploads on its own, with progress, so a slow connection cannot lose the rest of the form), discussion, domains and the admin URL |
 
 ## The site name follows the domain
 
@@ -226,6 +226,23 @@ again for another domain, or answering on a platform address as well as a custom
 domain, names itself correctly without being retyped. Type a title and it wins
 everywhere, on every host. An IP address has no name to take, so there the stored
 title is used.
+
+## Fixed landing screen
+
+The home address opens a built-in welcome screen on a visitor's first visit. It
+is not a CMS Page and never uses sample copy: its company name is **Settings →
+Site title**, its welcome line is **Settings → Tagline**, and its optional image
+is the logo from **Appearance → Identity**. The regular home page is still
+rendered underneath; **Enter site** dismisses the welcome layer for that tab
+session.
+
+Sound files added under **Settings → Landing screen** become the screen's
+playlist. A centered **Play audio** button starts them in the saved order and
+loops the playlist until the visitor enters; the button is shown even before
+any audio exists (disabled, with a hint), so the control is never missing.
+Browsers require a visitor gesture for audible playback, so the soundtrack does
+not autoplay. The **Preview the landing screen** link in Settings reopens it via
+`/?landing=1`, even in a tab where it was already dismissed.
 
 ## Writing posts and pages
 
