@@ -745,7 +745,9 @@ export const EDITOR_CSS = `<style>
 .visual-editor figure.image-block img{width:100%;height:auto;display:block}
 .visual-editor figure.image-block figcaption{font-size:.85rem;color:var(--muted);text-align:center;padding:.35rem}
 .visual-editor .align-left{float:left;margin:.3em 1em 1em 0}
+.visual-editor figure.image-block.align-left{margin:.3em 1em 1em 0}
 .visual-editor .align-right{float:right;margin:.3em 0 1em 1em}
+.visual-editor figure.image-block.align-right{margin:.3em 0 1em 1em}
 .visual-editor .align-center{margin-left:auto;margin-right:auto}
 .visual-editor img.is-selected,.visual-editor figure.image-block.is-selected{outline:2px solid var(--accent);outline-offset:2px}
 /* Page break: a marker the editor shows as a labelled rule. It carries no

@@ -495,3 +495,54 @@ test('the HTML pane is tidied but never emptied: stray divs and empty blocks go'
   assert.equal(context.amsEditor.tidy('<div class="html-block">\n<p>x</p>\n</div>'),
     '<div class="html-block">\n<p>x</p>\n</div>', 'a custom block keeps its wrapper');
 });
+
+
+test('mixed headings, images and following paragraphs survive tidying', () => {
+  const { context } = bootEditor();
+  const html = '<h2>Heading</h2><p>Intro</p><figure class="image-block align-center" style="width:50%"><img src="/a.png" alt=""><figcaption>Caption</figcaption></figure><div>First paragraph</div><div>Second paragraph</div><h3>Next heading</h3><p>More text</p>';
+  assert.equal(context.amsEditor.tidy(html), html.replace('<div>First paragraph</div><div>Second paragraph</div>', '<p>First paragraph</p><p>Second paragraph</p>'));
+  const custom = '<div class="custom"><p>Before</p><figure><img src="/a.png"></figure><p>After</p></div><div>Next</div>';
+  assert.equal(context.amsEditor.tidy(custom), custom.replace('<div>Next</div>', '<p>Next</p>'));
+  assert.match(editorScript, /tail\.extractContents\(\)/);
+  assert.match(editorScript, /range\.setStart\(paragraph,0\)/);
+});
+
+test('inserting an image keeps existing text and headings outside the figure', async () => {
+  const { JSDOM } = await import('jsdom');
+  const page = await panel.get(`${panel.admin}/posts/new`);
+  const dom = new JSDOM(page.text, { url: 'https://example.test/admin-panel/posts/new', runScripts: 'outside-only' });
+  const { window } = dom;
+  const doc = window.document;
+  doc.getElementById('body').value = '<h2>Heading</h2><p>First line<br>Second line</p><h3>Next heading</h3><p>More text</p>';
+  window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  window.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new window.Event('close')); };
+  let pick;
+  window.amsMediaPicker = () => ({ open: options => { pick = options.onPick; } });
+  window.eval(utilsScript);
+  window.eval(editorScript);
+  const visual = doc.getElementById('visual-editor');
+  const text = visual.querySelector('p').lastChild;
+  const range = doc.createRange();
+  range.setStart(text, 6); // Insert in the middle of "Second line".
+  range.collapse(true);
+  window.getSelection().removeAllRanges();
+  window.getSelection().addRange(range);
+  visual.dispatchEvent(new window.Event('keyup'));
+  const button = doc.querySelector('[data-picker-image]');
+  button.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true }));
+  button.click();
+  pick({ url: '/image.png', alt: 'Photo' });
+  doc.getElementById('insert-image-block').click();
+  const figure = visual.querySelector('figure.image-block');
+  assert.ok(figure);
+  assert.equal(figure.parentNode, visual, 'image is a top-level block');
+  assert.equal(figure.textContent, '', 'existing text was not absorbed by the image');
+  assert.equal(visual.querySelector('h2').textContent, 'Heading');
+  assert.equal(visual.querySelector('h3').textContent, 'Next heading');
+  assert.match(visual.textContent, /First lineSecond lineNext headingMore text/);
+  const caret = window.getSelection().getRangeAt(0);
+  assert.equal(caret.startContainer.tagName, 'P');
+  assert.equal(caret.startContainer.previousSibling, figure, 'typing continues in a separate paragraph after the image');
+  assert.match(window.amsEditor.serialize(), /<h3>Next heading<\/h3><p>More text<\/p>/);
+  dom.window.close();
+});
