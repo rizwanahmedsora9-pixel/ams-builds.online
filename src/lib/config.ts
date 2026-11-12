@@ -14,6 +14,18 @@ export async function markInstalled(env: Env): Promise<void> {
   installedMemo = true;
 }
 
+/**
+ * Forget the lock for this isolate.
+ *
+ * `isInstalled` memoises a positive answer forever, which is right for a running
+ * site and wrong for exactly one thing: a factory reset (lib/reset.ts) deletes the
+ * flag, and the very next request has to see the installer again rather than the
+ * memo saying "installed" until the isolate is recycled.
+ */
+export function resetInstallState(): void {
+  installedMemo = false;
+}
+
 export async function getConfig(env: Env): Promise<Config> {
   const cfg = await env.KV.get<Config>('config', 'json');
   if (!cfg) throw new Error('CMS config missing from KV');

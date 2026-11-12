@@ -8,11 +8,25 @@
  */
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { createReadStream, mkdirSync } from 'node:fs';
+import { chmodSync, createReadStream, mkdirSync } from 'node:fs';
 import { rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import type { Env } from '../types';
+
+/**
+ * A SQLite file has no password and no user list: whoever can read the file owns
+ * the site. The least the process can do is not hand it to every other account on
+ * the machine, so the data directory, the database (with its WAL sidecars) and the
+ * media folder are owner-only. Best effort by design - on Windows and on mounts
+ * that refuse a chmod this must not stop the server.
+ */
+const DIR_MODE = 0o700;
+const FILE_MODE = 0o600;
+
+function tighten(path: string, mode: number): void {
+  try { chmodSync(path, mode); } catch { /* not a POSIX filesystem, or not ours to change */ }
+}
 
 type Meta = { changes: number; last_row_id: number; duration: number };
 type Result = { success: true; results: Record<string, unknown>[]; meta: Meta };
@@ -104,7 +118,8 @@ class DiskFiles {
   private root: string;
   constructor(private db: DatabaseSync, dir: string) {
     this.root = resolve(dir);
-    mkdirSync(this.root, { recursive: true });
+    mkdirSync(this.root, { recursive: true, mode: DIR_MODE });
+    tighten(this.root, DIR_MODE);
     db.exec('CREATE TABLE IF NOT EXISTS _files (key TEXT PRIMARY KEY, content_type TEXT, size INTEGER NOT NULL, etag TEXT NOT NULL, uploaded TEXT NOT NULL)');
   }
 
@@ -148,14 +163,32 @@ class DiskFiles {
     if (file) await rm(file, { force: true });
     this.db.prepare('DELETE FROM _files WHERE key=?').run(key);
   }
+
+  /**
+   * Empties the whole store: every file under the media folder and every row of
+   * its index. A factory reset (lib/reset.ts) is the only caller - it is how the
+   * Node runtime answers "delete the uploads too", which on Cloudflare is a KV
+   * purge instead.
+   */
+  async clear(): Promise<void> {
+    await rm(this.root, { recursive: true, force: true });
+    mkdirSync(this.root, { recursive: true, mode: DIR_MODE });
+    tighten(this.root, DIR_MODE);
+    this.db.prepare('DELETE FROM _files').run();
+  }
 }
 
 /** Opens (creating if needed) the data directory and returns the bindings the app expects. */
 export function openStorage(dataDir: string): { env: Env; purgeExpired: () => void; close: () => void } {
   const dir = resolve(dataDir);
-  mkdirSync(dir, { recursive: true });
-  const db = new DatabaseSync(join(dir, 'cms.sqlite'));
+  mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  tighten(dir, DIR_MODE);
+  const file = join(dir, 'cms.sqlite');
+  const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;');
+  // WAL mode leaves two sidecars next to the database; they hold committed data
+  // too, so they get the same permissions (they may not exist yet on a first run).
+  for (const suffix of ['', '-wal', '-shm']) tighten(file + suffix, FILE_MODE);
   const kv = new KeyValue(db);
   const env = {
     DB: new Database(db),

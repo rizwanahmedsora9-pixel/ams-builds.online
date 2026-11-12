@@ -55,6 +55,7 @@ export function commandsFor(base: string, user: User): Command[] {
       { label: 'Import / Export', href: `${base}/tools/export`, icon: 'download', keys: ['export', 'import', 'backup', 'json'], group: 'Go to' },
       { label: 'Backups', href: `${base}/tools/backups`, icon: 'download', keys: ['backups', 'snapshot'], group: 'Go to' },
       { label: 'Site Health', href: `${base}/tools/health`, icon: 'tools', keys: ['health', 'diagnostics', 'status'], group: 'Go to' },
+      { label: 'Reset the panel', href: `${base}/tools/reset`, icon: 'trash', keys: ['reset', 'factory', 'start over', 'start again', 'wipe', 'fresh', 'delete everything'], group: 'Go to' },
     );
   }
   return list;

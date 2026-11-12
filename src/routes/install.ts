@@ -52,7 +52,8 @@ function wizard(v: Values, errors: string[] = []): string {
     </section>
     <section data-step>
       <h2>3. Install</h2>
-      <p>This creates the database tables, the default theme and a sample home page, then locks the installer permanently.</p>
+      <p>This creates the database tables, the default theme and a sample home page, then locks the installer.</p>
+      <p class="hint">Built the site wrong later? An admin can reopen this wizard with <b>Tools &rarr; Danger zone &rarr; Reset the panel</b>, which deletes everything first.</p>
       <button class="btn" type="submit" style="width:100%">Install</button>
     </section>
     <div class="row between" id="wiznav" style="margin-top:1rem" hidden>

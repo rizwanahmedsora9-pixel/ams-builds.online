@@ -7,6 +7,14 @@ services:
     environment:
       # Set to 1 only when a reverse proxy (nginx, Caddy, Traefik) sits in front.
       TRUST_PROXY: "0"
+      # The password of the database in the volume. The first start that carries it
+      # locks /data/cms.sqlite to it, and every later start must present the same
+      # one or the container exits before it listens - so keep it somewhere durable
+      # (an .env file, a secret) and do not lose it. At least 8 characters.
+      # DB_PASSWORD: "a long secret"
+      # Forgot it? Start once with this instead to remove the check; nothing else
+      # is changed, and the data stays where it is.
+      # DB_PASSWORD_UNLOCK: "1"
     volumes:
       - cms-data:/data
 
