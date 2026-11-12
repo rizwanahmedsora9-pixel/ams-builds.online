@@ -3,7 +3,7 @@ import { getCookie } from 'hono/cookie';
 import type { AppEnv, Ctx, Env } from '../types';
 import { SESSION_COOKIE, sessionUser } from '../lib/auth';
 import { bumpCache, cfgFor, getConfig, getSettings, type Settings } from '../lib/config';
-import { findContent, listPosts, permalinkStyle, postUrl, toViews, type ContentView } from '../lib/content';
+import { findContent, listPosts, mediaUrl, permalinkStyle, postUrl, toViews, type ContentView } from '../lib/content';
 import { commentsEnabled, commentsModerated, validCommentToken } from '../lib/comments';
 import { getFile } from '../lib/files';
 import { pluginOn } from '../lib/plugins';
@@ -12,7 +12,8 @@ import { resolveSettings } from '../lib/theme-manifest';
 import { previewFor } from '../lib/preview';
 import { can } from '../lib/capabilities';
 import type { ThemeBundle } from '../lib/theme-manifest';
-import { clientIp, cspFor, rateCount, rateHit, sameOrigin, stripTags, type CspMode } from '../lib/security';
+import { clientIp, cspFor, nonceFor, rateCount, rateHit, sameOrigin, stripTags, type CspMode } from '../lib/security';
+import { landingScreenMarkup, parseLandingAudioIds, type LandingAudioTrack } from '../lib/landing';
 import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
 import { assetMime, cleanAssetPath, isRefusedAsset } from '../lib/theme-manifest';
 
@@ -365,7 +366,7 @@ site.get('*', async (c) => {
   if (preview) result.meta.noindex = true;
 
   const framed = url.searchParams.has('preview');
-  const body = await renderTheme(c.env, {
+  let body = await renderTheme(c.env, {
     cfg: c.var.cfg,
     settings,
     url,
@@ -383,6 +384,30 @@ site.get('*', async (c) => {
       reply_to: url.searchParams.get('reply_to') || undefined,
     },
   });
+
+  // The landing screen is a first-visit layer over the existing home page. The
+  // visitor enters the site in-place, so / remains the normal home URL/content.
+  const landingPageId = Number(settings.landing_page_id) || 0;
+  if (path === '/' && landingPageId && !preview) {
+    const landingPage = await findContent(c.env, { type: 'page', id: landingPageId });
+    if (landingPage) {
+      const ids = parseLandingAudioIds(settings.landing_audio_ids);
+      let tracks: LandingAudioTrack[] = [];
+      if (ids.length) {
+        const placeholders = ids.map(() => '?').join(',');
+        const { results: audioRows } = await c.env.DB.prepare(
+          `SELECT id, r2_key, filename FROM media WHERE site_id=1 AND mime LIKE 'audio/%' AND id IN (${placeholders})`,
+        ).bind(...ids).all<{ id: number; r2_key: string; filename: string }>();
+        const byId = new Map(audioRows.map((item) => [item.id, item]));
+        tracks = ids.map((id) => byId.get(id)).filter((item): item is NonNullable<typeof item> => !!item)
+          .map((item) => ({ id: item.id, url: mediaUrl(item.r2_key), filename: item.filename }));
+      }
+      const nonce = body.match(/<(?:script|style)\b[^>]*\bnonce="([^"]+)"/i)?.[1] || nonceFor();
+      const markup = landingScreenMarkup({ page: landingPage, siteTitle: settings.site_title || '', tracks, nonce });
+      body = injectLandingScreen(body, markup);
+    }
+  }
+
   if (cacheable && result.status === 200) {
     c.executionCtx.waitUntil(c.env.KV.put(key, body, { expirationTtl: PAGE_CACHE_TTL }));
   }
@@ -397,6 +422,16 @@ site.get('*', async (c) => {
 site.all('*', (c) => c.text('Method not allowed', 405));
 
 /* --------------------------------------------------------------- helpers */
+
+/** Put the first-visit splash in the document head/body without replacing the theme's home page. */
+function injectLandingScreen(pageHtml: string, markup: { head: string; body: string }): string {
+  const withHead = /<\/head>/i.test(pageHtml)
+    ? pageHtml.replace(/<\/head>/i, () => `${markup.head}</head>`)
+    : pageHtml;
+  return /<\/body>/i.test(withHead)
+    ? withHead.replace(/<\/body>/i, () => `${markup.body}</body>`)
+    : withHead + markup.body;
+}
 
 /**
  * A `?preview=1` page is shown in the Customizer's iframe, so it may be framed

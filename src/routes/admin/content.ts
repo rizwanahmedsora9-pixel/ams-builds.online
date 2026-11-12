@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, ContentRow, Ctx } from '../../types';
 import { can } from '../../lib/auth';
-import { RESERVED_SLUGS, bumpCache, getSettings } from '../../lib/config';
+import { RESERVED_SLUGS, bumpCache, getSettings, setSettings } from '../../lib/config';
 import { mediaUrl, permalinkStyle, postUrl } from '../../lib/content';
 import { sanitizeHtml, slugify } from '../../lib/security';
 import { localToUtc, utcToLocal } from '../../lib/time';
@@ -132,13 +132,16 @@ function postListRedirect(c: Ctx, state: PostListState, message: string, isError
  * from the list. Plain links and one small form per verb, so it works without
  * JavaScript; CSS reveals it on hover/focus on a wide screen.
  */
-function rowActions(c: Ctx, kind: Kind, row: { id: number; pinned?: number }, preview: string, themes: { slug: string; name: string }[] = []): Raw {
+function rowActions(c: Ctx, kind: Kind, row: { id: number; pinned?: number }, preview: string, themes: { slug: string; name: string }[] = [], isLandingPage = false): Raw {
   const base = c.var.base;
   const previewMenu = themes.length > 1
     ? html`<details class="row-menu"><summary>Preview in theme…</summary>
         <ul>${themes.map((theme) => html`<li><a href="${preview}${preview.includes('?') ? '&' : '?'}theme=${encodeURIComponent(theme.slug)}" target="_blank" rel="noopener">${theme.name}</a></li>`)}</ul>
       </details>`
     : '';
+  const landingAction = kind === 'pages' ? html`<form method="post" action="${base}/pages/${row.id}/landing" class="inline">
+    ${csrfField(c)}<button type="submit" class="linkish" aria-pressed="${isLandingPage ? 'true' : 'false'}">${isLandingPage ? 'Remove landing screen' : 'Set as landing screen'}</button>
+  </form>` : '';
   return html`<span class="row-actions">
   <a href="${base}/${kind}/${row.id}">Edit</a>
   <a href="${base}/${kind}/${row.id}/quick">Quick edit</a>
@@ -146,6 +149,7 @@ function rowActions(c: Ctx, kind: Kind, row: { id: number; pinned?: number }, pr
   <a href="${base}/${kind}/${row.id}/revisions">History</a>
   <a href="${preview}" target="_blank" rel="noopener">View</a>
   <form method="post" action="${base}/${kind}/${row.id}/pin" class="inline"><button type="submit" class="linkish">${row.pinned ? 'Unpin' : 'Pin'}</button></form>
+  ${landingAction}
   ${previewMenu}
 </span>`;
 }
@@ -538,8 +542,8 @@ async function pagesList(c: Ctx): Promise<Response> {
               <span class="row-thumb row-thumb--empty" aria-hidden="true">${icon('file', { cls: 'ico--sm' })}</span>
               <div class="row-lead__body">
                 <a class="row-title" href="${base}/pages/${row.id}">${row.pinned ? html`<span class="pin" title="Pinned">${icon('pin', { cls: 'ico--sm' })}<span class="sr-only">Pinned: </span>` : ''}${row.title || '(untitled)'}</a>
-                <span class="row-meta">${row.status === 'draft' ? html`<span class="badge draft">draft</span>` : ''}${settings.home_page_id === String(row.id) ? html`<span class="badge published">home page</span>` : ''}<span class="row-slug">/${row.slug}</span></span>
-                ${rowActions(c, 'pages', row, preview, installedThemes)}
+                <span class="row-meta">${row.status === 'draft' ? html`<span class="badge draft">draft</span>` : ''}${settings.home_page_id === String(row.id) ? html`<span class="badge published">home page</span>` : ''}${settings.landing_page_id === String(row.id) ? html`<span class="badge published">landing screen</span>` : ''}<span class="row-slug">/${row.slug}</span></span>
+                ${rowActions(c, 'pages', row, preview, installedThemes, settings.landing_page_id === String(row.id))}
               </div>
             </div>`,
           row.author || '—',
@@ -584,6 +588,21 @@ async function pagesList(c: Ctx): Promise<Response> {
 /* -------------------------------------------------------------------- list */
 content.get('/:kind{(?:pages|posts)}', async (c) => kindOf(c) === 'posts' ? postsList(c) : pagesList(c));
 
+content.post('/pages/:id{[0-9]+}/landing', async (c) => {
+  const id = Number(c.req.param('id'));
+  const page = await c.env.DB.prepare("SELECT id, title, status FROM content WHERE id=? AND site_id=1 AND type='page'").bind(id).first<{ id: number; title: string; status: string }>();
+  if (!page) return errorPage(c, 404, 'Page not found.');
+  const settings = await getSettings(c.env);
+  const removing = settings.landing_page_id === String(id);
+  await setSettings(c.env, { landing_page_id: removing ? '' : String(id) });
+  await bumpCache(c.env, c.var.cfg);
+  await audit(c, 'settings', 'setting', `${removing ? 'Removed' : 'Set'} “${page.title}” ${removing ? 'from' : 'as'} the landing screen`, id);
+  const message = removing ? 'Landing screen cleared.' : page.status === 'published'
+    ? 'Landing screen set. Edit its content on the Pages screen.'
+    : 'Landing screen set. Publish this page before visitors can see it.';
+  return pageListRedirect(c, pageListState(c), message);
+});
+
 content.post('/pages/bulk', async (c) => {
   const state = pageListState(c);
   const action = String(c.var.form.get('action') ?? '');
@@ -614,6 +633,7 @@ content.post('/pages/bulk', async (c) => {
       db.prepare('DELETE FROM comments WHERE content_id=?').bind(row.id),
       db.prepare("DELETE FROM content WHERE id=? AND site_id=1 AND type='page'").bind(row.id),
       db.prepare("DELETE FROM settings WHERE site_id=1 AND key='home_page_id' AND value=?").bind(String(row.id)),
+      db.prepare("DELETE FROM settings WHERE site_id=1 AND key='landing_page_id' AND value=?").bind(String(row.id)),
     ]));
     await bumpCache(c.env, c.var.cfg);
     return pageListRedirect(c, state, `${rows.length} page${rows.length === 1 ? '' : 's'} deleted${limited ? ' (the first 100 selected were processed)' : ''}.`);
@@ -1484,6 +1504,7 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/delete', async (c) => {
     c.env.DB.prepare('DELETE FROM comments WHERE content_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM content WHERE id=?').bind(id),
     c.env.DB.prepare("DELETE FROM settings WHERE site_id=1 AND key='home_page_id' AND value=?").bind(String(id)),
+    c.env.DB.prepare("DELETE FROM settings WHERE site_id=1 AND key='landing_page_id' AND value=?").bind(String(id)),
   ]);
   await deleteRevisions(c.env, id);
   if (kind === 'pages') await removeUrlFromMenus(c.env, '/' + row.slug);

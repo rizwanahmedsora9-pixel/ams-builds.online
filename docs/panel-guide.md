@@ -110,6 +110,13 @@ empty leftovers, so the stored markup is as clean as the writing.
   *Duplicate* makes a draft copy; *Pin* floats a row to the top.
 - **Page order.** The Pages screen has an *Order* panel. The same order reaches themes through
   `{{#each pages}}`, so a menu built from pages matches what you set.
+- **First-visit landing screen.** Use a page's row actions to set or clear it as the landing screen.
+  Its title and body come from the normal page editor. Under **Settings → Landing screen**, choose
+  the page and upload/select up to 20 audio tracks. The responsive welcome screen has a centered Play
+  button, equalizer, mute control and Enter button; tracks play in order and loop after Play is pressed.
+  Enter stops playback and reveals the regular home page. The welcome screen stays dismissed in that
+  tab until the tab is closed. Browsers require a visitor gesture for audible playback, so audio does
+  not start automatically on page load.
 - **Preview in any theme.** `?preview=1&theme=<slug>` renders the post with any installed theme,
   for signed-in users only and never cached.
 
@@ -125,13 +132,13 @@ blank 500.
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
 | Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; the full editor (formatting bar, links, images with caption/alt/link, page breaks, word count), excerpt, featured image, SEO, draft/published/scheduled |
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). Images are compressed to WebP in the browser before upload, in every common format (JPG/JFIF, PNG/APNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, JXL, ICO, SVG). The editor's media picker uses the same library and has two tabs: **Library** and **Upload from device** |
-| Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
+| Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; set or clear the first-visit landing page; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes**, **Templates**, **Menus**, **Widgets** (the areas the theme declares), **Identity** (logo, favicon, social image) |
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects (301/302), JSON import/export, server-stored backups, site health, page-cache reset |
-| Settings | Site identity and favicon, reading (home page, posts per page, permalinks, default editor), discussion (comments and moderation), domains and the admin URL |
+| Settings | Site identity and favicon, reading, a customizable first-visit landing screen with an ordered looping audio playlist, discussion, domains and the admin URL |
 
 ## Who changed what
 

@@ -9,6 +9,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { ADMIN, TARGET, createHarness } from './helpers.mjs';
+import { JSDOM, VirtualConsole } from 'jsdom';
 
 let admin = '/admin-panel';
 let base = '';
@@ -17,6 +18,10 @@ const setAdmin = (slug) => { admin = slug; harness.setAdmin(slug); };
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
 const log = (msg) => console.log(`    · ${msg}`);
+const landingVirtualConsole = new VirtualConsole();
+landingVirtualConsole.on('jsdomError', (error) => {
+  if (!String(error.message).includes('Could not parse CSS stylesheet')) console.error(error);
+});
 
 /* ------------------------------------------------------------------ server */
 // Boot, cookie jar and the HTTP helpers all live in tests/helpers.mjs so a new
@@ -441,6 +446,83 @@ test('10. settings: timezone, permalinks and a moved admin URL take effect at on
   assert.match((await get(`${admin}/posts/new`)).text, /data-initial-skin="modern"/, 'ask falls back to the modern editor');
   assert.match((await get(`${admin}/settings`)).text, /value="ask" selected/, 'the choice is stored');
   log('title/tagline live, posts moved to /YYYY/MM/slug with redirect, admin moved to /control-room, default editor saved');
+});
+
+test('10b. landing screen: choose a page, upload a looping soundtrack and enter the home page', async () => {
+  const selected = await adminPost(`/pages/${state.pageId}/landing`, {});
+  assert.equal(selected.status, 303);
+  assert.match(selected.location, /Landing screen set/);
+  const pages = await get(`${admin}/pages`);
+  assert.match(pages.text, /class="badge published">landing screen/);
+  assert.match(pages.text, new RegExp(`action="${admin}\\/pages\\/${state.pageId}\\/landing"`));
+
+  const upload = new FormData();
+  upload.set('_csrf', await csrf());
+  for (const [key, value] of Object.entries({ ...SITE_SETTINGS, landing_page_id: state.pageId })) upload.set(key, String(value));
+  upload.append('landing_audio_files', new File(['sample audio bytes'], 'Welcome Track.MP3', { type: 'audio/mpeg' }));
+  upload.append('landing_audio_files', new File(['second track bytes'], 'Ambient Loop.ogg', { type: 'audio/ogg' }));
+  const saved = await request(`${admin}/settings`, { method: 'POST', body: upload });
+  assert.equal(saved.status, 303);
+  assert.match(saved.location, /Settings saved/);
+
+  const panelSettings = await get(`${admin}/settings`);
+  assert.match(panelSettings.text, /id="landing_page_id"/);
+  assert.match(panelSettings.text, /name="landing_audio_ids"[^>]*checked/);
+  assert.match(panelSettings.text, /welcome-track\.mp3/);
+  assert.match(panelSettings.text, /name="landing_audio_files"[^]*multiple/);
+
+  const home = await anon('/');
+  assert.match(home.text, /id="ams-landing-screen"[^]*role="dialog"/);
+  assert.ok(home.text.includes('<h1 id="ams-landing-title">About Us</h1>'));
+  assert.ok(home.text.includes('We build better things.'));
+  assert.match(home.text, /data-landing-play/);
+  assert.match(home.text, /data-landing-mute/);
+  assert.match(home.text, /data-landing-enter/);
+  assert.match(home.text, /data-ams-landing/);
+  assert.match(home.text, /sessionStorage\.setItem\('ams-landing-entered','1'\)/);
+  assert.match(home.text, /audio\.pause\(\)/);
+  assert.match(home.text, /audio\.addEventListener\('ended'/, 'the playlist advances and loops');
+  assert.match(home.text, /place-items:center/, 'the responsive landing layout centers its play button');
+  const audioUrl = home.text.match(/\/media\/\d{4}\/\d{2}\/[^"&]+-welcome-track\.mp3/);
+  assert.ok(audioUrl, 'the uploaded track is wired into the landing playlist');
+  const audio = await anon(audioUrl[0]);
+  assert.equal(audio.status, 200);
+  assert.equal(audio.headers.get('content-type'), 'audio/mpeg');
+  const landingDom = new JSDOM(home.text, { url: base + '/', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: landingVirtualConsole });
+  const landingWindow = landingDom.window;
+  const landingScreen = landingWindow.document.getElementById('ams-landing-screen');
+  assert.equal(landingWindow.document.documentElement.getAttribute('data-ams-landing'), 'show', 'a new tab session opens the landing screen');
+  const player = landingWindow.document.querySelector('[data-landing-audio]');
+  Object.defineProperty(player, 'paused', { configurable: true, writable: true, value: true });
+  player.load = () => {};
+  let playCount = 0;
+  player.play = () => { playCount++; player.paused = false; player.dispatchEvent(new landingWindow.Event('play')); return Promise.resolve(); };
+  player.pause = () => { player.paused = true; player.dispatchEvent(new landingWindow.Event('pause')); };
+  landingWindow.document.querySelector('[data-landing-play]').click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(playCount, 1, 'Play starts the soundtrack on a visitor gesture');
+  assert.equal(landingScreen.querySelector('.ams-landing-card').classList.contains('is-playing'), true, 'the equalizer animates while audio plays');
+  const firstTrack = player.src;
+  player.dispatchEvent(new landingWindow.Event('ended'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.notEqual(player.src, firstTrack, 'the playlist advances to the next uploaded track');
+  landingWindow.document.querySelector('[data-landing-mute]').click();
+  assert.equal(landingWindow.document.querySelector('[data-landing-mute]').getAttribute('aria-pressed'), 'true');
+  landingWindow.document.querySelector('[data-landing-enter]').click();
+  assert.equal(player.paused, true, 'Enter stops playback');
+  assert.equal(landingWindow.document.getElementById('ams-landing-screen'), null, 'Enter removes the landing screen and reveals home');
+  assert.equal(landingWindow.document.documentElement.hasAttribute('data-ams-landing'), false);
+  assert.equal(landingWindow.sessionStorage.getItem('ams-landing-entered'), '1', 'Enter dismisses the screen for this tab session');
+  landingDom.window.close();
+  const returningDom = new JSDOM(home.text, {
+    url: base + '/', runScripts: 'dangerously',
+    virtualConsole: landingVirtualConsole,
+    beforeParse(window) { window.sessionStorage.setItem('ams-landing-entered', '1'); },
+  });
+  assert.equal(returningDom.window.document.documentElement.hasAttribute('data-ams-landing'), false, 'the landing screen stays hidden in the same session');
+  returningDom.window.close();
+  await adminPost(`/pages/${state.pageId}/landing`, {}); // leave later theme tests on their normal home page
+  log('Pages assignment, in-Settings upload/playlist, first-visit splash, responsive Play/mute/Enter, session reset and audio storage work');
 });
 
 test('11. profile: password change keeps this session and old password stops working', async () => {
