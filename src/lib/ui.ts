@@ -105,10 +105,6 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
 .toolbar-separator{width:1px;background:var(--line);margin:.15rem .25rem}
 .editor-heading{gap:1rem;margin-top:.9rem}
 .editor-heading>label{margin:0}
-.editor-modes{display:flex;border:1px solid var(--line);border-radius:.45rem;overflow:hidden}
-.editor-modes button{padding:.25rem .7rem;border:0;border-left:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-size:.82rem;cursor:pointer}
-.editor-modes button:first-child{border-left:0}
-.editor-modes button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
 .visual-editor{width:100%;min-height:20rem;padding:.75rem;border:1px solid var(--line);border-radius:.5rem;background:var(--bg);color:var(--fg);overflow-wrap:anywhere}
 .visual-editor:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .visual-editor:empty::before{content:attr(data-placeholder);color:var(--muted);pointer-events:none}

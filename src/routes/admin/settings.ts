@@ -58,6 +58,13 @@ settings.get('/settings', async (c) => {
       <option value="dated"${sel(style === 'dated')}>/2026/01/post-name</option>
     </select>
     <p class="hint">Old post URLs redirect automatically when you change this.</p>
+    <label for="default_editor">Default editor</label>
+    <select id="default_editor" name="default_editor">
+      <option value="ask"${sel(!['classic', 'modern'].includes(s.default_editor || ''))}>Ask every time (classic or modern)</option>
+      <option value="modern"${sel(s.default_editor === 'modern')}>Modern editor</option>
+      <option value="classic"${sel(s.default_editor === 'classic')}>Classic editor</option>
+    </select>
+    <p class="hint">Every post and page can still switch between the two from the editor itself.</p>
   </div>
   <div class="card" id="discussion">
     <h2>Discussion</h2>
@@ -112,6 +119,7 @@ settings.post('/settings', async (c) => {
     posts_per_page: String(Math.min(50, Math.max(1, Number(str('posts_per_page')) || 10))),
     permalink_style: style,
     domains: domains.join('\n'),
+    default_editor: ['classic', 'modern'].includes(str('default_editor')) ? str('default_editor') : 'ask',
     comments_enabled: str('comments_enabled') === '1' ? '1' : '0',
     comments_require_approval: str('comments_require_approval') === '1' ? '1' : '0',
   });

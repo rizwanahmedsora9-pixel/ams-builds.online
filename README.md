@@ -153,7 +153,26 @@ and the pending-comment count is shown as a badge.
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects (301/302), JSON import/export, server-stored backups, site health, page-cache reset |
-| Settings | Site identity and favicon, reading (home page, posts per page, permalinks), discussion (comments and moderation), domains and the admin URL |
+| Settings | Site identity and favicon, reading (home page, posts per page, permalinks, default editor), discussion (comments and moderation), domains and the admin URL |
+
+## Writing posts and pages
+
+Every post and page can be written two ways, and you choose which one you want:
+
+- **Classic editor** — the compact original: a small formatting bar above a plain editing box.
+- **Modern editor** — the same tools in a roomier layout with a framed toolbar and a wider writing surface.
+
+Add New and Edit ask **Modern editor / Classic editor** the first time. Pick one and
+it is remembered on that device; change the site-wide default under
+**Settings → Reading → Default editor** (`Ask every time`, `Modern editor`,
+`Classic editor`). You can switch instantly from the **Classic / Modern** buttons
+inside the editor at any time — the content is the same either way.
+
+The **Text** and **HTML** tabs show the same content: Text is the visual editor and
+HTML is the underlying markup. Switching back and forth keeps everything, and both
+tabs support the formatting buttons, HTML blocks and YouTube embeds. Content that
+starts with a `<style>` or `<script>` block always opens in HTML so it is never
+mistaken for page markup. Without JavaScript the HTML textarea still saves normally.
 
 Roles: **admin** has everything, **editor** manages all content, media, menus and
 comments, **author** only writes and edits their own posts and uploads. You cannot
