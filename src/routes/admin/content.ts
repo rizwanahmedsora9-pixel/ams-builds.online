@@ -706,8 +706,11 @@ export const EDITOR_CSS = `<style>
 .ams-editor-bar .hint{margin:0;flex:1 1 12rem}
 .ams-editor-pane[hidden]{display:none!important}
 .ams-editor .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem;margin-bottom:.4rem}
-.ams-editor .toolbar button{padding:.25rem .55rem;border:1px solid var(--line);border-radius:.3rem;background:var(--card);color:var(--fg);font:inherit;font-size:.82rem;line-height:1.5;cursor:pointer}
+.ams-editor .toolbar button{display:inline-flex;align-items:center;justify-content:center;min-width:3rem;height:2.25rem;padding:0 .55rem;border:1px solid var(--line);border-radius:.3rem;background:var(--card);color:var(--fg);font:inherit;font-size:.82rem;line-height:1.2;white-space:nowrap;cursor:pointer}
 .ams-editor .toolbar button:hover{border-color:var(--accent);color:var(--accent)}
+/* Keep native text selection vivid inside both editor modes; the global
+   selection colour is intentionally softer for ordinary page text. */
+.ams-editor .visual-editor::selection,.ams-editor .visual-editor *::selection,.ams-editor textarea.code::selection{background:var(--accent);color:var(--accent-fg)}
 .ams-editor .toolbar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .ams-editor .toolbar button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
 .toolbar-separator{width:1px;height:1.25rem;margin:0 .2rem;background:var(--line);align-self:center}
