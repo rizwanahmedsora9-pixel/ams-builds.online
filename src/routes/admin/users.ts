@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { AppEnv, Ctx } from '../../types';
 import { can, hashPassword } from '../../lib/auth';
+import { card, emptyState, pageHead, table } from '../../admin/components';
+import { icon } from '../../admin/icons';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 
 /**
@@ -71,33 +73,41 @@ users.get('/users', async (c) => {
   ).all<Row>();
   const base = c.var.base;
   return layout(c, 'Users', html`
-<div class="row between" style="margin-bottom:1rem">
-  <h1 style="margin:0">Users</h1>
-  <a class="btn" href="${base}/users/new">Add user</a>
-</div>
-<div class="card">
-  <table class="table">
-    <thead><tr><th>User</th><th>Role</th><th>Posts</th><th>Added</th><th></th></tr></thead>
-    <tbody>
-      ${results.map((u) => html`<tr>
-        <td><a href="${base}/users/${u.id}"><b>${u.username}</b></a><br><small class="muted">${u.email}</small></td>
-        <td><span class="pill ${u.role === 'admin' ? 'on' : 'off'}">${u.role}</span></td>
-        <td>${u.posts}</td>
-        <td><small class="muted">${u.created_at.slice(0, 10)}</small></td>
-        <td class="actions">
-          ${u.id === c.var.user.id ? html`<span class="muted" style="font-size:.8rem">you</span>` : html`<a class="btn ghost small" href="${base}/users/${u.id}">Edit</a>`}
-        </td>
-      </tr>`)}
-    </tbody>
-  </table>
-</div>
-<div class="card">
-  <h2>Roles</h2>
-  <ul class="list">
+${pageHead({
+    title: 'Users',
+    sub: 'Who can sign in, and what each role is allowed to do.',
+    actions: html`<a class="btn" href="${base}/users/new">${icon('plus', { cls: 'ico--sm' })}Add user</a>`,
+  })}
+${card({
+    flush: true,
+    body: results.length
+      ? table({
+        columns: [
+          { label: 'User' },
+          { label: 'Role' },
+          { label: 'Posts', align: 'center' },
+          { label: 'Added' },
+          { label: '', cls: 'actions' },
+        ],
+        rows: results.map((u) => [
+          html`<a href="${base}/users/${u.id}"><b>${u.username}</b></a><br><small class="muted">${u.email}</small>`,
+          html`<span class="pill ${u.role === 'admin' ? 'on' : 'off'}">${u.role}</span>`,
+          u.posts,
+          html`<small class="muted">${u.created_at.slice(0, 10)}</small>`,
+          u.id === c.var.user.id
+            ? html`<span class="muted" style="font-size:var(--text-xs)">you</span>`
+            : html`<a class="btn ghost small" href="${base}/users/${u.id}">Edit</a>`,
+        ]),
+      })
+      : emptyState({ title: 'No users yet', body: 'That should not happen: at least one admin always exists.', iconName: 'users' }),
+  })}
+${card({
+    title: 'Roles',
+    body: html`<ul class="list">
     ${ROLES.map((r) => html`<li><div class="t"><b>${r[0].toUpperCase() + r.slice(1)}</b><small>${roleHelp[r]}</small></div></li>`)}
   </ul>
-  <p class="hint" style="margin-bottom:0">You can change your own email and password under <a href="${base}/profile">Profile</a>.</p>
-</div>`, '/users');
+  <p class="hint" style="margin-bottom:0">You can change your own email and password under <a href="${base}/profile">Profile</a>.</p>`,
+  })}`, '/users');
 });
 
 users.get('/users/new', (c) => userForm(c, null));

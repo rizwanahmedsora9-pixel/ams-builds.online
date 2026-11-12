@@ -7,127 +7,49 @@
 //
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
 import { crc32, deflateRawSync } from 'node:zlib';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { ADMIN, TARGET, createHarness } from './helpers.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const TARGET = process.env.TARGET === 'cloudflare' ? 'cloudflare' : 'node';
-const ADMIN = { username: 'owner', email: 'owner@example.com', password: 'correct horse battery' };
+let admin = '/admin-panel';
+let base = '';
+const setAdmin = (slug) => { admin = slug; harness.setAdmin(slug); };
 // 1x1 PNG
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
-let dataDir, child, port, base;
-let admin = '/admin-panel';
-const jar = new Map();
 const log = (msg) => console.log(`    · ${msg}`);
 
 /* ------------------------------------------------------------------ server */
-const freePort = () => new Promise((resolve, reject) => {
-  const s = createServer();
-  s.once('error', reject);
-  s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); });
-});
-
-async function startServer() {
-  const env = { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dataDir, TRUST_PROXY: '0' };
-  const args = TARGET === 'node'
-    ? ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs')]
-    : [join(ROOT, 'node_modules', 'wrangler', 'bin', 'wrangler.js'), 'dev', '--ip', '127.0.0.1', '--port', String(port),
-       '--inspector-port', String(await freePort()), '--persist-to', dataDir, '--show-interactive-dev-session=false'];
-  let output = '';
-  child = spawn(process.execPath, args, { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout.on('data', (d) => { output += d; });
-  child.stderr.on('data', (d) => { output += d; });
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`server exited early:\n${output}`);
-    try {
-      const res = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(3000) });
-      if (res.ok) return res.json();
-    } catch { /* not listening yet */ }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  throw new Error(`server did not start within 60s:\n${output}`);
-}
-
-function stopServer() {
-  return new Promise((resolve) => {
-    if (!child || child.exitCode !== null) return resolve();
-    child.once('exit', resolve);
-    child.kill('SIGTERM');
-    setTimeout(() => child.kill('SIGKILL'), 4000).unref();
-  });
-}
+// Boot, cookie jar and the HTTP helpers all live in tests/helpers.mjs so a new
+// test can start from a working panel in three lines.
+const harness = createHarness();
 
 before(async () => {
-  dataDir = mkdtempSync(join(tmpdir(), 'edge-cms-e2e-'));
-  port = await freePort();
-  base = `http://127.0.0.1:${port}`;
-  const health = await startServer();
-  console.log(`\n  target: ${TARGET}  url: ${base}  data: ${dataDir}`);
+  const health = await harness.start();
+  base = harness.base;
+  console.log(`\n  target: ${TARGET}  url: ${base}  data: ${harness.dataDir}`);
   console.log(`  health: ${JSON.stringify(health)}\n`);
 });
 
 after(async () => {
-  await stopServer();
-  rmSync(dataDir, { recursive: true, force: true, maxRetries: 5 });
+  await harness.stop();
+  harness.cleanup();
 });
 
-/* -------------------------------------------------------------------- http */
-async function request(path, { method = 'GET', body, cookies = true, headers = {} } = {}) {
-  const h = { ...headers };
-  if (cookies && jar.size) h.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
-  const res = await fetch(base + path, { method, body, headers: h, redirect: 'manual', signal: AbortSignal.timeout(20000) });
-  if (cookies) {
-    for (const line of res.headers.getSetCookie()) {
-      const [pair] = line.split(';');
-      const i = pair.indexOf('=');
-      const name = pair.slice(0, i), value = pair.slice(i + 1);
-      if (value === '' || /max-age=0/i.test(line)) jar.delete(name); else jar.set(name, value);
-    }
-  }
-  const text = await res.text();
-  const loc = res.headers.get('location');
-  return { status: res.status, text, headers: res.headers, location: loc ? decodeURIComponent(loc.replace(base, '')) : null };
-}
-const get = (path, opts) => request(path, opts);
-const anon = (path) => request(path, { cookies: false });
-const form = (fields) => {
-  const p = new URLSearchParams();
-  for (const [k, v] of Object.entries(fields)) for (const item of [].concat(v)) p.append(k, String(item));
-  return p;
-};
-async function csrf() {
-  const page = await get(`${admin}/login`);
-  const html = page.status === 200 ? page.text : (await get(`${admin}/profile`)).text;
-  const m = html.match(/name="_csrf" value="([^"]+)"/);
-  assert.ok(m, 'CSRF token is present in the form');
-  return m[1];
-}
-const adminPost = async (path, fields) => request(admin + path, { method: 'POST', body: form({ _csrf: await csrf(), ...fields }) });
+const request = (...args) => harness.request(...args);
+const jar = harness.jar;
+const get = (...args) => harness.get(...args);
+const anon = (...args) => harness.anon(...args);
+const form = (...args) => harness.form(...args);
+const csrf = (...args) => harness.csrf(...args);
+const adminPost = (...args) => harness.adminPost(...args);
+const anonPost = (...args) => harness.anonPost(...args);
+
 const idFrom = (location) => Number(location.match(/\/(\d+)(\?|$)/)[1]);
-const anonPost = (path, fields) => request(path, { method: 'POST', body: form(fields), cookies: false });
 const fieldValue = (html, name) => {
   const m = html.match(new RegExp(`name="${name}" value="([^"]*)"`));
   assert.ok(m, `${name} field is present`);
   return m[1];
 };
-const currentPostUrl = () => {
-  const y = new Date().getUTCFullYear(), m = String(new Date().getUTCMonth() + 1).padStart(2, '0');
-  return `/${y}/${m}/launch-day-more`;
-};
-const SITE_SETTINGS = {
-  site_title: 'Renamed Site', tagline: 'Now with a tagline', timezone: 'Asia/Karachi', primary_domain: 'example.com',
-  domains: 'www.example.com', admin_slug: 'control-room', permalink_style: 'dated', posts_per_page: 5,
-  home_page_id: 1, favicon: '',
-};
-
-
 /** Builds a small zip in memory (first file stored, the rest deflated). */
 function makeZip(files) {
   const locals = [], central = [];
@@ -157,9 +79,19 @@ async function uploadTheme(name, bytes) {
   return request(`${admin}/themes/upload`, { method: 'POST', body });
 }
 const themeId = async (name) => Number((await get(`${admin}/themes`)).text.match(new RegExp(`themes/(\\d+)/download">${name}<`))[1]);
+
 const nav = (htmlText) => [...htmlText.match(/<nav class="site-nav"[^]*?<\/nav>/)[0].matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
 
-/* ------------------------------------------------------------------- steps */
+const currentPostUrl = () => {
+  const y = new Date().getUTCFullYear(), m = String(new Date().getUTCMonth() + 1).padStart(2, '0');
+  return `/${y}/${m}/launch-day-more`;
+};
+const SITE_SETTINGS = {
+  site_title: 'Renamed Site', tagline: 'Now with a tagline', timezone: 'Asia/Karachi', primary_domain: 'example.com',
+  domains: 'www.example.com', admin_slug: 'control-room', permalink_style: 'dated', posts_per_page: 5,
+  home_page_id: 1, favicon: '',
+};
+
 const INSTALL = {
   username: ADMIN.username, email: ADMIN.email, password: ADMIN.password, password2: ADMIN.password,
   title: 'E2E Test Site', domain: 'example.com', slug: 'admin-panel',
@@ -451,7 +383,7 @@ test('10. settings: timezone, permalinks and a moved admin URL take effect at on
   });
   assert.equal(saved.location, '/control-room/settings?ok=Settings saved.');
   assert.equal((await get('/admin-panel')).status, 404, 'old admin URL is gone');
-  admin = '/control-room';
+  setAdmin('/control-room');
   assert.equal((await get(admin)).status, 200);
   const home = await anon('/');
   assert.match(home.text, /<title>Renamed Site – Now with a tagline<\/title>/);
@@ -488,8 +420,8 @@ test('11. profile: password change keeps this session and old password stops wor
 });
 
 test('12. data survives a restart', async () => {
-  await stopServer();
-  await startServer();
+  await harness.stop();
+  await harness.start();
   const health = JSON.parse((await anon('/api/health')).text);
   assert.equal(health.installed, true);
   assert.match((await anon('/about-us')).text, /We build better things\./);
@@ -662,7 +594,7 @@ test('12d. comments: public form, moderation, approval, replies, spam and delete
   assert.doesNotMatch((await anon(url)).text, /Great post!/, 'a pending comment is not public');
 
   const dash = await get(admin);
-  assert.match(dash.text, /class="bubble" title="1 pending"/, 'sidebar shows the pending count');
+  assert.match(dash.text, /class="rail__bubble" title="1 pending"/, 'sidebar shows the pending count');
 
   const panel = await get(`${admin}/comments?status=pending`);
   assert.match(panel.text, /Visitor One/);
@@ -808,7 +740,7 @@ test('12g. tools: redirects, export/import, backups, health and cache', async ()
 test('12h. updates and taxonomy management: version page, run updates, categories and tags', async () => {
   const page = await get(`${admin}/updates`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /0\.2\.0/);
+  assert.match(page.text, /0\.3\.0/);
   assert.match(page.text, /Database schema/);
   assert.match((await adminPost('/updates/run', {})).location, /\/updates\?ok=/);
 
@@ -832,9 +764,11 @@ test('12i. the sidebar has every admin section, its sub-menus and the collapse c
     assert.ok(dash.text.includes(`href="${admin}${path}"`), `sidebar links to ${path}`);
   }
   assert.match(dash.text, /Collapse Menu/);
-  assert.match(dash.text, /class="nav-item on" href="\/control-room" aria-current="page"/, 'Dashboard is highlighted');
+  assert.match(dash.text, /class="rail__item" href="\/control-room" aria-current="page"/, 'Dashboard is highlighted');
   assert.match(dash.text, /id="side-c"/);
-  assert.match(dash.text, /href="\/control-room\/profile" title="Profile"/);
+  assert.match(dash.text, /<a href="\/control-room\/profile">/, 'the account menu links to the profile');
+  assert.match(dash.text, /class="usermenu"/, 'the account menu is in the top bar');
+  assert.match(dash.text, /href="\/control-room\/preferences"/, 'preferences is reachable from the sidebar');
 
   // A section shows its sub-menu while it is open, like the WordPress admin.
   const posts = await get(`${admin}/posts`);
@@ -859,6 +793,58 @@ test('12i. the sidebar has every admin section, its sub-menus and the collapse c
     assert.equal((await get(`${admin}${path}`)).status, 200, path);
   }
   log('11 sections and Profile are linked, sub-menus appear for the open section, every page opens');
+});
+
+test('12j. panel shell: cached assets, preferences, error boundary and page weight', async () => {
+  // The stylesheets are served as cacheable assets, not inlined in every page.
+  const dash = await get(admin);
+  assert.doesNotMatch(dash.text.slice(0, dash.text.indexOf('</head>')), /<style>/, 'no inlined stylesheet in the panel');
+  const links = [...dash.text.matchAll(/href="([^"]+\/assets\/[a-z]+\.css\?v=[^"]+)"/g)].map((m) => m[1]);
+  assert.equal(links.length, 3, 'three stylesheets are linked');
+  for (const href of links) {
+    const sheet = await anon(href);
+    assert.equal(sheet.status, 200, `${href} is served`);
+    assert.match(sheet.headers.get('content-type'), /text\/css/);
+    assert.match(sheet.headers.get('cache-control'), /immutable/);
+    const etag = sheet.headers.get('etag');
+    assert.ok(etag, 'assets carry an ETag');
+    const again = await request(href, { cookies: false, headers: { 'if-none-match': etag } });
+    assert.equal(again.status, 304, 'a cached asset is revalidated without a body');
+  }
+  // The token layer really is in the tokens bundle.
+  assert.match((await anon(links[0])).text, /--space-4:/);
+  // Unknown assets 404 inside the admin instead of falling through to the site.
+  assert.equal((await get(`${admin}/assets/nope.css`)).status, 404);
+
+  // Preferences are cookies, applied server-side: no flash of the wrong scheme.
+  const prefsPage = await get(`${admin}/preferences`);
+  assert.equal(prefsPage.status, 200);
+  assert.match(prefsPage.text, /Colour scheme/);
+  const saved = await adminPost('/preferences', { scheme: 'dark', density: 'compact', railCollapsed: '1' });
+  assert.match(saved.location, /preferences\?ok=/);
+  const dark = await get(admin);
+  assert.match(dark.text, /<html lang="en" data-scheme="dark" data-density="compact"/);
+  assert.match(dark.text, /id="side-c"[^>]*checked/, 'the collapsed rail is rendered by the server');
+  assert.ok(jar.get('ams_scheme') === 'dark', 'the scheme is remembered in a cookie');
+  // A rejected value falls back to the safe default instead of being echoed.
+  await adminPost('/preferences', { scheme: '<script>', density: 'huge', railCollapsed: '' });
+  assert.match((await get(admin)).text, /data-scheme="auto" data-density="comfortable"/);
+  // Back to the default for the remaining tests.
+  await adminPost('/preferences', { scheme: 'auto', density: 'comfortable', railCollapsed: '' });
+
+  // Page weight: the panel no longer carries ~31 KB of CSS in every response.
+  const body = dash.text;
+  const head = body.slice(0, body.indexOf('</head>'));
+  assert.ok(head.length < 2000, `panel <head> is small (${head.length} bytes)`);
+
+  // Icons are a sprite: every nav entry references a real symbol.
+  const symbols = new Set([...body.matchAll(/<symbol id="i-([a-z-]+)"/g)].map((m) => m[1]));
+  assert.ok(symbols.size > 20, 'the icon sprite is present');
+  for (const used of new Set([...body.matchAll(/<use href="#i-([a-z-]+)"/g)].map((m) => m[1]))) {
+    assert.ok(symbols.has(used), `icon ${used} exists in the sprite`);
+  }
+  assert.doesNotMatch(body, /\p{Extended_Pictographic}/u, 'no emoji left as UI icons');
+  log('assets cached with ETag, preferences render server-side, sprite icons everywhere, no inline CSS');
 });
 
 test('13. deleting content and media removes them from the site', async () => {

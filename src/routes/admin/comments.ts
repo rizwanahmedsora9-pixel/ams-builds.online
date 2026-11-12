@@ -4,6 +4,7 @@ import { can } from '../../lib/auth';
 import { bumpCache } from '../../lib/config';
 import { STATUSES, commentCounts, type CommentRow, type CommentStatus } from '../../lib/comments';
 import { esc } from '../../lib/security';
+import { pageHead, tabs } from '../../admin/components';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 
 /**
@@ -62,13 +63,15 @@ comments.get('/comments', async (c) => {
     </form>`;
 
   return layout(c, 'Comments', html`
-<div class="row between" style="margin-bottom:1rem">
-  <h1 style="margin:0">Comments</h1>
-  <span class="muted">${counts.pending} waiting for review</span>
-</div>
-<div class="filters">
-  ${filters.map(([key, text]) => html`<a href="${base}/comments${key === 'all' ? '' : '?status=' + key}" class="${status === key ? 'on' : ''}">${text} <b>${counts[key as keyof typeof counts]}</b></a>`)}
-</div>
+${pageHead({
+    title: 'Comments',
+    sub: `${counts.pending} waiting for review.`,
+  })}
+${tabs(filters.map(([key, text]) => ({
+    label: html`${text} <span class="muted">${counts[key as keyof typeof counts]}</span>`,
+    href: `${base}/comments${key === 'all' ? '' : '?status=' + key}`,
+    current: status === key,
+  })), { label: 'Comment status' })}
 <div class="card">
   ${list.length ? html`<ul class="list">
     ${list.map((row) => html`<li class="wrap" id="comment-${row.id}">

@@ -101,21 +101,27 @@ Severity: P0 = blocks professional use · P1 = visible quality gap · P2 = polis
 
 Estimates assume one senior engineer familiar with the codebase. `d` = focused working days.
 
-### Phase 0 — Safety net & design foundations (4 d)
+### Phase 0 — Safety net & design foundations (4 d) — ✅ shipped in 0.3.0
 
 *Why first: everything else lands on top of these, and phases 1–6 are unsafe without tests.*
 
-- Extract `src/admin/` UI kit: `ui/components.ts` (`pageHeader`, `card`, `table`, `tabs`, `badge`,
-  `emptyState`, `modal`, `field`, `notice`, `pagination`, `toast`) rendering `html` tagged templates.
-- Move `ADMIN_CSS` → `src/admin/assets/app.css`, served at `/{admin}/assets/app.css` with
-  `Cache-Control: public, max-age=31536000, immutable` + `?v=APP_VERSION`. Admin HTML drops ~31 KB/page.
-- Replace emoji nav icons with an inline SVG sprite (`<symbol>` set, 24 px grid).
-- Design tokens (OKLCH, light + dark), spacing/radius/shadow scales, `[data-density="compact"]`.
-- Theme scheme override: `data-scheme="light|dark|auto"` cookie, not just media query.
-- **Error boundary**: wrap admin routes; a render failure shows a styled error card with the route,
-  not a blank 500.
-- Test harness: `tests/helpers.mjs` (login, install, form post, follow redirects) so later phases
-  write 5-line tests instead of 40-line setups. Add `npm run test:watch`.
+Shipped:
+
+- `src/admin/assets/{tokens,app,screens}/*.css` served as three immutable, ETagged
+  bundles; no inline CSS anywhere, including login and error pages.
+- Token layer: colours, space, radius, type scale, shadows, plus light, dark and
+  compact-density values. Components may only reference tokens.
+- New shell: sticky top bar, collapsible rail (state in a cookie so the server
+  renders the right width first time), account menu, skip link, breadcrumbs slot.
+- SVG icon sprite replacing emoji (one sprite per document).
+- Component kit: `pageHead`, `breadcrumbs`, `tabs`, `card`, `table`, `emptyState`,
+  `notice`, `pagination`, `postButton`, `dialog`, `field`, `selectField`, shared JS.
+- Preferences screen: scheme / density / rail, applied server-side (no flash).
+- Error boundary: a failed screen renders a styled page naming the route.
+- `npm run check:assets`: colour-literal ban outside tokens, per-bundle size
+  budgets, undefined-token detection, orphan-screen detection. Part of `npm test`.
+- `tests/helpers.mjs` harness + `tests/panel.test.mjs` reference test file.
+- Users, Comments and Categories/Tags rebuilt on the kit; version 0.3.0.
 
 **Acceptance:** no admin CSS inline; every existing test green; one shared `pageHeader` used by ≥3 screens.
 

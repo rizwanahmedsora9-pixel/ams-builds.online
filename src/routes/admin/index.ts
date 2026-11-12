@@ -3,9 +3,11 @@ import type { AppEnv, Ctx } from '../../types';
 import { can, csrfToken, endSession, hashPassword, sessionUser, startSession, verifyPassword } from '../../lib/auth';
 import { cfgFor, getConfig, getSettings } from '../../lib/config';
 import { clientIp, rateCount, rateHit, rateReset, sameOrigin, timingSafeEqual } from '../../lib/security';
-import { csrfField, errorPage, flash, go, html, layout, shell } from '../../lib/ui';
+import { csrfField, errorPage, flash, go, guardPage, html, layout, shell } from '../../lib/ui';
 import { SCHEMA_VERSION, installedSchemaVersion, pendingMigrations } from '../../db/migrations';
 import { APP_VERSION } from '../../lib/version';
+import { readPrefs } from '../../lib/prefs';
+import { icon } from '../../admin/icons';
 import content from './content';
 import media from './media';
 import settings from './settings';
@@ -18,6 +20,8 @@ import tools from './tools';
 import updates from './updates';
 import appearance from './appearance';
 import terms from './terms';
+import preferences from './preferences';
+import assets from './assets';
 
 /**
  * Admin panel. Mounted by the root app under "/{admin-slug}" with that prefix
@@ -71,13 +75,13 @@ admin.get('/login', async (c) => {
     <input type="password" id="password" name="password" required autocomplete="current-password">
     <p style="margin:1.1rem 0 0"><button class="btn" type="submit" style="width:100%">Log in</button></p>
   </form>
-</div>`));
+</div>`, { base: c.var.base, prefs: readPrefs(c) }));
 });
 
 admin.post('/login', async (c) => {
   const rlKey = 'login:' + clientIp(c.req.raw);
   if ((await rateCount(c.env, rlKey)) >= LOGIN_MAX_ATTEMPTS) {
-    return c.html(shell('Log in', html`<div class="auth"><div class="flash err">Too many failed attempts. Try again in 15 minutes.</div></div>`), 429);
+    return c.html(shell('Log in', html`<div class="auth"><div class="flash err">${icon('alert')}<span>Too many failed attempts. Try again in 15 minutes.</span></div></div>`, { base: c.var.base, prefs: readPrefs(c) }), 429);
   }
   const login = String(c.var.form.get('login') ?? '').trim();
   const password = String(c.var.form.get('password') ?? '');
@@ -94,12 +98,26 @@ admin.post('/login', async (c) => {
   return c.redirect(c.var.base, 303);
 });
 
+// 1b. Panel stylesheets are public within the admin prefix: they contain no
+//     data, and being cacheable is the point. Mounted before the session guard.
+admin.route('/', assets);
+
 // 2. everything below requires a session
 admin.use('*', async (c, next) => {
   const user = await sessionUser(c, c.var.cfg);
   if (!user) return c.redirect(c.var.base + '/login', 302);
   c.set('user', user);
   await next();
+});
+
+// 3. error boundary: a bug in one screen renders a styled error page naming the
+//    route instead of the runtime's bare 500. Redirects and typed responses pass
+//    through untouched; only escapes from a handler are caught.
+admin.use('*', async (c, next) => {
+  c.res = await guardPage(c, async () => {
+    await next();
+    return c.res;
+  });
 });
 
 admin.post('/logout', (c) => {
@@ -250,6 +268,7 @@ admin.route('/', tools);
 admin.route('/', updates);
 admin.route('/', appearance);
 admin.route('/', terms);
+admin.route('/', preferences);
 
 admin.notFound((c) => errorPage(c, 404, 'That admin page does not exist.'));
 

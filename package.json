@@ -1,6 +1,6 @@
 {
   "name": "edge-cms",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,9 +9,11 @@
     "build": "esbuild src/node/server.ts --bundle --platform=node --format=esm --target=node22 --loader:.html=text --loader:.css=text --loader:.sql=text --outfile=dist/server.mjs --log-level=warning",
     "start": "npm run build && node --disable-warning=ExperimentalWarning dist/server.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --disable-warning=ExperimentalWarning --test tests/e2e.mjs",
+    "test:watch": "npm run build && node --disable-warning=ExperimentalWarning --test --watch tests/e2e.mjs",
+    "test": "npm run check:assets && npm run build && node --disable-warning=ExperimentalWarning --test tests/e2e.mjs",
     "test:cloudflare": "node --test tests/e2e.cloudflare.mjs",
-    "test:all": "npm test && npm run test:cloudflare"
+    "test:all": "npm test && npm run test:cloudflare",
+    "check:assets": "node scripts/check-assets.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.7",

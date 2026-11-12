@@ -123,16 +123,17 @@ Delete `.wrangler/` or `data/` to start again from the installer.
 
 ## Tests
 
-```bash
-npm test                  # end-to-end on the Node.js runtime
-npm run test:cloudflare   # the same steps on the Cloudflare runtime (wrangler dev)
-npm run test:all
+```
+npm test              # asset budgets, then the end-to-end suite on Node.js
+npm run test:cloudflare   # same suite against wrangler dev (D1 + KV)
+npm run test:all      # both
+npm run check:assets  # panel CSS/token budgets only (fast)
 ```
 
-Each run starts a real server on an empty temporary data folder and drives it over HTTP: health check, installer (bad input, success, lock), public site and cache, login and CSRF, pages, media, posts, drafts and scheduling, settings, password change, restart, menus, themes, comments (public form, moderation, approval, replies, spam), users and role limits, plugins and custom code, redirects, import/export, backups, site health, updates, categories and tags, the whole sidebar, deletion, logout and rate limiting. It prints one line per step and removes the folder afterwards.
-
-`GET /api/health` reports the runtime, whether the site is installed, and whether the database, key-value store and media storage answer. Use it for uptime monitoring.
-
+`tests/e2e.mjs` boots a real server on an empty data folder and walks the whole
+product over HTTP. `tests/helpers.mjs` holds the shared harness (server lifecycle,
+cookie jar, CSRF, install-and-login helper), so a new test starts from a working
+panel in three lines - see `tests/panel.test.mjs` for the style.
 
 ## The admin panel
 
@@ -140,6 +141,29 @@ The sidebar mirrors WordPress: Dashboard, Updates, Posts, Media, Pages, Comments
 Appearance, Plugins, Users, Tools and Settings, with a **Collapse Menu** control at
 the bottom (remembered in the browser). Sub-menus appear for the section you are in,
 and the pending-comment count is shown as a badge.
+
+The panel is one shell built from a small component kit (`src/admin/components.ts`):
+page headers, cards, tables, tabs, badges, notices, empty states, pagination and
+dialogs. Screens render those instead of hand-written markup, so they look and
+behave the same and a change lands everywhere at once.
+
+- **Preferences** (sidebar footer, or the account menu) sets the colour scheme
+  (match the system, always light, always dark), the density and whether the
+  sidebar starts collapsed. These are cookies applied while rendering, so there is
+  no flash of the wrong theme and no layout jump on load.
+- **Icons** are one inline SVG sprite per page. No icon font and no emoji in the
+  interface.
+- **Styling** is three cacheable files (`tokens.css`, `app.css`, `screens/*.css`)
+  stamped with the app version and served with `Cache-Control: immutable`. Pages
+  carry no inline stylesheet, so an admin page is a few KB of HTML.
+- **Design tokens** (colours, spacing, radii, type scale) live in
+  `src/admin/assets/tokens.css`. Components and screens reference them only, which
+  is what makes light, dark and compact density work everywhere without special
+  cases. `npm run check:assets` fails the build if a screen hard-codes a colour or
+  a bundle grows past its budget.
+
+The account menu (top right) holds Profile, Preferences and Log out. A screen that
+fails to render shows a styled error page naming the route, instead of a blank 500.
 
 | Section | What it does |
 | --- | --- |
@@ -300,7 +324,15 @@ src/
     public.ts              themed site, /media/*, KV page cache
     api.ts                 read-only JSON API
     admin/
-      index.ts             CSRF, login, logout, dashboard, profile
+      index.ts             CSRF, login, logout, dashboard, profile, error boundary
+      assets/bundles.ts    CSS bundle registry (tokens, app, screens) + ETags
+      assets/tokens.css    design tokens: colour, space, radius, type, schemes
+      assets/app.css       shell (top bar, rail) and component kit
+      assets/screens/      one file per screen family as it is rebuilt
+      components.ts        pageHead, card, table, tabs, emptyState, notice, ...
+      icons.ts             inline SVG sprite
+      preferences.ts       colour scheme, density, rail state (per browser)
+      assets.ts            route: GET /{admin}/assets/*.css (immutable, ETagged)
       content.ts           pages and posts
       media.ts             media library
       settings.ts
