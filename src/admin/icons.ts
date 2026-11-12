@@ -45,6 +45,7 @@ const SYMBOLS: Symbol[] = [
   ['x', '<path d="m6 6 12 12M18 6 6 18"/>'],
   ['clock', '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>'],
   ['globe', '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.6 2.6 15.4 0 18-2.6-2.6-2.6-15.4 0-18Z"/>'],
+  ['play', '<circle cx="12" cy="12" r="9"/><path d="M10 8.2v7.6l6.3-3.8Z"/>'],
 ];
 
 const symbolMarkup = (): string =>

@@ -88,9 +88,8 @@ settings.get('/settings', async (c) => {
     <p class="hint">Every post and page can still switch between the two from the editor itself.</p>
   </div>
   <div class="card" id="landing">
-    <h2>Landing screen</h2>
-    <p class="hint" style="margin-top:0">This built-in screen opens at your home address on a visitor's first visit. It is not a Page and has no sample content: the company name comes from <b>Site title</b>, the welcome line from <b>Tagline</b>, and the optional logo from <b>Appearance → Identity</b>. After a visitor enters, the normal home page is revealed.</p>
-    <p class="hint"><a href="/?landing=1" target="_blank" rel="noopener">Preview the landing screen</a> — the preview reopens it even after you have entered in this tab.</p>
+    <h2>Landing soundtrack</h2>
+    <p class="hint" style="margin-top:0">The music for the built-in welcome screen. <b><a href="${c.var.base}/landing">Landing page</a></b> is where the screen itself is turned on or off and its play button shown or hidden. <a href="/?landing=1" target="_blank" rel="noopener">Preview the landing screen</a> — the preview reopens it even after you have entered in this tab.</p>
     <label for="landing_audio_files">Add soundtrack files</label>
     <input type="file" id="landing_audio_files" name="landing_audio_files" accept="${audioAccept}" multiple>
     <p class="hint">MP3, OGG, WAV, M4A, AAC, FLAC or Opus. Up to 20 MB per file and 20 tracks in the playlist. Files upload as soon as you pick them, one at a time, so a slow connection only has to carry one track. Audio starts only after the visitor presses Play, then plays in order and loops.</p>

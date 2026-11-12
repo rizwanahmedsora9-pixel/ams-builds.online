@@ -1321,9 +1321,10 @@ test('phase 6: capabilities decide what a role can do, in one place', async () =
   assert.equal((await author.get(`${panel.admin}/themes`)).status, 403, 'nor themes');
   assert.equal((await author.get(`${panel.admin}/tools/audit`)).status, 403, 'nor the audit log');
   assert.equal((await author.get(`${panel.admin}/settings`)).status, 403, 'nor settings');
+  assert.equal((await author.get(`${panel.admin}/landing`)).status, 403, 'nor the landing page options');
   // The sidebar is built from the same map, so the rail agrees with the routes.
   const rail = (await author.get(`${panel.admin}/`)).text.match(/<nav class="rail"[\s\S]*?<\/nav>/)[0];
-  assert.doesNotMatch(rail, />Appearance<|>Settings<|>Users</, 'the rail hides what the role cannot use');
+  assert.doesNotMatch(rail, />Appearance<|>Settings<|>Users<|>Landing page</, 'the rail hides what the role cannot use');
   assert.match(rail, />Posts</, 'and keeps what it can');
 });
 

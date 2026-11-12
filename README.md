@@ -214,7 +214,8 @@ autosaved and versioned, and no screen needs JavaScript to work.
 | Plugins | Built-in XML sitemap, robots.txt, RSS feed and **Search Console Verification** (paste Google/Bing/Yandex meta tag → live in `<head>`) can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects, JSON import/export (v2, includes themes), server-stored backups, site health with performance budgets, audit log, page-cache reset |
-| Settings | Site identity and favicon, reading, a fixed first-visit landing screen that uses the saved site title/tagline/logo (no Page or sample content) and an ordered looping soundtrack (each file uploads on its own, with progress, so a slow connection cannot lose the rest of the form), discussion, domains and the admin URL |
+| Landing page | Yes/No switches for the welcome screen and its play button: the screen can be turned off completely, or kept as welcome copy with no audio and no play control |
+| Settings | Site identity and favicon, reading, the landing soundtrack, a fixed first-visit landing screen that uses the saved site title/tagline/logo (no Page or sample content) and an ordered looping soundtrack (each file uploads on its own, with progress, so a slow connection cannot lose the rest of the form), discussion, domains and the admin URL |
 
 ## The site name follows the domain
 
@@ -236,13 +237,26 @@ is the logo from **Appearance → Identity**. The regular home page is still
 rendered underneath; **Enter site** dismisses the welcome layer for that tab
 session.
 
-Sound files added under **Settings → Landing screen** become the screen's
-playlist. A centered **Play audio** button starts them in the saved order and
-loops the playlist until the visitor enters; the button is shown even before
-any audio exists (disabled, with a hint), so the control is never missing.
-Browsers require a visitor gesture for audible playback, so the soundtrack does
-not autoplay. The **Preview the landing screen** link in Settings reopens it via
-`/?landing=1`, even in a tab where it was already dismissed.
+Its two decisions have their own sidebar screen, **Landing page**, each a plain
+Yes/No choice saved with one button:
+
+- **Show the landing page** — *No* removes the welcome layer entirely; the home
+  page opens directly.
+- **Show the play button on the landing page** — *No* keeps the welcome copy and
+  **Enter site** but drops the play/pause control, the equalizer, the mute
+  button and the audio itself, so nothing is fetched. The soundtrack stays
+  saved and comes back when the switch is turned on again.
+
+Sound files added under **Settings → Landing soundtrack** become the screen's
+playlist. A centered round icon button (a play glyph that becomes pause while it
+plays; no text label) starts them in the saved order and loops the playlist
+until the visitor enters; the button is shown even before any audio exists
+(disabled, with a hint), so the control is never missing. The first track starts
+downloading as the screen appears, so pressing play starts sound at once rather
+than after a fetch. Browsers require a visitor gesture for audible playback, so
+the soundtrack does not autoplay. The **Preview** action on the Landing page
+screen (and the link in Settings) reopens it via `/?landing=1` — even in a tab
+where it was already dismissed, and even while the screen is switched off.
 
 ## Writing posts and pages
 

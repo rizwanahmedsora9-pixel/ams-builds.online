@@ -490,6 +490,10 @@ test('10b. fixed landing screen uses settings, without a landing Page, and loops
   assert.ok(home.text.includes('Now with a tagline'));
   const playButton = home.text.match(/<button[^>]*data-landing-play[^>]*>/)?.[0];
   assert.ok(playButton && !/\sdisabled/.test(playButton), 'saving tracks enables the Play button');
+  assert.match(home.text, /data-landing-play[^>]*>\s*<svg[^>]*ams-landing-icon-play/, 'the play control is a round icon button');
+  assert.match(home.text, /ams-landing-icon-pause/, 'the same button swaps to a pause icon while playing');
+  assert.match(home.text, /preload="auto"/, 'the audio is preloaded instead of fetched on the click');
+  assert.match(home.text, /if\(active&&playButton\)warm\(\)/, 'the first track starts loading while the screen is up');
   assert.match(home.text, /data-landing-mute/);
   assert.match(home.text, /data-landing-enter/);
   assert.match(home.text, /data-ams-landing/);
@@ -508,6 +512,11 @@ test('10b. fixed landing screen uses settings, without a landing Page, and loops
   const landingScreen = landingWindow.document.getElementById('ams-landing-screen');
   assert.equal(landingWindow.document.documentElement.getAttribute('data-ams-landing'), 'show', 'a new tab session opens the landing screen');
   const player = landingWindow.document.querySelector('[data-landing-audio]');
+  assert.ok(player.getAttribute('src'), 'the first track is requested before the visitor clicks, so Play starts at once');
+  const playControl = landingWindow.document.querySelector('[data-landing-play]');
+  assert.equal(playControl.textContent.trim(), '', 'the play control is an icon only, with no text label');
+  assert.ok(playControl.querySelector('.ams-landing-icon-play'), 'the button draws a play glyph');
+  assert.ok(playControl.querySelector('.ams-landing-icon-pause'), 'and a pause glyph for the playing state');
   Object.defineProperty(player, 'paused', { configurable: true, writable: true, value: true });
   player.load = () => {};
   let playCount = 0;
@@ -517,6 +526,7 @@ test('10b. fixed landing screen uses settings, without a landing Page, and loops
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(playCount, 1, 'Play starts the soundtrack on a visitor gesture');
   assert.equal(landingScreen.querySelector('.ams-landing-card').classList.contains('is-playing'), true, 'the equalizer animates while audio plays');
+  assert.equal(landingWindow.document.querySelector('[data-landing-play]').getAttribute('aria-label'), 'Pause soundtrack', 'the icon button names its current action for screen readers');
   const firstTrack = player.src;
   player.dispatchEvent(new landingWindow.Event('ended'));
   await new Promise((resolve) => setImmediate(resolve));
@@ -629,6 +639,53 @@ test('10d. an explicit site title reaches the panel and the public page; the def
   // Later theme tests read the site name off the page, so leave a real one behind.
   await adminPost('/settings', { ...SITE_SETTINGS, site_title: 'Renamed Site' });
   log('saved title wins in the panel and the page, the installer default follows the host');
+});
+
+test('10e. landing page options: the screen and its play button have their own switches', async () => {
+  // A top-level rail entry with its own form; both switches start on, so an
+  // install that never opens this screen behaves exactly as before.
+  const options = await get(`${admin}/landing`);
+  assert.equal(options.status, 200);
+  assert.match(options.text, /rail__label">Landing page</);
+  assert.match(options.text, /name="landing_enabled" value="1"[^>]*checked/, 'the welcome screen is on by default');
+  assert.match(options.text, /name="landing_play_button" value="1"[^>]*checked/, 'the play control is shown by default');
+  assert.match(options.text, /Show the play button on the landing page/);
+  // The soundtrack still lives next to the media it comes from; the two screens
+  // link to each other instead of duplicating the uploader.
+  assert.match((await get(`${admin}/settings`)).text, /id="landing"[^]*href="[^"]*\/landing"/, 'Settings points at the new screen');
+
+  // Off: the home response carries no splash at all, but the preview still does,
+  // so the screen can be checked before it is switched on.
+  const off = await adminPost('/landing', { landing_enabled: '0', landing_play_button: '1' });
+  assert.match(off.location, /ok=Landing options saved\. The welcome screen is off/);
+  assert.doesNotMatch((await anon('/')).text, /id="ams-landing-screen"/, 'the switch removes the whole screen');
+  assert.match((await anon('/?landing=1')).text, /id="ams-landing-screen"/, 'the preview ignores the switch');
+
+  // On, with the play control hidden: welcome copy and Enter only, and no audio
+  // is fetched — the playlist is left out of the response entirely.
+  await adminPost('/landing', { landing_enabled: '1', landing_play_button: '0' });
+  const quiet = (await anon('/')).text;
+  assert.match(quiet, /id="ams-landing-screen"/);
+  const quietDom = new JSDOM(quiet, { url: base + '/', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: landingVirtualConsole });
+  const quietScreen = quietDom.window.document.getElementById('ams-landing-screen');
+  assert.equal(quietScreen.querySelector('[data-landing-play]'), null, 'the play control is gone when it is switched off');
+  assert.equal(quietScreen.querySelector('[data-landing-mute]'), null, 'and so is the mute control');
+  assert.equal(quietScreen.querySelector('.ams-landing-equalizer'), null, 'and the equalizer');
+  assert.equal(quietScreen.getAttribute('data-audio-tracks'), '[]', 'no track URLs, so nothing is downloaded');
+  const quietPlayer = quietScreen.querySelector('[data-landing-audio]');
+  assert.equal(quietPlayer.getAttribute('src'), null, 'nothing is preloaded while the control is hidden');
+  quietPlayer.load = () => {};
+  quietScreen.querySelector('[data-landing-enter]').click();
+  assert.equal(quietDom.window.document.getElementById('ams-landing-screen'), null, 'Enter still works without the player');
+  quietDom.window.close();
+
+  // Both back on: the icon control returns, and the soundtrack is untouched.
+  await adminPost('/landing', { landing_enabled: '1', landing_play_button: '1' });
+  const back = (await anon('/')).text;
+  assert.match(back, /data-landing-play/);
+  assert.match(back, /ams-landing-icon-play/);
+  assert.equal((await get(`${admin}/landing`)).text.includes('Currently on'), true);
+  log('landing page options: on/off and play-button switches save, hide the whole screen or just the player, preview unaffected');
 });
 
 test('11. profile: password change keeps this session and old password stops working', async () => {

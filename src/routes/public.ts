@@ -13,7 +13,7 @@ import { previewFor } from '../lib/preview';
 import { can } from '../lib/capabilities';
 import type { ThemeBundle } from '../lib/theme-manifest';
 import { clientIp, cspFor, nonceFor, rateCount, rateHit, safeUrl, sameOrigin, stripTags, type CspMode } from '../lib/security';
-import { landingScreenMarkup, parseLandingAudioIds, type LandingAudioTrack } from '../lib/landing';
+import { landingEnabled, landingPlayShown, landingScreenMarkup, parseLandingAudioIds, type LandingAudioTrack } from '../lib/landing';
 import { titleFor } from '../lib/origin';
 import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
 import { assetMime, cleanAssetPath, isRefusedAsset } from '../lib/theme-manifest';
@@ -341,7 +341,11 @@ site.get('*', async (c) => {
   // `&customize=1` only labels the preview for the Customizer's own script.
   const wantedTheme = url.searchParams.get('theme') ?? unsaved?.theme;
   if (preview && wantedTheme) previewTheme = (await themeBySlug(c.env, wantedTheme.slice(0, 60))) ?? undefined;
-  const cacheable = !hasSession && path.length <= 200 && !url.searchParams.has('comment') && !url.searchParams.has('reply_to');
+  // `?landing=1` re-opens the welcome screen even while its switch is off, so it
+  // must render per request: the page cache is keyed by path, not by query, and a
+  // cached home response would answer the preview with the stripped-down page.
+  const previewLanding = url.searchParams.get('landing') === '1';
+  const cacheable = !hasSession && path.length <= 200 && !previewLanding && !url.searchParams.has('comment') && !url.searchParams.has('reply_to');
   const key = cacheKey(c.var.cfg, url);
   const headers = { 'Cache-Control': hasSession ? 'private, no-store' : 'public, max-age=0, must-revalidate' };
 
@@ -392,7 +396,9 @@ site.get('*', async (c) => {
   // The fixed landing screen is a first-visit layer over the existing home
   // page. It is built from saved settings, never from a CMS Page; the visitor
   // enters the site in-place, so / remains the normal home URL/content.
-  if (path === '/' && result.status === 200 && !preview) {
+  // The preview above renders the screen even while the Landing page switch is
+  // off, so the admin can check it before turning it on.
+  if (path === '/' && result.status === 200 && !preview && (landingEnabled(settings) || previewLanding)) {
     const ids = parseLandingAudioIds(settings.landing_audio_ids);
     let tracks: LandingAudioTrack[] = [];
     if (ids.length) {
@@ -410,6 +416,7 @@ site.get('*', async (c) => {
       tagline: settings.tagline || '',
       logoUrl: safeUrl(settings.site_logo || ''),
       tracks,
+      showPlay: landingPlayShown(settings),
       nonce,
     });
     body = injectLandingScreen(body, markup);
