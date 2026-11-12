@@ -122,13 +122,21 @@ install.post('/', async (c) => {
   await createSchema(c.env);
 
   const db = c.env.DB;
+  // The bundled theme's stylesheet is a served asset like any other (that is what
+  // v2 layouts link), so the file store gets it at install time.
+  const { putFile } = await import('../lib/files');
+  await putFile(c.env, `themes/${defaultTheme.slug}/style.css`,
+    new TextEncoder().encode(defaultTheme.css).buffer as ArrayBuffer, 'text/css; charset=utf-8');
   const setting = db.prepare('INSERT OR REPLACE INTO settings (site_id,key,value) VALUES (1,?,?)');
   const homeBody = `<h1>Welcome to ${v.title.replace(/[<>&]/g, '')}</h1>\n<p>This is your sample home page. Sign in to the admin panel to edit it, write your first post and upload media.</p>`;
   await db.batch([
     db.prepare("INSERT INTO users (username,email,password_hash,role,created_at) VALUES (?,?,?,'admin',?)").bind(v.username, v.email, await hashPassword(password), now),
     db.prepare('INSERT OR REPLACE INTO sites (id,hostname,name,created_at) VALUES (1,?,?,?)').bind(v.domain, v.title, now),
-    db.prepare('INSERT OR REPLACE INTO themes (slug,name,version,templates,css,active,created_at) VALUES (?,?,?,?,?,1,?)')
-      .bind(defaultTheme.slug, defaultTheme.name, defaultTheme.version, JSON.stringify(defaultTheme.templates), defaultTheme.css, now),
+    db.prepare('INSERT OR REPLACE INTO themes (slug,name,version,templates,partials,css,manifest,active,created_at) VALUES (?,?,?,?,?,?,?,1,?)')
+      .bind(defaultTheme.slug, defaultTheme.name, defaultTheme.version, JSON.stringify(defaultTheme.templates),
+        JSON.stringify(defaultTheme.partials), defaultTheme.css, JSON.stringify(defaultTheme.manifest), now),
+    db.prepare('INSERT OR REPLACE INTO theme_assets (theme_slug,path,mime,size,created_at) VALUES (?,?,?,?,?)')
+      .bind(defaultTheme.slug, 'style.css', 'text/css; charset=utf-8', defaultTheme.css.length, now),
     db.prepare("INSERT INTO content (site_id,type,title,slug,body,status,author_id,published_at,created_at,updated_at) VALUES (1,'page','Home','home',?,'published',1,?,?,?)").bind(homeBody, now, now, now),
     db.prepare("INSERT INTO menus (id,site_id,name,location) VALUES (1,1,'Primary','primary')"),
     db.prepare("INSERT INTO menu_items (menu_id,label,url,position) VALUES (1,'Home','/',0),(1,'Blog','/blog',1)"),

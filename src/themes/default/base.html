@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>{{{theme_css}}}</style>
+{{#if theme_css_url}}<link rel="stylesheet" href="{{{theme_css_url}}}">{{/if}}
+<style nonce="{{nonce}}">{{{theme_css}}}</style>
 {{{head}}}
 </head>
 <body class="{{body_class}}">
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
   <div class="wrap bar">
-    <a class="brand" href="/">{{site.title}}</a>
+    {{#if site.logo}}<a class="brand brand--logo" href="/"><img src="{{site.logo}}" alt="{{site.title}}" class="brand-logo">{{site.title}}</a>{{else}}<a class="brand" href="/">{{site.title}}</a>{{/if}}
     {{#if menu.primary}}
     <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Toggle menu">
     <label for="nav-toggle" class="nav-button" aria-hidden="true"><span></span></label>
@@ -26,7 +27,7 @@
 <footer class="site-footer">
   <div class="wrap">
     {{#if menu.footer}}<nav class="footer-nav" aria-label="Footer">{{#each menu.footer}}<a href="{{url}}">{{label}}</a>{{/each}}</nav>{{/if}}
-    <p>&copy; {{year}} {{site.title}}{{#if site.tagline}} &middot; {{site.tagline}}{{/if}}</p>
+    {{> footer-note}}
   </div>
 </footer>
 {{{footer}}}

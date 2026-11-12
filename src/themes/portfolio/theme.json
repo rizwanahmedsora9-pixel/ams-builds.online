@@ -1,0 +1,38 @@
+{
+  "name": "AMS Portfolio",
+  "slug": "ams-portfolio",
+  "version": "1.0.0",
+  "author": "AMS",
+  "description": "Grid-first presentation theme: a bold hero, a project grid and per-theme controls for the hero, the accent and the grid width.",
+  "tags": ["grid", "portfolio", "bold", "hero"],
+  "preview": ["#0e1116", "#f2f4f8", "#22d3a6"],
+  "screenshot": "screenshot.png",
+  "templates": {
+    "base": "base.html",
+    "home": "home.html",
+    "page": "page.html",
+    "post": "post.html",
+    "archive": "archive.html",
+    "404": "404.html"
+  },
+  "partials": {
+    "hero": "partials/hero.html",
+    "footer": "partials/footer.html"
+  },
+  "widgets": ["footer", "hero-aside"],
+  "settings": [
+    { "key": "hero_title", "type": "text", "label": "Hero headline", "default": "Design with intent", "help": "The first words a visitor reads." },
+    { "key": "hero_sub", "type": "textarea", "label": "Hero paragraph", "default": "Selected work, writing and the occasional experiment." },
+    { "key": "hero_cta", "type": "text", "label": "Hero button label", "default": "See the work" },
+    { "key": "hero_cta_url", "type": "url", "label": "Hero button link", "default": "/blog" },
+    { "key": "accent", "type": "color", "label": "Accent colour", "default": "#22d3a6" },
+    { "key": "columns", "type": "select", "label": "Grid columns", "default": "3", "options": [{ "value": "2", "label": "Two" }, { "value": "3", "label": "Three" }, { "value": "4", "label": "Four" }] },
+    { "key": "show_excerpts", "type": "toggle", "label": "Show excerpts in the grid", "default": true },
+    { "key": "hero_image", "type": "image", "label": "Hero background image", "default": "", "help": "Pick one from Media. Leave empty for the gradient." }
+  ],
+  "changelog": [
+    { "version": "1.0.0", "notes": "First release: hero, project grid, eight customizer settings, two widget areas." }
+  ],
+  "assets": ["screenshot.png"],
+  "css": "style.css"
+}

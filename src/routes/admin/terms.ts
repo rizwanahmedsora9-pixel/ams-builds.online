@@ -3,6 +3,7 @@ import type { AppEnv, Ctx } from '../../types';
 import { can } from '../../lib/auth';
 import { bumpCache } from '../../lib/config';
 import { slugify } from '../../lib/security';
+import { pageHead, tabs } from '../../admin/components';
 import { csrfField, errorPage, go, html, layout } from '../../lib/ui';
 
 /**
@@ -12,7 +13,7 @@ import { csrfField, errorPage, go, html, layout } from '../../lib/ui';
 const terms = new Hono<AppEnv>();
 
 const guard = async (c: Ctx, next: () => Promise<void>) => {
-  if (!can(c.var.user, 'editor')) return errorPage(c, 403, 'Your role cannot manage categories and tags.');
+  if (!can(c.var.user, 'manage_terms')) return errorPage(c, 403, 'Your role cannot manage categories and tags.');
   await next();
 };
 terms.use('/terms', guard);
@@ -32,10 +33,17 @@ terms.get('/terms', async (c) => {
   const label = taxonomy === 'category' ? 'Categories' : 'Tags';
   const other: Taxonomy = taxonomy === 'category' ? 'tag' : 'category';
   return layout(c, label, html`
-<div class="row between" style="margin-bottom:1rem">
-  <h1 style="margin:0">${label}</h1>
-  <a class="btn ghost" href="${base}/terms?taxonomy=${other}">${other === 'category' ? 'Categories' : 'Tags'}</a>
-</div>
+${pageHead({
+    title: label,
+    sub: taxonomy === 'category'
+      ? 'Categories group posts by topic and appear at /category/name.'
+      : 'Tags are free-form labels and appear at /tag/name.',
+    actions: html`<a class="btn ghost" href="${base}/terms?taxonomy=${other}">${other === 'category' ? 'Categories' : 'Tags'}</a>`,
+  })}
+${tabs([
+    { label: 'Categories', href: `${base}/terms?taxonomy=category`, current: taxonomy === 'category' },
+    { label: 'Tags', href: `${base}/terms?taxonomy=tag`, current: taxonomy === 'tag' },
+  ], { label: 'Taxonomy' })}
 <form method="post" action="${base}/terms/new" class="card">
   ${csrfField(c)}
   <input type="hidden" name="taxonomy" value="${taxonomy}">

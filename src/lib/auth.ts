@@ -82,5 +82,13 @@ export async function csrfToken(c: Context, cfg: Config): Promise<string> {
 }
 
 /* -------------------------------------------------------------------- roles */
+/**
+ * Role checks are capabilities now (see lib/capabilities.ts): `can(user, 'editor')`
+ * still answers "is this role at least an editor" for the few places that ask
+ * for a *level* rather than a permission, and the panel asks for a capability.
+ */
 const RANK: Record<Role, number> = { author: 1, editor: 2, admin: 3 };
-export const can = (user: User, atLeast: Role): boolean => RANK[user.role] >= RANK[atLeast];
+export { can } from './capabilities';
+export type { Capability } from './capabilities';
+/** Level check: "at least this role". Prefer `can(user, 'capability')`. */
+export const atLeast = (user: User, role: Role): boolean => RANK[user.role] >= RANK[role];

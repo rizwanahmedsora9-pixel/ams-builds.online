@@ -3,6 +3,40 @@ import type { Settings } from './config';
 import { stripTags } from './security';
 import { formatDate } from './time';
 
+/**
+ * Pages for navigation (`{{#each pages}}` in a theme), in the order the editor
+ * set under Pages -> Order. Falls back to alphabetical on databases that
+ * predate the menu_order column.
+ */
+export async function listPages(env: Env, opts: { limit?: number } = {}): Promise<ContentRow[]> {
+  const limit = Math.min(200, Math.max(1, opts.limit || 100));
+  // Setting `pages_order` picks the default: the order set in the Pages screen
+  // ('menu_order') or plain alphabetical ('title'). Themes can rely on either.
+  let setting = 'menu_order';
+  try {
+    const row = await env.DB.prepare("SELECT value FROM settings WHERE site_id=1 AND key='pages_order'").first<{ value: string }>();
+    if (row?.value === 'title') setting = 'title';
+  } catch { /* settings table missing on a fresh install: keep the default */ }
+  if (setting === 'title') {
+    const { results } = await env.DB.prepare(
+      `${SELECT} WHERE c.site_id=1 AND c.type='page' AND c.status='published' ORDER BY c.title COLLATE NOCASE ASC LIMIT ?`,
+    ).bind(limit).all<ContentRow>();
+    return results;
+  }
+  try {
+    const { results } = await env.DB.prepare(
+      `${SELECT} WHERE c.site_id=1 AND c.type='page' AND c.status='published'
+       ORDER BY c.menu_order ASC, c.title COLLATE NOCASE ASC LIMIT ?`,
+    ).bind(limit).all<ContentRow>();
+    return results;
+  } catch {
+    const { results } = await env.DB.prepare(
+      `${SELECT} WHERE c.site_id=1 AND c.type='page' AND c.status='published' ORDER BY c.title COLLATE NOCASE ASC LIMIT ?`,
+    ).bind(limit).all<ContentRow>();
+    return results;
+  }
+}
+
 /** Visible to the public: published, or scheduled and already due (cron flips the status later). */
 export const VISIBLE = "(c.status='published' OR (c.status='scheduled' AND c.published_at<=?))";
 
@@ -29,6 +63,8 @@ export type ContentView = {
   id: number; type: string; title: string; slug: string; url: string; content: string; excerpt: string;
   date: string; date_iso: string; author: string | null; featured_image: string | null; featured_alt: string;
   categories: TermView[]; tags: TermView[]; seo_title: string; seo_description: string; status: string;
+  /** The theme template the editor chose for this item ('' = the default). */
+  template: string;
 };
 
 /** Turns DB rows into the objects themes (and the JSON API) see. */
@@ -54,6 +90,7 @@ export async function toViews(env: Env, rows: ContentRow[], settings: Settings):
     const plain = r.excerpt || stripTags(r.body);
     return {
       id: r.id, type: r.type, title: r.title, slug: r.slug, status: r.status,
+      template: r.template || '',
       url: r.type === 'post' ? postUrl(r, style) : settings.home_page_id === String(r.id) ? '/' : '/' + r.slug,
       content: r.body,
       excerpt: plain.length > 180 ? plain.slice(0, 177).trimEnd() + '…' : plain,

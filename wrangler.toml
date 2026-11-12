@@ -30,3 +30,11 @@ binding = "KV"
 # [[routes]]
 # pattern = "example.com"
 # custom_domain = true
+
+# Theme screenshots ship as packaged files. They are read through the normal
+# file store as ArrayBuffers (never imported as text), so the zip upload and the
+# PNG in a ZIP export stay byte-for-byte identical.
+[[rules]]
+type = "Data"
+globs = ["**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.webp", "**/*.avif", "**/*.ico"]
+fallthrough = true
