@@ -610,9 +610,13 @@ test('12c. theme store: five bundled themes install and switch with one click', 
   const withShot = await get(`${admin}/themes`);
   assert.match(withShot.text, /store-item__shot[^>]*url\([^)]*\/theme-assets\/ams-journal\/screenshot\.png/, 'the installed screenshot is served');
   const shotUrl = withShot.text.match(/theme-assets\/ams-journal\/screenshot\.png[^'"]*/)[0];
-  const shot = await request('/theme-assets/ams-journal/screenshot.png'.replace('.png', '.png'));
+  const shot = await request('/theme-assets/ams-journal/screenshot.png');
   assert.equal(shot.status, 200);
   assert.ok(shotUrl.length > 0);
+  // The bytes really travel: an empty PNG would pass a status check and show a
+  // blank card, which is exactly what a build misconfigured for binary assets does.
+  assert.equal(shot.bytes[0], 0x89, 'the screenshot is a PNG, not an empty file');
+  assert.ok(shot.bytes.length > 1000, 'and it has pixels in it');
   // And the theme itself renders: Journal's own markup, not a fallback.
   assert.match((await adminPost('/themes/store/ams-journal/install', { activate: 1 })).location, /AMS Journal is now your active theme/);
   const journal = await anon('/');

@@ -140,11 +140,11 @@ product over HTTP. `tests/helpers.mjs` holds the shared harness (server lifecycl
 cookie jar, CSRF, install-and-login helper), so a new test starts from a working
 panel in three lines.
 
-`tests/template.test.mjs` (11 cases) tests the template engine directly — escaping, comparisons,
+`tests/template.test.mjs` (12 cases) tests the template engine directly — escaping, comparisons,
 loops and their helpers, every filter, date patterns, partials, layout blocks and the parser's
 error messages. It runs against `dist/template.mjs`, the same bundle the server uses.
 
-`tests/panel.test.mjs` (48 cases) covers the panel itself: the shell renders once,
+`tests/panel.test.mjs` (50 cases) covers the panel itself: the shell renders once,
 every screen loads, the palette markup and its live region, global search end to end
 (full page, `partial=1` fragment, session guard, escaped query), the rail / scheme /
 density cookies, the shared list pattern and its empty states, the dashboard's
@@ -179,7 +179,8 @@ The Phase 6 cases read the audit log from the outside: a save, two theme activat
 produce a readable entry, filters are linkable GET parameters, and the log is newest-first. A second
 identity signs in as an author in its own cookie jar and is refused pages, themes, settings, users and the
 audit log by capability while the sidebar hides them; the role map is checked directly, and the panel
-strings come from the `en` catalogue. The health screen is checked against `src/lib/budget-report.json`,
+strings come from the `en` catalogue (and a separate test greps the source for every `t('…')` key to prove the
+catalogue has them all). The health screen is checked against `src/lib/budget-report.json`,
 and an export is checked to be format version 2 with themes, theme settings and revisions and no password
 material.
 

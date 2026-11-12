@@ -119,3 +119,35 @@ test('a hostile template stays data: no expressions, no calls, no code', () => {
   assert.equal(html('{{__proto__}}', {}), '');
   assert.equal(html('{{a.constructor}}', { a: {} }), '');
 });
+
+/* ---------------------------------------------------------------- i18n */
+
+test('every t() key used in the source exists in the en catalogue', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  // The catalogue is plain data, so it is read from source rather than through the
+  // bundle: this test must not be able to pass because a build was stale.
+  const src = await fs.readFile(new URL('../src/lib/i18n.ts', import.meta.url), 'utf8');
+  const catalogueKeys = () => [...src.matchAll(/^\s{2}'([a-z0-9_.]+)':/gm)].map((m) => m[1]);
+  const known = new Set(catalogueKeys());
+  const root = new URL('../src/', import.meta.url);
+
+  const walk = async (dir) => {
+    const out = [];
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...await walk(full));
+      else if (entry.name.endsWith('.ts') && entry.name !== 'i18n.ts') out.push(full);
+    }
+    return out;
+  };
+
+  const missing = [];
+  for (const file of await walk(path.join(root.pathname, ''))) {
+    const source = await fs.readFile(file, 'utf8');
+    for (const match of source.matchAll(/\bt\(\s*'([a-z0-9_.]+)'/g)) {
+      if (!known.has(match[1])) missing.push(`${path.relative(root.pathname, file)}: ${match[1]}`);
+    }
+  }
+  assert.deepEqual(missing, [], 'no screen asks for a string the catalogue does not have');
+});

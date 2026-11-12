@@ -90,8 +90,15 @@ const premium = bundle(
  * installer writes exactly the PNG the theme's zip would carry and the preview
  * card can show it without a second upload step.
  */
-function withScreenshot(theme: StoreTheme, path: string, data: ArrayBuffer): StoreTheme {
-  return { ...theme, packageFiles: [{ path, data: new Uint8Array(data), mime: 'image/png' }] };
+/**
+ * A store theme that ships a screenshot. The installer writes exactly the PNG the
+ * theme's zip would carry, so the store card can show the real thing.
+ */
+function withScreenshot(theme: StoreTheme, path: string, source: PackagedBytes): StoreTheme {
+  // The bytes are inlined by both builds: esbuild's `binary` loader gives a
+  // Uint8Array on Node, Wrangler's Data rule an ArrayBuffer.
+  const data = source instanceof Uint8Array ? source : new Uint8Array(source);
+  return { ...theme, packageFiles: [{ path, data, mime: 'image/png' }] };
 }
 
 const journal = withScreenshot(

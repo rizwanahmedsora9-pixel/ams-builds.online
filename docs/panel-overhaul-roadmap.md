@@ -476,7 +476,7 @@ asset as well as the row. The editor is a file tree + textarea with per-file sav
 real zip written by `zipFiles` (`theme.json` names the files, assets byte-for-byte) and `POST /themes/upload`
 accepts it back; `GET /themes/:id/download.json` keeps the readable form. **AMS Journal** and **AMS Portfolio**
 ship with partials, `--j-*`/`--p-*` tokens, a per-theme asset (`screenshot.png`) and 6/8 settings.
-*Measured:* `tests/panel.test.mjs` 48 cases, `tests/e2e.mjs` 27, `tests/template.test.mjs` 11 — 86 green on
+*Measured:* `tests/panel.test.mjs` 50 cases, `tests/e2e.mjs` 27, `tests/template.test.mjs` 12 — 89 green on
 Node, panel CSS budgets met (largest bundle 29.6 KB, editor JS 8.7 KB / 30 KB).
 
 ### Phase 6 — Governance, performance, polish (7 d) — ✅ shipped in 0.8.0
@@ -505,6 +505,10 @@ measured by `scripts/measure.mjs` into `src/lib/budget-report.json`, enforced by
 catalogue, `t(key, vars)`, missing keys render visibly). Export is format version 2 with `themes`,
 `theme_settings` and `content_revisions`; import validates each theme with the normal manifest parser and
 skips a bad one rather than failing the file.
+
+Living docs: `README.md` is the front door (install, run, what is in the box), `docs/panel-guide.md` is every
+screen including the audit log and the capability table, and `docs/theme-developer-guide.md` is the manifest,
+template tags, assets, settings and CSP. This file stays the plan and the record.
 
 ---
 
