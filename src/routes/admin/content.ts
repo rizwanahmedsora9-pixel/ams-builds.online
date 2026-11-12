@@ -17,6 +17,7 @@ import {
 } from '../../admin/revisions';
 import { hasColumn, hasPhase2Schema } from '../../lib/schema';
 import { activeThemeTemplates } from '../../lib/theme-store';
+import { audit } from '../../lib/audit';
 import { lockBanner, restoreBanner, revisionDiff, revisionList } from '../../admin/editor-views';
 import { csrfField, errorPage, go, html, layout, raw, type Raw } from '../../lib/ui';
 
@@ -31,10 +32,10 @@ const kindOf = (c: Ctx): Kind => c.req.param('kind') as Kind;
 content.use('/:kind{(?:pages|posts)}/*', guard);
 content.use('/:kind{(?:pages|posts)}', guard);
 async function guard(c: Ctx, next: () => Promise<void>) {
-  if (kindOf(c) === 'pages' && !can(c.var.user, 'editor')) return errorPage(c, 403, 'Your role cannot manage pages.');
+  if (kindOf(c) === 'pages' && !can(c.var.user, 'manage_pages')) return errorPage(c, 403, 'Your role cannot manage pages.');
   await next();
 }
-const mayEdit = (c: Ctx, row: { author_id: number | null }) => can(c.var.user, 'editor') || row.author_id === c.var.user.id;
+const mayEdit = (c: Ctx, row: { author_id: number | null }) => can(c.var.user, 'edit_others_posts') || row.author_id === c.var.user.id;
 
 type PostStatusFilter = 'all' | 'published' | 'draft' | 'scheduled';
 type PostSort = 'title' | 'author' | 'comments' | 'date' | 'order';
@@ -152,7 +153,7 @@ async function postsList(c: Ctx): Promise<Response> {
   const base = c.var.base;
   const settings = await getSettings(c.env);
   const timezone = settings.timezone || 'UTC';
-  const authorOnly = !can(c.var.user, 'editor');
+  const authorOnly = !can(c.var.user, 'edit_others_posts');
   const ownerArgs = authorOnly ? [c.var.user.id] : [];
   const ownerSql = authorOnly ? ' AND author_id=?' : '';
   const per = 30;
@@ -646,7 +647,7 @@ content.post('/posts/bulk', async (c) => {
   ids.length = Math.min(ids.length, 100);
   if (!ids.length) return postListRedirect(c, state, 'Select at least one post.', true);
 
-  const authorOnly = !can(c.var.user, 'editor');
+  const authorOnly = !can(c.var.user, 'edit_others_posts');
   const ownerSql = authorOnly ? ' AND author_id=?' : '';
   const ownerArgs = authorOnly ? [c.var.user.id] : [];
   const placeholders = ids.map(() => '?').join(',');
@@ -1245,7 +1246,7 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
   return layout(c, title, html`
 ${raw(EDITOR_CSS)}
 <div class="row between" style="margin-bottom:1rem"><h1 style="margin:0">${title}</h1><a href="${base}/${kind}">&larr; All ${kind}</a></div>
-<div id="lock-slot">${lockHolder ? lockBanner(lockHolder, base, kind, row!.id, can(c.var.user, 'editor')) : ''}</div>
+<div id="lock-slot">${lockHolder ? lockBanner(lockHolder, base, kind, row!.id, can(c.var.user, 'edit_others_posts')) : ''}</div>
 ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
 <form method="post" action="${base}/${kind}/save" id="edit"
       data-is-new="${row ? '0' : '1'}" data-initial-skin="${initialSkin}" data-preferred-skin="${preferred}"
@@ -1296,7 +1297,7 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
       <p class="ams-editor-status" id="editor-status" role="status" aria-live="polite"></p>
     </div>
     <p class="hint">Text and HTML always show the same content: switch freely, nothing is lost. Add as many HTML and YouTube blocks as you need.</p>
-    ${can(c.var.user, 'admin') ? html`<p class="hint">Admin HTML is not sanitized when you save.</p>` : html`<p class="hint">Unsafe HTML is removed when you save. YouTube embeds added with the YouTube button are allowed.</p>`}
+    ${can(c.var.user, 'manage_settings') ? html`<p class="hint">Admin HTML is not sanitized when you save.</p>` : html`<p class="hint">Unsafe HTML is removed when you save. YouTube embeds added with the YouTube button are allowed.</p>`}
   </div>
   ${postFields}
   <div class="card">
@@ -1591,7 +1592,7 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/autosave', async (c) => {
   const body = String(c.var.form.get('body') ?? '');
   const title = String(c.var.form.get('title') ?? '').slice(0, 200);
   const excerpt = String(c.var.form.get('excerpt') ?? '').slice(0, 500);
-  const draft = { ...row, title, body: can(c.var.user, 'admin') ? body : sanitizeHtml(body), excerpt };
+  const draft = { ...row, title, body: can(c.var.user, 'manage_settings') ? body : sanitizeHtml(body), excerpt };
   if (sameContent(row, draft)) return c.json({ ok: true, unchanged: true, at: new Date().toISOString() });
 
   const at = new Date().toISOString();
@@ -1621,7 +1622,7 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/lock/takeover', async (c) => {
   const id = Number(c.req.param('id'));
   const row = await c.env.DB.prepare('SELECT author_id FROM content WHERE id=? AND type=? AND site_id=1').bind(id, typeOf(kindOf(c))).first<{ author_id: number | null }>();
   if (!row) return errorPage(c, 404, 'Not found.');
-  if (!can(c.var.user, 'editor')) return errorPage(c, 403, 'Only editors can take over an edit.');
+  if (!can(c.var.user, 'edit_others_posts')) return errorPage(c, 403, 'Your role cannot take over an edit.');
   await claimLock(c.env, id, c.var.user, true);
   return go(c, `/${kindOf(c)}/${id}`, { ok: 'You have the edit now. The other person will be warned when they save.' });
 });
@@ -1663,7 +1664,7 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   }
 
   // Raw HTML is an admin privilege; everyone else goes through the allow-list sanitizer.
-  const body = can(c.var.user, 'admin') ? str('body') : sanitizeHtml(str('body'));
+  const body = can(c.var.user, 'manage_settings') ? str('body') : sanitizeHtml(str('body'));
 
   let status = ['draft', 'published', 'scheduled'].includes(str('status')) ? str('status') : 'draft';
   if (type === 'page' && status === 'scheduled') status = 'published';
@@ -1743,6 +1744,9 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   }
 
   await bumpCache(c.env, c.var.cfg);
+  // One line per real save, saying what changed and where it is.
+  await audit(c, existing ? (status === 'published' ? 'published' : 'updated') : 'created', 'content',
+    `${existing ? 'Saved' : 'Created'} ${typeOf(kind).replace('page', 'page')} “${title || '(untitled)'}” (${status})`, savedId);
   return go(c, `/${kind}/${savedId}`, { ok: status === 'scheduled' ? 'Saved and scheduled.' : status === 'published' ? 'Saved and published.' : 'Draft saved.' });
 });
 
@@ -1763,6 +1767,7 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/delete', async (c) => {
   await deleteRevisions(c.env, id);
   if (kind === 'pages') await removeUrlFromMenus(c.env, '/' + row.slug);
   await bumpCache(c.env, c.var.cfg);
+  await audit(c, 'deleted', 'content', `Deleted ${typeOf(kind)} /${row.slug}`, id);
   return go(c, `/${kind}`, { ok: 'Deleted.' });
 });
 

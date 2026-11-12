@@ -50,8 +50,8 @@ async function tryFirst<T extends Row>(c: Ctx, sql: string, ...args: (string | n
  */
 export async function needsAttention(c: Ctx, base: string): Promise<{ items: AttentionItem[]; checked: number }> {
   const user: User = c.var.user;
-  const editor = can(user, 'editor');
-  const admin = can(user, 'admin');
+  const editor = can(user, 'moderate_comments');
+  const admin = can(user, 'manage_tools');
   const items: AttentionItem[] = [];
 
   const [pending, failed, scheduled, stale, unindexed, unreadable, migrations, authors] = await Promise.all([

@@ -543,9 +543,15 @@ test('12b. themes: upload JSON and zip, activate, replace, download, delete', as
   assert.equal(sheet.headers.get('x-content-type-options'), 'nosniff');
   assert.match(sheet.headers.get('content-security-policy'), /default-src 'none'/);
 
+  // Phase 5: the download is a zip that uploads back, plus a JSON view for
+  // reading a theme in an editor or a diff.
   const dl = await get(`${admin}/themes/${zipId}/download`);
-  assert.match(dl.headers.get('content-disposition'), /zip-theme-theme\.json/);
-  assert.equal(JSON.parse(dl.text).version, '1.0');
+  assert.match(dl.headers.get('content-disposition'), /zip-theme-1\.0\.zip/);
+  assert.equal(dl.headers.get('content-type'), 'application/zip');
+  assert.equal(new DataView(dl.bytes.buffer, dl.bytes.byteOffset).getUint32(0, true), 0x04034b50, 'it is a zip');
+  const jsonView = await get(`${admin}/themes/${zipId}/download.json`);
+  assert.match(jsonView.headers.get('content-disposition'), /zip-theme-theme\.json/);
+  assert.equal(JSON.parse(jsonView.text).version, '1.0');
 
   assert.match((await adminPost(`/themes/${zipId}/delete`, {})).location, /Activate another theme/);
   // Phase 3: an asset-backed theme can still be inspected before it goes.
@@ -562,10 +568,15 @@ test('12b. themes: upload JSON and zip, activate, replace, download, delete', as
   log('5 bad uploads rejected with reasons; JSON + zip themes installed, activated, replaced live, downloaded, deleted');
 });
 
-test('12c. theme store: AMS Base, AMS Pro and AMS Premium install and switch with one click', async () => {
+test('12c. theme store: five bundled themes install and switch with one click', async () => {
   const store = await get(`${admin}/themes`);
-  for (const name of ['AMS Base', 'AMS Pro', 'AMS Premium']) assert.ok(store.text.includes(`<h3>${name} `), name);
-  assert.equal((store.text.match(/store\/[a-z-]+\/install/g) || []).length, 4, 'Pro and Premium each offer Install and Install-and-activate');
+  for (const name of ['AMS Base', 'AMS Pro', 'AMS Premium', 'AMS Journal', 'AMS Portfolio']) assert.ok(store.text.includes(`<h3>${name} `), name);
+  assert.equal((store.text.match(/store\/[a-z-]+\/install/g) || []).length, 8, 'the four installable themes each offer Install and Install-and-activate');
+  // A store card shows a screenshot (or a palette gradient when it ships none),
+  // and its tags, so the store looks like a store.
+  assert.match(store.text, /class="store-item__shot"/);
+  // Nothing is installed yet, so every card falls back to its palette gradient.
+  assert.doesNotMatch(store.text, /store-item__shot[^>]*url\(/, 'an uninstalled theme shows a generated card, not a broken image');
 
   assert.match((await adminPost('/themes/store/ams-pro/install', {})).location, /AMS Pro v1\.0\.0 installed/);
   assert.match((await anon('/')).text, /class="site-header"/, 'installing alone does not switch theme');
@@ -591,8 +602,32 @@ test('12c. theme store: AMS Base, AMS Pro and AMS Premium install and switch wit
   assert.match((await anon('/')).text, /<a href="\/" aria-current="page">Home<\/a>/, 'current tab is marked');
 
   const after = await get(`${admin}/themes`);
-  assert.equal((after.text.match(/store\/[a-z-]+\/install/g) || []).length, 2, 'installed themes only offer Activate');
+  assert.equal((after.text.match(/store\/[a-z-]+\/install/g) || []).length, 6, 'installed themes only offer Activate');
   assert.match((await adminPost('/themes/store/nope/install', {})).text, /not in the store/);
+  // Installing Journal writes the screenshot the app ships with it, so its card
+  // shows the real thing from then on.
+  assert.match((await adminPost('/themes/store/ams-journal/install', {})).location, /AMS Journal v1\.0\.0 installed/);
+  const withShot = await get(`${admin}/themes`);
+  assert.match(withShot.text, /store-item__shot[^>]*url\([^)]*\/theme-assets\/ams-journal\/screenshot\.png/, 'the installed screenshot is served');
+  const shotUrl = withShot.text.match(/theme-assets\/ams-journal\/screenshot\.png[^'"]*/)[0];
+  const shot = await request('/theme-assets/ams-journal/screenshot.png');
+  assert.equal(shot.status, 200);
+  assert.ok(shotUrl.length > 0);
+  // The bytes really travel: an empty PNG would pass a status check and show a
+  // blank card, which is exactly what a build misconfigured for binary assets does.
+  assert.equal(shot.bytes[0], 0x89, 'the screenshot is a PNG, not an empty file');
+  assert.ok(shot.bytes.length > 1000, 'and it has pixels in it');
+  // And the theme itself renders: Journal's own markup, not a fallback.
+  assert.match((await adminPost('/themes/store/ams-journal/install', { activate: 1 })).location, /AMS Journal is now your active theme/);
+  const journal = await anon('/');
+  assert.match(journal.text, /class="masthead"/, 'Journal renders its masthead');
+  assert.match(journal.text, /masthead__kicker">Notes, essays/, 'its own theme setting reaches the page');
+  assert.match((await get(`${admin}/themes/preview/ams-journal`)).text, /id="theme-preview-frame"/, 'the live preview page renders');
+  assert.match((await adminPost('/themes/store/ams-portfolio/install', { activate: 1 })).location, /AMS Portfolio is now your active theme/);
+  const portfolio = await anon('/');
+  assert.match(portfolio.text, /class="hero__title">Design with intent/, 'Portfolio renders its hero setting');
+  assert.match(portfolio.text, /class="grid"/, 'and its grid');
+  assert.match(portfolio.text, /--cols:3/, 'the grid-columns setting reaches the CSS');
   assert.match((await adminPost('/themes/store/default/install', { activate: 1 })).location, /AMS Base is now your active theme/);
   assert.match((await anon('/')).text, /class="site-header"/);
   log('store lists 3 themes; Pro and Premium render home, blog, post, page and 404 with tabs + footer; switched back to Base');
@@ -770,7 +805,7 @@ test('12g. tools: redirects, export/import, backups, health and cache', async ()
 test('12h. updates and taxonomy management: version page, run updates, categories and tags', async () => {
   const page = await get(`${admin}/updates`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /7\.0\.0|0\.7\.0/, 'the updates page states the running version');
+  assert.match(page.text, /8\.0\.0|0\.8\.0/, 'the updates page states the running version');
   assert.match(page.text, /Database schema/);
   assert.match((await adminPost('/updates/run', {})).location, /\/updates\?ok=/);
 

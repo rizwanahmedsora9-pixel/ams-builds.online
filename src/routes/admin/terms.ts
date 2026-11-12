@@ -13,7 +13,7 @@ import { csrfField, errorPage, go, html, layout } from '../../lib/ui';
 const terms = new Hono<AppEnv>();
 
 const guard = async (c: Ctx, next: () => Promise<void>) => {
-  if (!can(c.var.user, 'editor')) return errorPage(c, 403, 'Your role cannot manage categories and tags.');
+  if (!can(c.var.user, 'manage_terms')) return errorPage(c, 403, 'Your role cannot manage categories and tags.');
   await next();
 };
 terms.use('/terms', guard);

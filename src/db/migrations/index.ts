@@ -6,7 +6,7 @@ import { resetSchemaCache } from '../../lib/schema';
  * by the installer; each entry here upgrades an already-installed database.
  * Append new entries with the next version number - never edit old ones.
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /**
  * A migration statement that must not take the whole batch down.
@@ -129,6 +129,27 @@ const THEME_PLATFORM = [
  * Phase 4: a page or post may name the theme template that renders it
  * (`page-landing`). Empty means "the default template for this kind of content".
  */
+/**
+ * Phase 6: every mutation in the panel writes one row here (lib/audit.ts is the
+ * only writer). The indexes follow how the log is read: newest first, by user,
+ * and by action. Retention is time-based, so no index on a status column.
+ */
+const AUDIT = [
+  `CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    action TEXT NOT NULL,
+    object_type TEXT NOT NULL,
+    object_id TEXT,
+    summary TEXT NOT NULL DEFAULT '',
+    ip TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_audit_recent ON audit_log (id DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log (user_id, id DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action, id DESC)',
+];
+
 const TEMPLATES = [
   tolerant("ALTER TABLE content ADD COLUMN template TEXT NOT NULL DEFAULT ''"),
 ];
@@ -143,6 +164,7 @@ export const migrations: { version: number; name: string; statements: string[] }
   { version: 4, name: 'Page ordering default', statements: WORKFLOW_FIXES },
   { version: 5, name: 'Theme platform: assets, partials, versions', statements: THEME_PLATFORM },
   { version: 6, name: 'Per-page templates', statements: TEMPLATES },
+  { version: 7, name: 'Audit log', statements: AUDIT },
 ];
 
 /** Runs one migration statement, tolerating the errors marked in its comment. */

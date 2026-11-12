@@ -110,7 +110,7 @@ media.get('/media', async (c) => {
   const rangeEnd = Math.min((state.p - 1) * per + rows.length, total);
   const accept = Object.keys(TYPES).map((ext) => '.' + ext).join(',');
   const actions = (m: MediaListRow, url: string) => {
-    const mine = can(c.var.user, 'editor') || m.uploaded_by === c.var.user.id;
+    const mine = can(c.var.user, 'manage_media') || m.uploaded_by === c.var.user.id;
     return html`<button type="button" class="btn ghost small" data-copy="${url}">Copy URL</button>
       ${mine ? html`<form method="post" action="${base}/media/${m.id}/delete" class="inline" data-confirm>${csrfField(c)}<button class="btn danger small" type="submit">Delete</button></form>` : ''}`;
   };
@@ -256,7 +256,7 @@ media.post('/media/picker/upload', async (c) => {
   const mime = TYPES[ext];
   if (!mime) return c.json({ ok: false, error: 'That file type is not allowed.' }, 415);
   if (file.size > MAX_BYTES) return c.json({ ok: false, error: 'That file is too large.' }, 413);
-  if (ADMIN_ONLY.has(ext) && !can(c.var.user, 'admin')) return c.json({ ok: false, error: 'Only admins can upload that type.' }, 403);
+  if (ADMIN_ONLY.has(ext) && !can(c.var.user, 'manage_settings')) return c.json({ ok: false, error: 'Only admins can upload that type.' }, 403);
   const now = new Date();
   const folder = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
   const filename = `${slugify(file.name.slice(0, dot)) || 'file'}.${ext}`;
@@ -277,7 +277,7 @@ media.post('/media/:id{[0-9]+}/alt', async (c) => {
   const alt = String(c.var.form.get('alt') ?? '').trim().slice(0, 200);
   const row = await c.env.DB.prepare('SELECT uploaded_by FROM media WHERE id=? AND site_id=1').bind(id).first<{ uploaded_by: number | null }>();
   if (!row) return errorPage(c, 404, 'That file is not in the library.');
-  if (!can(c.var.user, 'editor') && row.uploaded_by !== c.var.user.id) return errorPage(c, 403, 'You can only edit files you uploaded.');
+  if (!can(c.var.user, 'manage_media') && row.uploaded_by !== c.var.user.id) return errorPage(c, 403, 'You can only edit files you uploaded.');
   await c.env.DB.prepare('UPDATE media SET alt=? WHERE id=?').bind(alt, id).run();
   return go(c, '/media', { ok: alt ? 'Alt text saved.' : 'Alt text cleared (the image is now decorative).' });
 });
@@ -293,7 +293,7 @@ media.post('/media/upload', async (c) => {
     const dot = file.name.lastIndexOf('.');
     const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : '';
     const mime = TYPES[ext];
-    if (!mime || file.size > MAX_BYTES || (ADMIN_ONLY.has(ext) && !can(c.var.user, 'admin'))) {
+    if (!mime || file.size > MAX_BYTES || (ADMIN_ONLY.has(ext) && !can(c.var.user, 'manage_settings'))) {
       skipped.push(file.name);
       continue;
     }
@@ -317,7 +317,7 @@ media.post('/media/bulk', async (c) => {
   ids.length = Math.min(ids.length, 100);
   if (!ids.length) return mediaListRedirect(c, state, 'Select at least one media file.', true);
 
-  const canDeleteAll = can(c.var.user, 'editor');
+  const canDeleteAll = can(c.var.user, 'manage_media');
   const ownerSql = canDeleteAll ? '' : ' AND uploaded_by=?';
   const ownerArgs = canDeleteAll ? [] : [c.var.user.id];
   const placeholders = ids.map(() => '?').join(',');
@@ -340,7 +340,7 @@ media.post('/media/:id{[0-9]+}/delete', async (c) => {
   const id = Number(c.req.param('id'));
   const row = await c.env.DB.prepare('SELECT r2_key, uploaded_by FROM media WHERE id=? AND site_id=1').bind(id).first<{ r2_key: string; uploaded_by: number | null }>();
   if (!row) return errorPage(c, 404, 'File not found.');
-  if (!can(c.var.user, 'editor') && row.uploaded_by !== c.var.user.id) return errorPage(c, 403, 'You can only delete your own uploads.');
+  if (!can(c.var.user, 'manage_media') && row.uploaded_by !== c.var.user.id) return errorPage(c, 403, 'You can only delete your own uploads.');
   await deleteFile(c.env, row.r2_key);
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE content SET featured_media_id=NULL WHERE featured_media_id=?').bind(id),

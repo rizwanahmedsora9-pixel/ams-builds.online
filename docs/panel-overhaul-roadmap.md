@@ -449,7 +449,7 @@ criteria over HTTP: an unsaved brand colour and an unsaved theme setting reach t
 else, the save keeps both, the same manifest settings become controls with no code, and a page with its own
 template renders it publicly while a page without one keeps the default.
 
-### Phase 5 — Theme store & lifecycle (6 d)
+### Phase 5 — Theme store & lifecycle (6 d) — ✅ shipped in 0.8.0
 
 - **Storefront quality**: real screenshots (`screenshot.png` in the package, rendered via
   `/theme-assets/...`; fall back to a token-generated gradient card if absent), live "Preview" modal
@@ -468,7 +468,18 @@ template renders it publicly while a page without one keeps the default.
 **Acceptance:** install → preview → customize → rollback performed entirely in the panel; store cards
 show screenshots; zip export round-trips through upload byte-for-byte for templates/CSS.
 
-### Phase 6 — Governance, performance, polish (7 d)
+**Shipped in 0.8.0.** Store cards render `screenshot.png` through `/theme-assets/<slug>/screenshot.png`
+(cache-busted by version) and fall back to a palette gradient; preview is an iframe running the real site;
+install + activate is one POST. `theme_versions` (migration 6) records every install, update and panel save,
+the detail screen shows the history newest-first with **Roll back**, and a rollback rewrites the stylesheet
+asset as well as the row. The editor is a file tree + textarea with per-file save and validation; export is a
+real zip written by `zipFiles` (`theme.json` names the files, assets byte-for-byte) and `POST /themes/upload`
+accepts it back; `GET /themes/:id/download.json` keeps the readable form. **AMS Journal** and **AMS Portfolio**
+ship with partials, `--j-*`/`--p-*` tokens, a per-theme asset (`screenshot.png`) and 6/8 settings.
+*Measured:* `tests/panel.test.mjs` 50 cases, `tests/e2e.mjs` 27, `tests/template.test.mjs` 12 — 89 green on
+Node, panel CSS budgets met (largest bundle 29.6 KB, editor JS 8.7 KB / 30 KB).
+
+### Phase 6 — Governance, performance, polish (7 d) — ✅ shipped in 0.8.0
 
 - **Audit log** (migration 5): `audit_log(id, user_id, action, object_type, object_id, summary, ip,
   created_at)` written from one helper on every mutation; viewer under Tools with filters and 90-day
@@ -484,6 +495,21 @@ show screenshots; zip export round-trips through upload byte-for-byte for templa
   reference, README the front door.
 - **Import/export v2**: include theme packages, theme settings and revisions in Tools export.
 
+**Shipped in 0.8.0.** `audit_log` is migration 7 and every mutation goes through `audit()` (content, themes,
+users, comments, settings, appearance, import/export) with a readable summary; Tools → Audit log filters by
+person/action/area/text through GET parameters, and `pruneAudit` drops rows older than 90 days from the cron.
+`src/lib/capabilities.ts` holds 16 capabilities and the role defaults, `can(user, cap)` guards every route and
+the sidebar; the Users screen describes a role from the same map. Budgets live in `src/lib/budgets.ts`,
+measured by `scripts/measure.mjs` into `src/lib/budget-report.json`, enforced by `npm run check:budgets` in
+`npm test` and shown on Site Health. Panel strings for the new screens come from `src/lib/i18n.ts` (`en`
+catalogue, `t(key, vars)`, missing keys render visibly). Export is format version 2 with `themes`,
+`theme_settings` and `content_revisions`; import validates each theme with the normal manifest parser and
+skips a bad one rather than failing the file.
+
+Living docs: `README.md` is the front door (install, run, what is in the box), `docs/panel-guide.md` is every
+screen including the audit log and the capability table, and `docs/theme-developer-guide.md` is the manifest,
+template tags, assets, settings and CSP. This file stays the plan and the record.
+
 ---
 
 ## 4. Sequencing, effort and the first slice
@@ -495,8 +521,8 @@ show screenshots; zip export round-trips through upload byte-for-byte for templa
 | 2 | Revisions, autosave, locks, editor v2, media picker, list v2 | 11 | 0, 1 |
 | 3 ✅ | Theme platform v2 (assets, partials, filters, manifest, CSP) | 9 | 0 |
 | 4 ✅ | Appearance hub, tokens, live preview, per-page templates, widget areas, Identity | 8 | 1, 3 |
-| 5 | Store lifecycle, authoring, rollback, 2 new themes | 6 | 3, 4 |
-| 6 | Audit log, capabilities, budgets, i18n, docs | 7 | 1–5 |
+| 5 ✅ | Store lifecycle, authoring, rollback, 2 new themes | 6 | 3, 4 |
+| 6 ✅ | Audit log, capabilities, budgets, i18n, docs | 7 | 1–5 |
 | | **Total** | **52** | |
 
 Parallelism: Phase 3 can run alongside 1–2 (different surface area), which compresses this to ~6 weeks

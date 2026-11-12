@@ -96,9 +96,12 @@ export function createHarness() {
         if (value === '' || /max-age=0/i.test(line)) jar.delete(name); else jar.set(name, value);
       }
     }
-    const text = await res.text();
+    // Both forms, because a zip download is bytes and every other response is
+    // text; decoding once here keeps the call sites simple.
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const text = new TextDecoder().decode(bytes);
     const loc = res.headers.get('location');
-    return { status: res.status, text, headers: res.headers, location: loc ? decodeURIComponent(loc.replace(base, '')) : null };
+    return { status: res.status, text, bytes, headers: res.headers, location: loc ? decodeURIComponent(loc.replace(base, '')) : null };
   }
 
   const get = (path, opts) => request(path, opts);

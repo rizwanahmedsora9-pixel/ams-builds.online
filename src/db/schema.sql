@@ -224,3 +224,20 @@ CREATE TABLE IF NOT EXISTS backups (
   size INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
+
+-- Phase 6: the audit log. One row per mutation, written by lib/audit.ts, pruned
+-- after 90 days by the cron trigger. user_id is null when an action ran without
+-- a session (the installer, a scheduled publish).
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  action TEXT NOT NULL,
+  object_type TEXT NOT NULL,
+  object_id TEXT,
+  summary TEXT NOT NULL DEFAULT '',
+  ip TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_recent ON audit_log (id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log (user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action, id DESC);

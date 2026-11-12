@@ -20,8 +20,8 @@ export type Command = { label: string; href: string; icon: string; keys: string[
 
 /** Static commands, filtered by role. Rendered into the palette by the client. */
 export function commandsFor(base: string, user: User): Command[] {
-  const admin = can(user, 'admin');
-  const editor = can(user, 'editor');
+  const admin = can(user, 'manage_tools');
+  const editor = can(user, 'edit_others_posts');
   const list: Command[] = [
     { label: 'New post', href: `${base}/posts/new`, icon: 'plus', keys: ['new', 'post', 'write', 'add'], group: 'Create' },
     { label: 'New page', href: `${base}/pages/new`, icon: 'plus', keys: ['new', 'page', 'add'], group: 'Create' },
@@ -73,8 +73,8 @@ export async function searchSite(env: Env, user: User, rawQuery: string): Promis
   const q = rawQuery.trim().slice(0, SEARCH_MAX);
   if (q.length < SEARCH_MIN) return [];
   const pattern = like(q.toLowerCase());
-  const editor = can(user, 'editor');
-  const admin = can(user, 'admin');
+  const editor = can(user, 'edit_others_posts');
+  const admin = can(user, 'manage_tools');
   const groups: Group[] = [];
 
   // Posts and pages ---------------------------------------------------------

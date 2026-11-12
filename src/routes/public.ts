@@ -10,7 +10,7 @@ import { pluginOn } from '../lib/plugins';
 import { PAGE_CACHE_TTL, activeTheme, cacheKey, renderTheme, themeBySlug, type PageMeta } from '../lib/render';
 import { resolveSettings } from '../lib/theme-manifest';
 import { previewFor } from '../lib/preview';
-import { can } from '../lib/auth';
+import { can } from '../lib/capabilities';
 import type { ThemeBundle } from '../lib/theme-manifest';
 import { clientIp, cspFor, rateCount, rateHit, sameOrigin, stripTags, type CspMode } from '../lib/security';
 import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
@@ -334,7 +334,7 @@ site.get('*', async (c) => {
   const preview = hasSession && url.searchParams.has('preview') && !!signedIn;
   // The Customizer's channel: unsaved values live in a signed cookie, never in
   // the query string, and are read only for a signed-in admin.
-  const unsaved = preview ? await previewFor(c, !!signedIn && can(signedIn, 'admin')) : null;
+  const unsaved = preview ? await previewFor(c, !!signedIn && can(signedIn, 'manage_appearance')) : null;
   let previewTheme: ThemeBundle | undefined;
   // `&customize=1` only labels the preview for the Customizer's own script.
   const wantedTheme = url.searchParams.get('theme') ?? unsaved?.theme;

@@ -9,7 +9,7 @@ import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 const menus = new Hono<AppEnv>();
 
 const guard = async (c: Ctx, next: () => Promise<void>) => {
-  if (!can(c.var.user, 'editor')) return errorPage(c, 403, 'Your role cannot manage menus.');
+  if (!can(c.var.user, 'manage_menus')) return errorPage(c, 403, 'Your role cannot manage menus.');
   await next();
 };
 menus.use('/menus', guard);

@@ -26,6 +26,7 @@ const limits = {
   'screens/lists.css': { raw: 12 * 1024, gzip: 4 * 1024 },
   'screens/editor.css': { raw: 12 * 1024, gzip: 4 * 1024 },
   'screens/appearance.css': { raw: 10 * 1024, gzip: 3 * 1024 },
+  'screens/themes.css': { raw: 6 * 1024, gzip: 2 * 1024 },
   'screens/legacy.css': { raw: 24 * 1024, gzip: 7 * 1024 },
 };
 

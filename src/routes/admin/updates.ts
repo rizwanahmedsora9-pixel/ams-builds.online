@@ -18,7 +18,7 @@ import { APP_NAME, APP_VERSION } from '../../lib/version';
 const updates = new Hono<AppEnv>();
 
 const guard = async (c: Ctx, next: () => Promise<void>) => {
-  if (!can(c.var.user, 'admin')) return errorPage(c, 403, 'Only admins can see updates.');
+  if (!can(c.var.user, 'manage_updates')) return errorPage(c, 403, 'Only admins can see updates.');
   await next();
 };
 updates.use('/updates', guard);

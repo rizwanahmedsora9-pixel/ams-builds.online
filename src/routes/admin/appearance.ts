@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { audit } from '../../lib/audit';
 import type { AppEnv, Ctx } from '../../types';
 import { can } from '../../lib/auth';
 import { bumpCache, getSettings, setSettings } from '../../lib/config';
@@ -35,7 +36,7 @@ const themeAreas = (theme: { manifest: { widgets?: ThemeWidgetArea[] } }): Theme
   theme.manifest.widgets?.length ? theme.manifest.widgets : DEFAULT_WIDGET_AREAS;
 
 const guard = async (c: Ctx, next: () => Promise<void>) => {
-  if (!can(c.var.user, 'admin')) return errorPage(c, 403, 'Only admins can change the appearance.');
+  if (!can(c.var.user, 'manage_appearance')) return errorPage(c, 403, 'Your role cannot change the appearance.');
   await next();
 };
 appearance.use('/appearance', guard);
@@ -306,6 +307,9 @@ appearance.post('/appearance', async (c) => {
   clearPreviewCookie(c);
   clearThemeValueCache(c.env);
   await bumpCache(c.env, c.var.cfg);
+  const touched = [...Object.keys(tokenSettings), ...themeRows.map((r) => r.key), 'custom_css', 'custom_head', 'custom_footer', 'custom_js']
+    .filter((key) => f.has(key));
+  await audit(c, 'settings', 'theme', `Saved the Customizer for “${theme.name}” (${touched.length} field${touched.length === 1 ? '' : 's'})`);
   // Stay in the Customizer when the save came from it, so the preview keeps its context.
   const fromCustomizer = String(f.get('start_path') ?? '') !== '';
   return go(c, fromCustomizer ? `/appearance?path=${encodeURIComponent(String(f.get('start_path') || '/'))}` : '/appearance', { ok: 'Saved. Every page is up to date.' });
@@ -495,6 +499,7 @@ appearance.post('/identity', async (c) => {
   await setSettings(c.env, values);
   if (!brand) await c.env.DB.prepare("DELETE FROM settings WHERE site_id=1 AND key='token_brand'").run();
   await bumpCache(c.env, c.var.cfg);
+  await audit(c, 'settings', 'setting', 'Saved Identity (logo, favicon, social image, scheme)');
   return go(c, '/identity', { ok: 'Identity saved.' });
 });
 
@@ -553,6 +558,7 @@ appearance.post('/widgets', async (c) => {
   }
   await setSettings(c.env, values);
   await bumpCache(c.env, c.var.cfg);
+  await audit(c, 'settings', 'theme', 'Saved widgets');
   return go(c, '/widgets', { ok: 'Widgets saved.' });
 });
 

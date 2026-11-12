@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { audit } from '../../lib/audit';
 import type { AppEnv, Ctx } from '../../types';
 import { can } from '../../lib/auth';
 import { bumpCache } from '../../lib/config';
@@ -15,7 +16,7 @@ import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 const comments = new Hono<AppEnv>();
 
 const guard = async (c: Ctx, next: () => Promise<void>) => {
-  if (!can(c.var.user, 'editor')) return errorPage(c, 403, 'Your role cannot moderate comments.');
+  if (!can(c.var.user, 'moderate_comments')) return errorPage(c, 403, 'Your role cannot moderate comments.');
   await next();
 };
 comments.use('/comments', guard);
@@ -125,6 +126,7 @@ comments.post('/comments/:id{[0-9]+}/status', async (c) => {
     .bind(next, new Date().toISOString(), id).run();
   // Approved comments are part of the public page.
   if (row.status === 'approved' || next === 'approved') await bumpCache(c.env, c.var.cfg);
+  await audit(c, 'moderated', 'comment', `Comment ${label(next)} (was ${row.status})`, id);
   return backTo(c, from, { ok: `Comment ${label(next)}.` });
 });
 
@@ -150,6 +152,7 @@ comments.post('/comments/:id{[0-9]+}/delete', async (c) => {
   if (!row) return errorPage(c, 404, 'Comment not found.');
   await c.env.DB.prepare('DELETE FROM comments WHERE id=?').bind(id).run();
   if (row.status === 'approved') await bumpCache(c.env, c.var.cfg);
+  await audit(c, 'deleted', 'comment', 'Deleted a comment', id);
   return go(c, '/comments', { ok: 'Comment deleted.' });
 });
 

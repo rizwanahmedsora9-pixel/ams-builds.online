@@ -90,8 +90,8 @@ const PREFS_PREFIX = '/preferences';
 
 /** The sidebar definition, kept separate so tests and the command palette can read it. */
 export function navGroups(user: { role: string }, pending: number): NavGroup[] {
-  const admin = can(user as Ctx['var']['user'], 'admin');
-  const editor = can(user as Ctx['var']['user'], 'editor');
+  const admin = can(user as Ctx['var']['user'], 'manage_settings');
+  const editor = can(user as Ctx['var']['user'], 'edit_others_posts');
   return [
     { key: 'home', path: '', label: 'Dashboard', icon: 'home', show: true },
     { key: 'updates', path: '/updates', label: 'Updates', icon: 'refresh', show: admin },
@@ -283,7 +283,7 @@ export async function layout(c: Ctx, title: string, body: Raw, _active = '', opt
   const prefs = readPrefs(c);
 
   let pending = 0;
-  if (can(user, 'editor')) {
+  if (can(user, 'moderate_comments')) {
     try {
       pending = await pendingComments(c.env);
     } catch {

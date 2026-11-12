@@ -405,6 +405,10 @@ export async function readThemeUpload(buf: ArrayBuffer, unzip: (b: ArrayBuffer) 
   const assets: UploadedAsset[] = [];
   let total = 0;
   for (const rel of [...wanted].sort()) {
+    // `style.css` is the stylesheet (already read above), never an asset: it is
+    // text a manifest points at with `"css"`, and it is written back to the file
+    // store by saveTheme so a v2 layout can link it.
+    if (cleanAssetPath(rel) === 'style.css') continue;
     const path = cleanAssetPath(rel);
     const data = [...files.entries()].find(([p]) => p === dir + rel)?.[1];
     if (!data) continue;

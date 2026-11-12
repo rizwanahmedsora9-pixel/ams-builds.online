@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { audit } from '../../lib/audit';
+import { roleSummary } from '../../lib/capabilities';
 import type { AppEnv, Ctx } from '../../types';
 import { can, hashPassword } from '../../lib/auth';
 import { card, emptyState, pageHead, table } from '../../admin/components';
@@ -15,7 +17,7 @@ import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 const users = new Hono<AppEnv>();
 
 const guard = async (c: Ctx, next: () => Promise<void>) => {
-  if (!can(c.var.user, 'admin')) return errorPage(c, 403, 'Only admins can manage users.');
+  if (!can(c.var.user, 'manage_users')) return errorPage(c, 403, 'Only admins can manage users.');
   await next();
 };
 users.use('/users', guard);
@@ -26,11 +28,12 @@ type Role = (typeof ROLES)[number];
 type UserRow = { id: number; username: string; email: string; role: Role; created_at: string };
 type Row = UserRow & { posts: number };
 
-const roleHelp: Record<Role, string> = {
-  admin: 'Everything, including settings, themes, plugins, users and tools.',
-  editor: 'All posts and pages, media, menus and comment moderation.',
-  author: 'Own posts and own media only.',
-};
+/**
+ * What each role can do is derived from the capability map (lib/capabilities.ts)
+ * rather than restated here, so the description in the dropdown cannot drift
+ * from what the routes actually allow.
+ */
+const roleHelp = (role: Role): string => roleSummary(role);
 
 function userForm(c: Ctx, row: UserRow | null, error = ''): Promise<Response> {
   const base = c.var.base;
@@ -51,7 +54,7 @@ ${error ? html`<div class="flash err" role="alert">${error}</div>` : ''}
   <input type="email" id="email" name="email" value="${row?.email ?? ''}" required maxlength="160">
   <label for="role">Role</label>
   <select id="role" name="role">
-    ${ROLES.map((r) => html`<option value="${r}"${row?.role === r ? raw(' selected') : ''}>${r[0].toUpperCase() + r.slice(1)} — ${roleHelp[r]}</option>`)}
+    ${ROLES.map((r) => html`<option value="${r}"${row?.role === r ? raw(' selected') : ''}>${r[0].toUpperCase() + r.slice(1)} — ${roleHelp(r)}</option>`)}
   </select>
   ${isSelf ? html`<p class="hint">You cannot demote or delete the account you are signed in with.</p>` : ''}
   <label for="password">${row ? 'New password' : 'Password'}</label>
@@ -104,7 +107,7 @@ ${card({
 ${card({
     title: 'Roles',
     body: html`<ul class="list">
-    ${ROLES.map((r) => html`<li><div class="t"><b>${r[0].toUpperCase() + r.slice(1)}</b><small>${roleHelp[r]}</small></div></li>`)}
+    ${ROLES.map((r) => html`<li><div class="t"><b>${r[0].toUpperCase() + r.slice(1)}</b><small>${roleHelp(r)}</small></div></li>`)}
   </ul>
   <p class="hint" style="margin-bottom:0">You can change your own email and password under <a href="${base}/profile">Profile</a>.</p>`,
   })}`, '/users');
@@ -163,11 +166,13 @@ users.post('/users/save', async (c) => {
       await c.env.DB.prepare('UPDATE users SET username=?, email=?, role=? WHERE id=?')
         .bind(username, email, role, id).run();
     }
+    await audit(c, 'updated', 'user', `Updated user “${username}” (${role})`, id);
     return go(c, '/users', { ok: `${username} saved.` });
   }
 
-  await c.env.DB.prepare('INSERT INTO users (username,email,password_hash,role,created_at) VALUES (?,?,?,?,?)')
+  const created = await c.env.DB.prepare('INSERT INTO users (username,email,password_hash,role,created_at) VALUES (?,?,?,?,?)')
     .bind(username, email, await hashPassword(password), role, new Date().toISOString()).run();
+  await audit(c, 'created', 'user', `Created user “${username}” (${role})`, Number(created.meta.last_row_id));
   return go(c, '/users', { ok: `${username} can now sign in.` });
 });
 
@@ -186,6 +191,7 @@ users.post('/users/:id{[0-9]+}/delete', async (c) => {
     c.env.DB.prepare('UPDATE comments SET user_id=NULL WHERE user_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM users WHERE id=?').bind(id),
   ]);
+  await audit(c, 'deleted', 'user', `Deleted user “${row.username}” (${row.role})`, id);
   return go(c, '/users', { ok: `${row.username} deleted. Their posts now belong to you.` });
 });
 

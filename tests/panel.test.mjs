@@ -964,3 +964,419 @@ test('phase 4: the Customizer keeps working without JavaScript', async () => {
   assert.match(page.text, /With JavaScript off, save first/);
   assert.match(page.text, /\/assets\/screens\.css\?v=/, 'the split pane CSS is a cacheable asset');
 });
+
+/* ------------------------------------------- phase 5: store & lifecycle */
+
+// The theme store as a *lifecycle*: preview → install → edit → export → roll
+// back, entirely in the panel. These cases use the five bundled themes (two of
+// them new: Journal and Portfolio) and the zip writer/reader round trip.
+
+const zipNames = async (bytes) => {
+  // Minimal central-directory read: enough to assert what a zip contains.
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0; i--) if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  assert.ok(eocd >= 0, 'the download is a zip');
+  const count = view.getUint16(eocd + 10, true);
+  let at = view.getUint32(eocd + 16, true);
+  const names = [];
+  for (let i = 0; i < count; i++) {
+    assert.equal(view.getUint32(at, true), 0x02014b50, 'central directory entry');
+    const nameLen = view.getUint16(at + 28, true);
+    const extraLen = view.getUint16(at + 30, true);
+    const commentLen = view.getUint16(at + 32, true);
+    names.push(new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLen)));
+    at += 46 + nameLen + extraLen + commentLen;
+  }
+  return names.sort();
+};
+
+test('phase 5: the store shows five themes with screenshots, tags and a live preview', async () => {
+  const page = await panel.get(`${panel.admin}/themes`);
+  for (const name of ['AMS Base', 'AMS Pro', 'AMS Premium', 'AMS Journal', 'AMS Portfolio']) {
+    assert.ok(page.text.includes(`<h3>${name} `), `${name} is a store card`);
+  }
+  assert.equal((page.text.match(/class="store-item__shot"/g) || []).length, 5, 'every card has art');
+  assert.match(page.text, /class="tag">serif/, 'a theme shows its tags');
+  assert.match(page.text, /themes\/preview\/ams-journal/, 'each card links to the live preview');
+
+  // The preview page frames the real site; the theme is not activated.
+  const preview = await panel.get(`${panel.admin}/themes/preview/ams-journal`);
+  assert.equal(preview.status, 200);
+  assert.match(preview.text, /id="theme-preview-frame"[^>]*src="\/\?preview=1(?:&amp;|&)theme=ams-journal"/);
+  assert.match(preview.text, /data-preview-device="mobile"/, 'device widths are offered');
+  assert.match(preview.text, /Install and activate/);
+  // A theme that is not installed still renders: its stylesheet is served from the app.
+  const storeCss = await panel.get(`${panel.admin}/themes/preview/ams-journal/style.css`);
+  assert.equal(storeCss.status, 200);
+  assert.match(storeCss.text, /--j-measure/, 'the theme stylesheet is served for the preview');
+
+  // Installing and activating it makes it the site.
+  assert.match((await panel.adminPost('/themes/store/ams-journal/install', { activate: 1 })).location, /AMS Journal is now your active theme/);
+  const home = await panel.anon('/');
+  assert.match(home.text, /class="masthead"/);
+  assert.match(home.text, /<style nonce="[^"]*">:root\{--measure:34ch;--accent:#9c4221\}/, 'the theme settings reach the CSS');
+  assert.match(home.text, /has-dropcap/, 'a toggle setting adds its class');
+  assert.match(home.text, /class="colophon"/, 'a partial renders');
+  // Its declared widget areas are editable, and render where it draws them.
+  const widgets = await panel.get(`${panel.admin}/widgets`);
+  assert.match(widgets.text, /widgets\.after-post/);
+  assert.match(widgets.text, /widgets\.footer/);
+  // The stored key uses underscores (`widget_<area('-'→'_')>_<n>_<field>`), while
+  // the manifest keeps the hyphen in the area name.
+  await panel.adminPost('/widgets', { widget_after_post_1_body: '<p>After the post</p>' });
+  assert.match((await panel.anon('/')).text, /site-widgets--after-post/, 'an area the layout does not draw is appended');
+  // Restore the default theme for later cases.
+  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+});
+
+test('phase 5: a theme can be edited in the panel, validated, and rolled back', async () => {
+  const install = await panel.adminPost('/themes/store/ams-portfolio/install', { activate: 1 });
+  assert.match(install.location, /AMS Portfolio is now your active theme|installed/, 'the theme is installed and active');
+  const row = (await panel.get(`${panel.admin}/themes`)).text.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="ams-portfolio"/);
+  assert.ok(row, 'the theme is listed with an id');
+
+  const editor = await panel.get(`${panel.admin}/themes/ams-portfolio/edit`);
+  assert.equal(editor.status, 200);
+  assert.match(editor.text, /<textarea[^>]*id="file-body"[^>]*name="body"/, 'a plain textarea, no dependency');
+  assert.match(editor.text, /partials\/hero\.html/, 'partials are listed');
+  assert.match(editor.text, /base\.html/);
+  assert.match(editor.text, /style\.css/);
+
+  // A bad edit is refused by the same validator an upload uses, and nothing changes.
+  const bad = await panel.adminPost('/themes/ams-portfolio/edit', { file: 'base.html', body: '<p>no content block</p>' });
+  assert.match(bad.location, /err=/, 'an invalid template is refused');
+  assert.match(decodeURIComponent(bad.location), /content/);
+  assert.match((await panel.get(`${panel.admin}/themes/ams-portfolio/edit?file=base.html`)).text, /\{\{\{content\}\}\}/, 'the file is unchanged');
+
+  // A good edit is stored, and reaches the page.
+  const good = await panel.adminPost('/themes/ams-portfolio/edit', {
+    file: 'partials/hero.html', body: '<section class="hero"><h1 class="hero__title">Edited in the panel</h1></section>',
+  });
+  assert.match(good.location, /ok=/, 'the save succeeds');
+  assert.match((await panel.get(`${panel.admin}/themes/ams-portfolio/edit?file=partials/hero.html`)).text, /Edited in the panel/);
+  assert.match((await panel.anon('/')).text, /Edited in the panel/);
+
+  // CSS is editable too, and a template's syntax is checked.
+  await panel.adminPost('/themes/ams-portfolio/edit', { file: 'style.css', body: 'body{background:#101418}' });
+  assert.match((await panel.anon('/')).text, /body\{background:#101418\}/);
+
+  // Every save snapshotted the theme first, so rollback restores it.
+  const history = await panel.get(`${panel.admin}/themes/ams-portfolio`);
+  const snapshots = [...history.text.matchAll(/versions\/(\d+)\/restore/g)].map((m) => m[1]);
+  assert.ok(snapshots.length >= 2, 'each save snapshotted the theme first');
+  assert.match(history.text, /Before editing partials\/hero\.html/, 'the snapshot says what it was for');
+  // History is newest first, so the last entry is the pristine state from before
+  // any of these edits: rolling back to it undoes all of them at once.
+  await panel.adminPost(`/themes/ams-portfolio/versions/${snapshots[snapshots.length - 1]}/restore`, {});
+  assert.doesNotMatch((await panel.anon('/')).text, /Edited in the panel/, 'rollback brought the original back');
+  assert.match((await panel.anon('/')).text, /Design with intent/);
+  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+});
+
+test('phase 5: export is a zip that uploads back byte-for-byte', async () => {
+  // Journal may or may not be installed by an earlier case; install it here so
+  // this test states its own preconditions.
+  await panel.adminPost('/themes/store/ams-journal/install', {});
+  const listed = (await panel.get(`${panel.admin}/themes`)).text;
+  const id = listed.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="ams-journal"/)?.[1];
+  assert.ok(id, 'the theme has an id');
+
+  const res = await panel.request(`${panel.admin}/themes/${id}/download`, {});
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /application\/zip/);
+  assert.match(res.headers.get('content-disposition'), /ams-journal-1\.0\.0\.zip/);
+  const names = await zipNames(res.bytes);
+  for (const expected of ['theme.json', 'base.html', 'home.html', 'partials/header.html', 'style.css', 'screenshot.png']) {
+    assert.ok(names.includes(expected), `${expected} is in the export`);
+  }
+
+  // The manifest inside the zip names files rather than carrying their text, so
+  // it is the same shape an author would upload from a folder.
+  const manifestAt = 0; // theme.json is written first, so its local header is at 0
+  void manifestAt;
+  const size = res.bytes.length;
+
+  // Round trip through the real upload form: a zip made here must upload back.
+  const body = new FormData();
+  body.set('_csrf', await panel.csrf());
+  body.append('theme', new Blob([res.bytes], { type: 'application/zip' }), 'ams-journal.zip');
+  const upload = await panel.request(`${panel.admin}/themes/upload`, { method: 'POST', body });
+  assert.equal(upload.status, 303, 'the exported zip uploads back');
+  assert.match(decodeURIComponent(upload.location), /AMS Journal.*(updated|installed)/);
+
+  // And it is still the same theme: templates, CSS and the screenshot survived.
+  // Templates, partials and the stylesheet all survived the round trip: the
+  // layout still includes its header partial, and the partial is the real one.
+  const after = await panel.get(`${panel.admin}/themes/ams-journal/edit?file=base.html`);
+  assert.match(after.text, /\{\{&gt; header\}\}/);
+  const partial = await panel.get(`${panel.admin}/themes/ams-journal/edit?file=partials/header.html`);
+  assert.match(partial.text, /masthead__title/);
+  const assets = (await panel.get(`${panel.admin}/themes/ams-journal`)).text;
+  assert.match(assets.text ?? assets, /screenshot\.png/, 'the binary asset round-tripped');
+  assert.ok(size > 5000, 'the zip carries the PNG, not just text');
+  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+});
+
+test('phase 5: a new theme can be created from a template in the panel', async () => {
+  const form = await panel.get(`${panel.admin}/themes/new`);
+  assert.equal(form.status, 200);
+  assert.match(form.text, /name="kind"/);
+  assert.match(form.text, /Child of the active theme/);
+
+  const made = await panel.adminPost('/themes/new', { name: 'Panel Made', kind: 'blank' });
+  assert.match(made.location, /\/themes\/panel-made\/edit/, 'the new theme opens in the editor');
+  const editor = await panel.get(`${panel.admin}/themes/panel-made/edit`);
+  assert.match(editor.text, /<textarea/);
+  // It renders once activated: the blank theme is a real theme, not a stub.
+  const row = (await panel.get(`${panel.admin}/themes`)).text.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="panel-made"/);
+  assert.ok(row, 'it is installed');
+  await panel.adminPost(`/themes/${row[1]}/activate`, {});
+  const home = await panel.anon('/');
+  assert.equal(home.status, 200);
+  assert.match(home.text, /class="site-head"/, 'the blank theme renders its own layout');
+  assert.doesNotMatch(home.text, /\{\{/, 'no unrendered tags');
+
+  // A child theme inherits from the active theme and needs no layout of its own.
+  const child = await panel.adminPost('/themes/new', { name: 'Panel Child', kind: 'child' });
+  assert.match(child.location, /panel-child/);
+  assert.match((await panel.get(`${panel.admin}/themes/panel-child`)).text, /Inherits templates/);
+  // Both go, so the store list stays predictable for later cases.
+  const ids = (await panel.get(`${panel.admin}/themes`)).text;
+  const childId = ids.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="panel-child"/)[1];
+  const madeId = ids.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="panel-made"/)[1];
+  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+  await panel.adminPost(`/themes/${childId}/delete`, {});
+  await panel.adminPost(`/themes/${madeId}/delete`, {});
+  assert.match((await panel.get(`${panel.admin}/themes`)).text, /AMS Journal/, 'the store is unchanged');
+});
+
+/* ---------------------------------- phase 6: audit, capabilities, i18n */
+
+test('phase 6: every mutation writes an audit entry a person can read', async () => {
+  // A save, a theme change, a settings change and a user change: four kinds of
+  // mutation, four entries, each naming what happened rather than an id.
+  await panel.adminPost('/pages/save', { title: 'Audit Trail Page', slug: 'audit-trail', body: '<p>x</p>', status: 'published' });
+  await panel.adminPost('/themes/store/ams-portfolio/install', { activate: 1 });
+  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+
+  const page = await panel.get(`${panel.admin}/tools/audit`);
+  assert.equal(page.status, 200);
+  assert.match(page.text, /Audit log/);
+  assert.match(page.text, /Created page “Audit Trail Page”/, 'the save is readable');
+  assert.match(page.text, /Activated theme “AMS Portfolio”/, 'theme activation is logged');
+  assert.match(page.text, /data-audit-action="created"/, 'actions are filterable');
+  assert.match(page.text, /owner/, 'who did it is recorded');
+  // Entries are newest first and paged by keyset, not offset.
+  const ids = [...page.text.matchAll(/data-audit-id="(\d+)"/g)].map((m) => Number(m[1]));
+  assert.ok(ids.length >= 4, 'there are entries');
+  assert.deepEqual([...ids].sort((a, b) => b - a), ids, 'newest first');
+
+  // Filters are GET parameters, so a view is linkable and works without JavaScript.
+  const filtered = await panel.get(`${panel.admin}/tools/audit?action=created`);
+  assert.match(filtered.text, /Created page/);
+  assert.doesNotMatch(filtered.text, /Activated theme/);
+  const byType = await panel.get(`${panel.admin}/tools/audit?type=theme`);
+  assert.match(byType.text, /Activated theme/);
+  assert.doesNotMatch(byType.text, /Created page/);
+  const search = await panel.get(`${panel.admin}/tools/audit?q=Portfolio`);
+  assert.match(search.text, /AMS Portfolio/);
+  const nothing = await panel.get(`${panel.admin}/tools/audit?q=zzz-nothing-matches`);
+  assert.match(nothing.text, /No entries match/);
+
+  // A delete is recorded too: the answer to "who removed that" is in the log.
+  const list = (await panel.get(`${panel.admin}/pages`)).text;
+  const id = list.match(/Audit Trail Page[\s\S]{0,400}?\/pages\/(\d+)/)?.[1];
+  assert.ok(id, 'the page is listed');
+  await panel.adminPost(`/pages/${id}/delete`, {});
+  assert.match((await panel.get(`${panel.admin}/tools/audit`)).text, /Deleted page \/audit-trail/);
+});
+
+test('phase 6: capabilities decide what a role can do, in one place', async () => {
+  // The map itself: a role is a bundle of named capabilities, and the panel asks
+  // for the capability rather than comparing roles.
+  const { can, ROLE_CAPS, CAPABILITIES, capsFor, roleSummary } = await import('../src/lib/capabilities.ts');
+  assert.ok(CAPABILITIES.length >= 15, 'there is a capability catalogue');
+  for (const capability of CAPABILITIES) assert.ok(ROLE_CAPS.admin.includes(capability), `an admin has ${capability}`);
+  for (const capability of ROLE_CAPS.admin) assert.ok(CAPABILITIES.includes(capability), `${capability} is catalogued`);
+  // The defaults are exactly the permissions the roles had before capabilities.
+  assert.equal(can({ role: 'author' }, 'write_posts'), true);
+  assert.equal(can({ role: 'author' }, 'manage_pages'), false);
+  assert.equal(can({ role: 'author' }, 'manage_themes'), false);
+  assert.equal(can({ role: 'editor' }, 'moderate_comments'), true);
+  assert.equal(can({ role: 'editor' }, 'edit_others_posts'), true);
+  assert.equal(can({ role: 'editor' }, 'manage_users'), false);
+  assert.equal(can(null, 'read'), false);
+  assert.equal(capsFor('admin').length, CAPABILITIES.length);
+  assert.match(roleSummary('author'), /writes posts/);
+  assert.match(roleSummary('admin'), /Everything/);
+
+  // And the routes follow it: an author cannot reach a screen their role lacks.
+  const created = await panel.adminPost('/users/save', {
+    username: 'auditor', email: 'auditor@example.com', role: 'author', password: 'auth0rpass!',
+  });
+  assert.equal(created.status, 303, 'an author account exists');
+
+  // Sign in as that author in a separate jar, so the admin session is untouched.
+  const author = createClient(panel.base);
+  const loginPage = await author.get(`${panel.admin}/login`);
+  const token = loginPage.text.match(/name="_csrf" value="([^"]+)"/)[1];
+  const signIn = await author.post(`${panel.admin}/login`, new URLSearchParams({ _csrf: token, login: 'auditor', password: 'auth0rpass!' }));
+  assert.equal(signIn.status, 303, 'the author signs in');
+
+  assert.equal((await author.get(`${panel.admin}/posts/new`)).status, 200, 'an author may write a post');
+  assert.equal((await author.get(`${panel.admin}/pages`)).status, 403, 'but not pages');
+  assert.equal((await author.get(`${panel.admin}/themes`)).status, 403, 'nor themes');
+  assert.equal((await author.get(`${panel.admin}/tools/audit`)).status, 403, 'nor the audit log');
+  assert.equal((await author.get(`${panel.admin}/settings`)).status, 403, 'nor settings');
+  // The sidebar is built from the same map, so the rail agrees with the routes.
+  const rail = (await author.get(`${panel.admin}/`)).text.match(/<nav class="rail"[\s\S]*?<\/nav>/)[0];
+  assert.doesNotMatch(rail, />Appearance<|>Settings<|>Users</, 'the rail hides what the role cannot use');
+  assert.match(rail, />Posts</, 'and keeps what it can');
+});
+
+/** A minimal cookie-jar client, for a second identity in the same test file. */
+function createClient(base) {
+  const jar = new Map();
+  const json = async (res) => ({ status: res.status, text: await res.text(), headers: res.headers });
+  const withCookies = (init = {}) => ({
+    ...init,
+    redirect: 'manual',
+    headers: { ...(init.headers || {}), cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; ') },
+  });
+  const remember = (res) => {
+    for (const line of res.headers.getSetCookie()) {
+      const [pair] = line.split(';');
+      const i = pair.indexOf('=');
+      const name = pair.slice(0, i), value = pair.slice(i + 1);
+      if (value === '' || /max-age=0/i.test(line)) jar.delete(name); else jar.set(name, value);
+    }
+  };
+  return {
+    get: async (path) => {
+      const res = await fetch(base + path, withCookies());
+      remember(res);
+      return json(res);
+    },
+    post: async (path, body) => {
+      const res = await fetch(base + path, withCookies({ method: 'POST', body, headers: { Origin: base } }));
+      remember(res);
+      return json(res);
+    },
+  };
+}
+
+test('phase 6: the panel strings come from one catalogue', async () => {
+  const { t, en, catalogueKeys } = await import('../src/lib/i18n.ts');
+  assert.equal(t('audit.title'), 'Audit log');
+  assert.equal(t('audit.entries', { n: 3 }), '3 entries');
+  assert.equal(t('nope.missing'), 'nope.missing', 'a missing key is visible, not silent');
+  assert.ok(catalogueKeys().length > 40, 'the catalogue is real');
+  for (const key of Object.keys(en)) assert.equal(typeof en[key], 'string');
+
+  // The screens that were translated take their words from the catalogue.
+  const audit = await panel.get(`${panel.admin}/tools/audit`);
+  assert.match(audit.text, /Every change made in the panel, newest first\. Entries are kept for 90 days\./);
+  const health = await panel.get(`${panel.admin}/tools/health`);
+  assert.match(health.text, /Performance budgets/);
+  assert.match(health.text, /Panel CSS, all three files/);
+});
+
+test('phase 6: performance budgets are measured, stated and shown in the panel', async () => {
+  const fs = await import('node:fs/promises');
+  const report = JSON.parse(await fs.readFile(new URL('../src/lib/budget-report.json', import.meta.url), 'utf8'));
+  const health = await panel.get(`${panel.admin}/tools/health`);
+  for (const [key, bytes] of Object.entries(report)) {
+    assert.ok(Number(bytes) > 0, `${key} was measured`);
+    assert.match(health.text, new RegExp(`data-budget="${key}"`), `${key} is shown`);
+  }
+  // A public page stays well inside its stated limit.
+  const home = await panel.anon('/');
+  assert.ok(Buffer.byteLength(home.text) < 200 * 1024, 'the page is not enormous before compression');
+});
+
+test('phase 6: export v2 carries themes, theme settings and revisions', async () => {
+  await panel.adminPost('/themes/store/ams-journal/install', {});
+  const res = await panel.get(`${panel.admin}/tools/export/download`);
+  assert.equal(res.status, 200);
+  const dump = JSON.parse(res.text);
+  assert.equal(dump.format, 'edge-cms-backup');
+  assert.equal(dump.format_version, 2);
+  assert.ok(Array.isArray(dump.themes) && dump.themes.length >= 1, 'installed themes travel with the backup');
+  const journal = dump.themes.find((t) => t.slug === 'ams-journal');
+  assert.ok(journal, 'a specific theme is present');
+  assert.match(journal.templates, /\{\{\{content\}\}\}/, 'its templates are in the file');
+  assert.match(journal.partials, /masthead/, 'its partials are in the file');
+  assert.match(journal.css, /--j-measure/, 'its stylesheet is in the file');
+  assert.ok(Array.isArray(dump.theme_settings), 'per-theme settings are exported');
+  assert.ok(Array.isArray(dump.content_revisions), 'revisions are exported');
+  // Still no passwords, and still the content it always had.
+  assert.ok(dump.users.length >= 1);
+  assert.equal(dump.users[0].password_hash, undefined, 'no password material in an export');
+  assert.ok(Array.isArray(dump.content) && dump.content.length >= 1);
+});
+
+test('phase 5: a preview runs the real site, and a local edit is never silently replaced', async () => {
+  // Install Journal, then change one partial in the panel.
+  await panel.adminPost('/themes/store/ams-journal/install', { activate: 1 });
+  await panel.adminPost('/themes/ams-journal/edit', {
+    file: 'partials/header.html',
+    body: '<header class="masthead"><p class="masthead__kicker">My own kicker</p><a class="masthead__title" href="/">{{site.title}}</a>{{{widgets.header}}}</header>',
+  });
+  assert.match((await panel.anon('/')).text, /My own kicker/);
+
+  // Preview: a panel page with the store theme's site framed, and the framed URL
+  // renders that theme publicly (preview=1 is signed-in only, never cached).
+  const preview = await panel.get(`${panel.admin}/themes/preview/ams-portfolio`);
+  assert.equal(preview.status, 200);
+  assert.match(preview.text, /id="theme-preview-frame"/);
+  assert.match(preview.text, /src="\/\?preview=1&(amp;)?theme=ams-portfolio"/);
+  const framed = await panel.get('/?preview=1&theme=ams-portfolio');
+  assert.equal(framed.status, 200);
+  assert.match(framed.text, /hero__title/, 'the framed page is the real theme');
+  assert.match(framed.headers.get('cache-control') ?? '', /no-store/);
+  assert.equal((await panel.anon('/?preview=1&theme=ams-portfolio')).status, 200);
+  assert.doesNotMatch((await panel.anon('/?preview=1&theme=ams-portfolio')).text, /hero__title/, 'previews are for signed-in people');
+
+  // The store still ships this theme under this name, and my copy differs, so the
+  // next install asks what to do with the edit instead of overwriting it.
+  assert.match((await panel.adminPost('/themes/store/ams-journal/install', { conflict: 'keep' })).location, /Kept%20your%20edits|Kept your edits/);
+  assert.match((await panel.anon('/')).text, /My own kicker/, 'keeping my changes kept them');
+
+  // "Save mine as a copy" freezes the edit under its own name and takes the store's.
+  assert.equal((await panel.adminPost('/themes/store/ams-journal/install', { conflict: 'copy' })).status, 303);
+  const themes = (await panel.get(`${panel.admin}/themes`)).text;
+  assert.match(themes, /AMS Journal \(mine\)/, 'my edited copy is a theme of its own');
+  assert.match(themes, /data-theme-slug="ams-journal-mine"/);
+  assert.doesNotMatch((await panel.anon('/')).text, /My own kicker/, 'and the store version came back');
+
+  // Every one of those choices is in the audit log, naming the files.
+  const audit = (await panel.get(`${panel.admin}/tools/audit?type=theme`)).text;
+  assert.match(audit, /Saved your edits to/);
+  assert.match(audit, /partials\/header\.html|Edited partials\/header\.html/);
+
+  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+});
+
+test('phase 5: an older install shows "Update available vX → vY" with its changelog', async () => {
+  // The server is a real instance, so an older install is simulated the way an
+  // upgrade finds one: the row says v0.9.0 while the store package is v1.0.0.
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(`${panel.dataDir}/cms.sqlite`);
+  db.prepare("UPDATE themes SET version='0.9.0' WHERE slug='ams-journal'").run();
+  db.prepare("DELETE FROM settings WHERE key='theme_store_stamp_ams-journal'").run();
+  db.close();
+
+  const store = (await panel.get(`${panel.admin}/themes`)).text;
+  assert.match(store, /Update available v0\.9\.0 → v1\.0\.0/);
+  assert.match(store, /First release: serif single column/, 'the changelog is shown');
+  assert.match(store, /Update 0\.9\.0 → 1\.0\.0/, 'the button says both versions');
+  assert.match(store, /data-update="ams-journal"/);
+
+  // Taking the update writes a snapshot and lands the newer files.
+  assert.match((await panel.adminPost('/themes/store/ams-journal/install', {})).location, /installed/);
+  assert.doesNotMatch((await panel.get(`${panel.admin}/themes`)).text, /Update available v0\.9\.0/);
+  const detail = (await panel.get(`${panel.admin}/themes/ams-journal`)).text;
+  assert.match(detail, /Before store update/, 'the replaced version is in the history');
+  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+});

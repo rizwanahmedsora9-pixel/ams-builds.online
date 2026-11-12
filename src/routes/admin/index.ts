@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, Ctx } from '../../types';
-import { can, csrfToken, endSession, hashPassword, sessionUser, startSession, verifyPassword } from '../../lib/auth';
+import { csrfToken, endSession, hashPassword, sessionUser, startSession, verifyPassword } from '../../lib/auth';
+import { can } from '../../lib/capabilities';
 import { cfgFor, getConfig, getSettings } from '../../lib/config';
 import { clientIp, rateCount, rateHit, rateReset, sameOrigin, timingSafeEqual } from '../../lib/security';
 import { csrfField, errorPage, flash, go, guardPage, html, layout, shell } from '../../lib/ui';
@@ -169,7 +170,7 @@ admin.get('/', async (c) => {
        FROM content c LEFT JOIN users u ON u.id=c.author_id WHERE c.site_id=1
        ORDER BY c.updated_at DESC, c.id DESC LIMIT 6`,
     ).all<{ id: number; type: string; title: string; status: string; updated_at: string; author: string | null }>(),
-    can(user, 'editor')
+    can(user, 'moderate_comments')
       ? c.env.DB.prepare(
         `SELECT cm.id, cm.author_name, cm.body, cm.status, cm.created_at, c.title AS post
          FROM comments cm JOIN content c ON c.id=cm.content_id WHERE cm.site_id=1
@@ -188,7 +189,7 @@ admin.get('/', async (c) => {
   const siteName = settingsMap.site_title || 'your site';
 
   const stats = [
-    can(user, 'editor') ? { href: `${base}/pages`, value: counts.pages, label: 'Pages', icon: 'file' } : null,
+    can(user, 'manage_pages') ? { href: `${base}/pages`, value: counts.pages, label: 'Pages', icon: 'file' } : null,
     { href: `${base}/posts`, value: counts.posts, label: 'Posts', icon: 'edit' },
     { href: `${base}/media`, value: counts.media, label: 'Media', icon: 'image' },
   ].filter(Boolean) as { href: string; value: number; label: string; icon: string }[];
@@ -205,7 +206,7 @@ admin.get('/', async (c) => {
     </div>
     <div class="row">
       <a class="btn" href="${base}/posts/new">${icon('plus', { cls: 'ico--sm' })}New post</a>
-      ${can(user, 'editor') ? html`<a class="btn ghost" href="${base}/pages/new">New page</a>` : ''}
+      ${can(user, 'manage_pages') ? html`<a class="btn ghost" href="${base}/pages/new">New page</a>` : ''}
       <a class="btn ghost" href="${base}/media#upload">Upload media</a>
     </div>
   </header>
@@ -270,7 +271,7 @@ admin.get('/', async (c) => {
           <dt>Moderation</dt><dd>${moderated ? 'New comments wait for you' : 'Comments appear immediately'}</dd>
         </dl>`,
       })}
-      ${can(user, 'editor') ? card({
+      ${can(user, 'moderate_comments') ? card({
         title: 'Latest comments',
         actions: html`<a class="btn ghost small" href="${base}/comments">All</a>`,
         flush: true,

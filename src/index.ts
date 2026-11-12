@@ -4,6 +4,7 @@ import { cfgFor, getConfig, isInstalled, bumpCache } from './lib/config';
 import { publishDue } from './lib/content';
 import { migrate } from './db/migrations';
 import { pruneAllRevisions, pruneLocks } from './admin/revisions';
+import { pruneAudit } from './lib/audit';
 import install from './routes/install';
 import api from './routes/api';
 import admin from './routes/admin';
@@ -61,6 +62,8 @@ export default {
       // Housekeeping for the editor: expired edit locks and old autosaves.
       await pruneLocks(env);
       await pruneAllRevisions(env);
+      // Audit retention: 90 days, so the table cannot grow without limit.
+      await pruneAudit(env);
     })());
   },
 } satisfies ExportedHandler<Env>;

@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { audit } from '../../lib/audit';
 import type { AppEnv } from '../../types';
 import { can } from '../../lib/auth';
 import { getSettings, saveConfig, setSettings, validAdminSlug } from '../../lib/config';
@@ -9,7 +10,7 @@ import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 const settings = new Hono<AppEnv>();
 
 settings.use('/settings', async (c, next) => {
-  if (!can(c.var.user, 'admin')) return errorPage(c, 403, 'Only admins can change settings.');
+  if (!can(c.var.user, 'manage_settings')) return errorPage(c, 403, 'Only admins can change settings.');
   await next();
 });
 
@@ -142,6 +143,7 @@ settings.post('/settings', async (c) => {
   cfg.domains = domains;
   cfg.cacheV = Date.now();
   await saveConfig(c.env, cfg);
+  await audit(c, 'settings', 'setting', `Saved site settings (title “${siteTitle}”)`);
   return c.redirect(`/${slug}/settings?ok=${encodeURIComponent('Settings saved.')}`, 303);
 });
 
