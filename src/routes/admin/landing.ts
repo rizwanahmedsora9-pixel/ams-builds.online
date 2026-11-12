@@ -69,8 +69,8 @@ ${pageHead({
   ${card({
     title: 'Show the play button on the landing page',
     head: html`<span class="muted">${play ? 'Currently shown' : 'Currently hidden'}</span>`,
-    body: html`<p class="hint" style="margin-top:0">The round play/pause control, the equalizer and the mute button. With it hidden the screen is just the welcome copy and <b>Enter site</b>, and no audio is downloaded. Your soundtrack stays saved, so switching this back on brings it back.</p>
-      ${yesNo('landing_play_button', play, 'The screen offers the soundtrack, and pressing play starts it.', "No play control and no audio download — the screen is welcome copy only.")}
+    body: html`<p class="hint" style="margin-top:0">The round control, the equalizer and the mute button. With it hidden the screen is just the welcome copy and <b>Enter site</b>, and no audio is downloaded. Your soundtrack stays saved, so switching this back on brings it back.</p>
+      ${yesNo('landing_play_button', play, 'The screen offers the soundtrack, and pressing the control starts it.', "No control and no audio download — the screen is welcome copy only.")}
       ${notice(tracks
         ? html`<b>${tracks === 1 ? '1 track' : `${tracks} tracks`}</b> in the playlist. Add, remove or reorder them under <a href="${base}/settings#landing">Settings → Landing soundtrack</a>.`
         : html`No soundtrack yet. Upload audio under <a href="${base}/settings#landing">Settings → Landing soundtrack</a>.`)}`,
