@@ -141,6 +141,10 @@ product over HTTP. `tests/helpers.mjs` holds the shared harness (server lifecycl
 cookie jar, CSRF, install-and-login helper), so a new test starts from a working
 panel in three lines.
 
+`tests/origin.test.mjs` (5 cases) covers the site-name rule: the domain a request
+arrived on becomes a readable name, an admin's own title always wins, and an IP or
+a generated preview suffix never becomes a name.
+
 `tests/template.test.mjs` (12 cases) tests the template engine directly — escaping, comparisons,
 loops and their helpers, every filter, date patterns, partials, layout blocks and the parser's
 error messages. It runs against `dist/template.mjs`, the same bundle the server uses.
@@ -210,7 +214,18 @@ autosaved and versioned, and no screen needs JavaScript to work.
 | Plugins | Built-in XML sitemap, robots.txt, RSS feed and **Search Console Verification** (paste Google/Bing/Yandex meta tag → live in `<head>`) can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects, JSON import/export (v2, includes themes), server-stored backups, site health with performance budgets, audit log, page-cache reset |
-| Settings | Site identity and favicon, reading, customizable first-visit landing screen, ordered looping audio playlist uploads, discussion, domains and the admin URL |
+| Settings | Site identity and favicon, reading, customizable first-visit landing screen with an ordered looping soundtrack (each file uploads on its own, with progress, so a slow connection cannot lose the rest of the form), discussion, domains and the admin URL |
+
+## The site name follows the domain
+
+The installer starts with the name taken from the domain it was opened on
+(`ams-builds.online` → *Ams Builds*, `ams.vercel.app` → *Ams*), and writes no
+title of its own. Until an admin types one in **Settings → Site title**, every
+page derives the name from the host that served it — so the same code deployed
+again for another domain, or answering on a platform address as well as a custom
+domain, names itself correctly without being retyped. Type a title and it wins
+everywhere, on every host. An IP address has no name to take, so there the stored
+title is used.
 
 ## Writing posts and pages
 
@@ -489,6 +504,7 @@ wrangler.toml
 Dockerfile, docker-compose.yml
 tests/e2e.mjs              end-to-end tests for both runtimes
 tests/panel.test.mjs       the panel itself, over HTTP
+tests/origin.test.mjs      the site-name-from-domain rule
 tests/template.test.mjs    the template engine, directly
 docs/panel-guide.md        every admin screen
 docs/theme-developer-guide.md  the manifest, tags, assets, settings

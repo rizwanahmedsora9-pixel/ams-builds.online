@@ -14,6 +14,7 @@ import { can } from '../lib/capabilities';
 import type { ThemeBundle } from '../lib/theme-manifest';
 import { clientIp, cspFor, nonceFor, rateCount, rateHit, sameOrigin, stripTags, type CspMode } from '../lib/security';
 import { landingScreenMarkup, parseLandingAudioIds, type LandingAudioTrack } from '../lib/landing';
+import { titleFor } from '../lib/origin';
 import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
 import { assetMime, cleanAssetPath, isRefusedAsset } from '../lib/theme-manifest';
 
@@ -345,6 +346,9 @@ site.get('*', async (c) => {
   const headers = { 'Cache-Control': hasSession ? 'private, no-store' : 'public, max-age=0, must-revalidate' };
 
   const settings = await getSettings(c.env);
+  // A title nobody has renamed follows the domain the page is served from, so the
+  // same install (or a second deploy of it) names itself correctly on every host.
+  settings.site_title = titleFor(settings.site_title, url);
   if (cacheable) {
     const hit = await c.env.KV.get(key);
     if (hit !== null) {
