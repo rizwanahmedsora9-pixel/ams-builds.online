@@ -476,7 +476,7 @@ ${pageHead({
   })}
   <p><button class="btn" type="submit">Save identity</button></p>
 </form>
-${raw(mediaPicker({ endpoint: `${base}/media/picker` }))}
+${raw(mediaPicker({ endpoint: `${base}/media/picker`, uploadUrl: `${base}/media/picker/upload`, csrf: c.var.csrf }))}
 ${raw(PICKER_JS)}
 ${raw(IDENTITY_JS)}`, '/identity');
 });

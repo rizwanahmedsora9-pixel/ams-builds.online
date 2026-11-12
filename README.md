@@ -202,7 +202,7 @@ autosaved and versioned, and no screen needs JavaScript to work.
 | Dashboard | Greeting, **Needs attention** checklist (each item links to the fix), site totals, recently edited content, latest comments, version, schema and theme |
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
 | Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
-| Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). The media picker in the editor uses the same library |
+| Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). **Browser-side WebP compression** before upload, every common image format (JPG/JFIF, PNG/APNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, JXL, ICO, SVG), and a two-tab picker in the editor: already-uploaded images, or upload straight from the device |
 | Pages | Same list pattern as Posts, plus a **Page order** panel that themes inherit; status/date filters and bulk publish/draft/delete; add new; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes** (store, installed, editor), **Templates**, **Menus**, **Widgets**, **Identity** |
@@ -229,6 +229,18 @@ HTML is the underlying markup. Switching back and forth keeps everything, and bo
 tabs support the formatting buttons, HTML blocks and YouTube embeds. Content that
 starts with a `<style>` or `<script>` block always opens in HTML so it is never
 mistaken for page markup. Without JavaScript the HTML textarea still saves normally.
+
+**Media** in the toolbar (and **Choose image** for the featured image) opens one
+dialog with two tabs. **Library** lists what is already uploaded, searchable by
+file name and alt text. **Upload from device** takes one or many files by click or
+drag and drop; raster images are resized to at most 2000 px and re-encoded as WebP
+in the browser at the quality you pick (Tight by default), and the dialog reports
+how much smaller each file got before it is sent. GIF animation and SVG are left
+as they are, WebP/AVIF are kept, and a converted file is only used when it is
+actually smaller. A format the browser itself cannot decode (HEIC on most desktop
+browsers, for example) is flagged in the dialog rather than uploaded as a picture
+most visitors could never see. Alt text is saved in the same step, so images
+reach the site described and light.
 
 Roles: **admin** has everything, **editor** manages all content, media, menus and
 comments, **author** only writes and edits their own posts and uploads. You cannot
@@ -429,7 +441,8 @@ src/
       attention.ts         "needs attention" checks for the dashboard
       revisions.ts         save snapshots, line diff, autosave retention, edit locks
       editor-views.ts      revision list, diff and editor banners (server-rendered)
-      media-picker.ts      the picker dialog and its client script
+      media-picker.ts      the picker dialog and its client script (library + upload tabs)
+      media-compress.ts    browser-side resize/WebP compression shared by every upload form
       assets/screens/editor.css   editor-only styles (History, banners, picker)
       assets.ts            route: GET /{admin}/assets/*.css (immutable, ETagged)
       bundles.ts           CSS bundle registry: tokens, app, screens + ETags
@@ -457,6 +470,7 @@ src/
     auth.ts                passwords, sessions, CSRF, roles
     security.ts            escaping, sanitizer, rate limiting
     files.ts               uploaded files: KV on Cloudflare, disk on Node
+    media-types.ts         accepted image/file formats and their stored Content-Type
     themes.ts, zip.ts      theme bundle reader and zip reader/writer
     menus.ts               page-to-menu sync
     render.ts              template engine, theme rendering

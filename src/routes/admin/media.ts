@@ -5,18 +5,15 @@ import { bumpCache } from '../../lib/config';
 import { mediaUrl } from '../../lib/content';
 import { slugify } from '../../lib/security';
 import { MAX_FILE_BYTES as MAX_BYTES, deleteFile, putFile } from '../../lib/files';
+import { ADMIN_ONLY_EXT, FILE_ACCEPT, FILE_TYPES, isImageMime } from '../../lib/media-types';
+import { MEDIA_COMPRESS_JS } from '../../admin/media-compress';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 
 const media = new Hono<AppEnv>();
 
 // The stored Content-Type comes from this table, never from the browser.
-const TYPES: Record<string, string> = {
-  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif',
-  ico: 'image/x-icon', svg: 'image/svg+xml', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm',
-  mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', txt: 'text/plain; charset=utf-8', csv: 'text/csv; charset=utf-8',
-  zip: 'application/zip', woff2: 'font/woff2',
-};
-const ADMIN_ONLY = new Set(['svg']); // can carry script; served sandboxed, but still limited to admins
+const TYPES = FILE_TYPES;
+const ADMIN_ONLY = ADMIN_ONLY_EXT;
 
 const fmtSize = (n: number) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 
@@ -108,7 +105,7 @@ media.get('/media', async (c) => {
   const bulkAction = `${base}/media/bulk${currentUrl.slice('/media'.length)}`;
   const rangeStart = total ? (state.p - 1) * per + 1 : 0;
   const rangeEnd = Math.min((state.p - 1) * per + rows.length, total);
-  const accept = Object.keys(TYPES).map((ext) => '.' + ext).join(',');
+  const accept = FILE_ACCEPT;
   const actions = (m: MediaListRow, url: string) => {
     const mine = can(c.var.user, 'manage_media') || m.uploaded_by === c.var.user.id;
     return html`<button type="button" class="btn ghost small" data-copy="${url}">Copy URL</button>
@@ -129,7 +126,15 @@ media.get('/media', async (c) => {
         ${csrfField(c)}
         <label for="files" style="margin-top:0">Choose files to upload</label>
         <input type="file" id="files" name="files" multiple required accept="${accept}">
-        <p class="hint">Images, PDF, audio, video, fonts. Up to ${fmtSize(MAX_BYTES)} per file.</p>
+        <label for="media-quality">Image quality</label>
+        <select id="media-quality" name="quality" data-quality>
+          <option value="0.7" selected>Tight — smallest WebP (recommended)</option>
+          <option value="0.8">Balanced</option>
+          <option value="0.9">High</option>
+          <option value="0">Keep originals, no conversion</option>
+        </select>
+        <p class="hint">JPG, PNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, SVG and more, plus PDF, audio, video and fonts. Raster images are compressed to WebP in your browser before upload. Up to ${fmtSize(MAX_BYTES)} per file.</p>
+        <p class="hint" data-compress-status role="status" aria-live="polite"></p>
         <button class="btn" type="submit">Upload</button>
       </form>
     </details>
@@ -205,6 +210,7 @@ media.get('/media', async (c) => {
       ${total > state.p * per ? html`<a class="btn ghost small" href="${mediaListHref(state, { p: state.p + 1 })}">Older &rarr;</a>` : ''}
     </div>
   </div>
+  ${raw(MEDIA_COMPRESS_JS)}
   ${raw(`<script>
 (function(){
   var upload=document.getElementById('upload');if(location.hash==='#upload'&&upload)upload.open=true;
@@ -216,6 +222,32 @@ media.get('/media', async (c) => {
     (navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy URL'},1200)},function(){prompt('Copy this URL',u)})})});
   document.querySelectorAll('[data-confirm]').forEach(function(f){f.addEventListener('submit',function(e){if(!confirm('Delete this file permanently?'))e.preventDefault()})});
   var form=document.getElementById('media-bulk-form');if(form)form.addEventListener('submit',function(e){if(!confirm('Delete the selected media files permanently? This cannot be undone.'))e.preventDefault()});
+  // Compress images in the browser before the normal form submit reaches the
+  // server, so the stored file (and every visitor's download) is the small WebP.
+  var upForm=document.querySelector('.media-upload-form');
+  if(upForm&&window.amsCompressImages){
+    var upInput=upForm.querySelector('input[type=file]');
+    var upQuality=upForm.querySelector('[data-quality]');
+    var upNote=upForm.querySelector('[data-compress-status]');
+    if(upInput)upInput.addEventListener('change',function(){
+      var originals=[].slice.call(upInput.files||[]);
+      if(!originals.length){if(upNote)upNote.textContent='';return}
+      var value=upQuality?parseFloat(upQuality.value):0.7;
+      if(isNaN(value))value=0.7;
+      if(upNote)upNote.textContent=value>0?'Optimising '+originals.length+' image'+(originals.length===1?'':'s')+' to WebP…':'Preparing files…';
+      window.amsCompressImages(originals,value>0?{quality:value}:{convert:false}).then(function(results){
+        var dt=null;try{dt=new DataTransfer()}catch(err){}
+        var saved=0,failed=0;
+        results.forEach(function(r){
+          saved+=Math.max(0,(r.original.size||0)-(r.file.size||0));
+          if(r.failed)failed++;
+          if(dt)dt.items.add(r.file);
+        });
+        if(dt){try{upInput.files=dt.files}catch(err){}}
+        if(upNote)upNote.textContent=(saved&&window.amsFmtSize?window.amsFmtSize(saved)+' saved. ':'')+(failed?failed+' could not be converted in this browser and will upload as-is.':'Ready to upload.');
+      },function(){if(upNote)upNote.textContent='Ready to upload.'});
+    });
+  }
 })();
 </script>`)}
 </section>`, '/media');
@@ -246,28 +278,76 @@ media.get('/media/picker', async (c) => {
   );
 });
 
-/** Upload from inside the picker, answering JSON so the dialog can refresh itself. */
-media.post('/media/picker/upload', async (c) => {
-  const file = c.var.form.get('file');
-  if (typeof file === 'string' || !file || !file.size) return c.json({ ok: false, error: 'Choose a file first.' }, 400);
-  const alt = String(c.var.form.get('alt') ?? '').trim().slice(0, 200);
+type UploadedItem = { id: number; url: string; filename: string; alt: string; mime: string; size: number };
+type UploadResult = { item: UploadedItem } | { error: string };
+
+/**
+ * One place that stores an uploaded file and its row: extension decides the
+ * Content-Type (never the browser), SVG stays admin-only, and the size limit is
+ * the same on every platform. Shared by the library and the picker so a new
+ * image format only has to be added to src/lib/media-types.ts.
+ */
+async function storeUpload(
+  c: Ctx, file: File, alt: string, now: Date, folder: string, imagesOnly = false,
+): Promise<UploadResult> {
   const dot = file.name.lastIndexOf('.');
   const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : '';
   const mime = TYPES[ext];
-  if (!mime) return c.json({ ok: false, error: 'That file type is not allowed.' }, 415);
-  if (file.size > MAX_BYTES) return c.json({ ok: false, error: 'That file is too large.' }, 413);
-  if (ADMIN_ONLY.has(ext) && !can(c.var.user, 'manage_settings')) return c.json({ ok: false, error: 'Only admins can upload that type.' }, 403);
-  const now = new Date();
-  const folder = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  if (!mime) return { error: 'that file type is not allowed' };
+  if (imagesOnly && !isImageMime(mime)) return { error: 'not an image' };
+  if (file.size > MAX_BYTES) return { error: `larger than ${fmtSize(MAX_BYTES)}` };
+  if (ADMIN_ONLY.has(ext) && !can(c.var.user, 'manage_settings')) return { error: 'only admins can upload SVG' };
   const filename = `${slugify(file.name.slice(0, dot)) || 'file'}.${ext}`;
   const key = `${folder}/${randomToken(6)}-${filename}`;
   await putFile(c.env, key, await file.arrayBuffer(), mime);
+  const stored = mime.split(';')[0];
   const res = await c.env.DB.prepare(
     'INSERT INTO media (site_id,r2_key,filename,mime,size,alt,uploaded_by,created_at) VALUES (1,?,?,?,?,?,?,?)',
-  ).bind(key, filename, mime.split(';')[0], file.size, alt, c.var.user.id, now.toISOString()).run();
+  ).bind(key, filename, stored, file.size, alt, c.var.user.id, now.toISOString()).run();
+  return { item: { id: Number(res.meta.last_row_id), url: mediaUrl(key), filename, alt, mime: stored, size: file.size } };
+}
+
+const uploadFiles = (c: Ctx): File[] => {
+  const list = c.var.form.getAll('files').filter((f): f is File => typeof f !== 'string' && f.size > 0);
+  const single = c.var.form.get('file');
+  if (list.length) return list;
+  return single && typeof single !== 'string' && single.size > 0 ? [single] : [];
+};
+
+const uploadFolder = (now: Date): string => `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+
+/**
+ * Upload from inside the picker, answering JSON so the dialog can refresh
+ * itself. Takes one or many files (`files`, or a legacy single `file`), applies
+ * the same alt text to the batch, and reports anything it had to skip.
+ */
+media.post('/media/picker/upload', async (c) => {
+  const files = uploadFiles(c);
+  if (!files.length) return c.json({ ok: false, error: 'Choose a file first.' }, 400);
+  if (files.length > 20) return c.json({ ok: false, error: 'Upload up to 20 images at a time.' }, 400);
+  const alt = String(c.var.form.get('alt') ?? '').trim().slice(0, 200);
+  const now = new Date();
+  const folder = uploadFolder(now);
+  const items: UploadedItem[] = [];
+  const skipped: string[] = [];
+  for (const file of files) {
+    // One bad file (storage full, a truncated upload) must not sink the batch.
+    try {
+      const result = await storeUpload(c, file, alt, now, folder, true);
+      if ('error' in result) skipped.push(`${file.name} (${result.error})`);
+      else items.push(result.item);
+    } catch {
+      skipped.push(`${file.name} (could not be saved)`);
+    }
+  }
+  if (!items.length) {
+    return c.json({ ok: false, error: `Could not upload ${skipped.join(', ')}.`, skipped }, 415, { 'Cache-Control': 'no-store' });
+  }
   return c.json({
     ok: true,
-    item: { id: Number(res.meta.last_row_id), url: mediaUrl(key), filename, alt, mime: mime.split(';')[0] },
+    item: items[0],
+    items,
+    ...(skipped.length ? { skipped } : {}),
   }, 200, { 'Cache-Control': 'no-store' });
 });
 
@@ -283,29 +363,22 @@ media.post('/media/:id{[0-9]+}/alt', async (c) => {
 });
 
 media.post('/media/upload', async (c) => {
-  const files = c.var.form.getAll('files').filter((f): f is File => typeof f !== 'string' && f.size > 0);
+  const files = uploadFiles(c);
   if (!files.length) return go(c, '/media', { err: 'Choose at least one file.' });
   const now = new Date();
-  const folder = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const folder = uploadFolder(now);
   const skipped: string[] = [];
   let saved = 0;
   for (const file of files.slice(0, 20)) {
-    const dot = file.name.lastIndexOf('.');
-    const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : '';
-    const mime = TYPES[ext];
-    if (!mime || file.size > MAX_BYTES || (ADMIN_ONLY.has(ext) && !can(c.var.user, 'manage_settings'))) {
-      skipped.push(file.name);
-      continue;
+    try {
+      const result = await storeUpload(c, file, '', now, folder);
+      if ('error' in result) skipped.push(`${file.name} (${result.error})`);
+      else saved++;
+    } catch {
+      skipped.push(`${file.name} (could not be saved)`);
     }
-    const stem = slugify(file.name.slice(0, dot)) || 'file';
-    const filename = `${stem}.${ext}`;
-    const key = `${folder}/${randomToken(6)}-${filename}`;
-    await putFile(c.env, key, await file.arrayBuffer(), mime);
-    await c.env.DB.prepare('INSERT INTO media (site_id,r2_key,filename,mime,size,uploaded_by,created_at) VALUES (1,?,?,?,?,?,?)')
-      .bind(key, filename, mime.split(';')[0], file.size, c.var.user.id, now.toISOString()).run();
-    saved++;
   }
-  if (skipped.length) return go(c, '/media', { err: `${saved} uploaded. Skipped (type not allowed or too large): ${skipped.join(', ').slice(0, 300)}` });
+  if (skipped.length) return go(c, '/media', { err: `${saved} uploaded. Skipped: ${skipped.join(', ').slice(0, 300)}` });
   return go(c, '/media', { ok: `${saved} file${saved === 1 ? '' : 's'} uploaded.` });
 });
 
