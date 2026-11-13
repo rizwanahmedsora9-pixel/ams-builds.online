@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import type { AppEnv, Ctx } from '../../types';
 import { pageHead, card, notice } from '../../admin/components';
-import { icon } from '../../admin/icons';
+import { icon, PAGE_ICONS, pageIcons } from '../../admin/icons';
 import { csrfField, go, html, layout, raw } from '../../lib/ui';
+import { can } from '../../lib/capabilities';
+import { getSettings, setSettings } from '../../lib/config';
 import { DENSITIES, SCHEMES, parsePrefs, readPrefs, writePrefs, type Density, type Scheme } from '../../lib/prefs';
 
 /**
@@ -23,9 +25,10 @@ const DENSITY_INFO: { value: Density; label: string; detail: string }[] = [
   { value: 'compact', label: 'Compact', detail: 'Smaller type and tighter rows, for long editing sessions.' },
 ];
 
-preferences.get('/preferences', (c) => {
+preferences.get('/preferences', async (c) => {
   const prefs = readPrefs(c);
   const base = c.var.base;
+  const icons = pageIcons(await getSettings(c.env));
   const option = (name: string, value: string, checked: boolean, label: string, detail: string, iconName?: string) => html`
   <label class="pref-option${checked ? ' is-on' : ''}">
     <input type="radio" name="${name}" value="${value}"${checked ? raw(' checked') : raw('')}>
@@ -63,6 +66,11 @@ ${pageHead({
   </div>
   <div class="btn-row" style="margin-bottom:1.5rem"><button class="btn" type="submit">Save preferences</button></div>
 </form>
+${can(c.var.user, 'manage_settings') ? html`<form method="post" action="${base}/preferences/page-icons" class="card" id="icon-settings">
+  ${csrfField(c)}<h2>Icon Settings → Pages</h2><p class="hint">Choose the icons used in the panel for pages with children and other pages.</p>
+  <label for="parent-icon">Parent page / folder icon</label><select id="parent-icon" name="parent_icon">${PAGE_ICONS.map((name) => html`<option value="${name}"${icons.parent === name ? raw(' selected') : ''}>${name}</option>`)}</select>
+  <label for="child-icon">Child page / document icon</label><select id="child-icon" name="child_icon">${PAGE_ICONS.map((name) => html`<option value="${name}"${icons.child === name ? raw(' selected') : ''}>${name}</option>`)}</select>
+  <p><button class="btn" type="submit">Save page icons</button></p></form>` : ''}
 ${card({
       title: 'Account',
       body: html`<p class="muted" style="margin-top:0">Signed in as <b>${c.var.user.username}</b> (${c.var.user.role}). Change your email or password on the profile page.</p>
@@ -79,6 +87,15 @@ preferences.post('/preferences', (c) => {
   });
   writePrefs(c, prefs);
   return go(c, '/preferences', { ok: 'Preferences saved for this browser.' });
+});
+
+preferences.post('/preferences/page-icons', async (c) => {
+  if (!can(c.var.user, 'manage_settings')) return c.text('Forbidden', 403);
+  const parent = String(c.var.form.get('parent_icon') || '');
+  const child = String(c.var.form.get('child_icon') || '');
+  if (!PAGE_ICONS.includes(parent as typeof PAGE_ICONS[number]) || !PAGE_ICONS.includes(child as typeof PAGE_ICONS[number])) return go(c, '/preferences#icon-settings', { err: 'Choose valid page icons.' });
+  await setSettings(c.env, { page_parent_icon: parent, page_child_icon: child });
+  return go(c, '/preferences', { ok: 'Page icons saved.' });
 });
 
 export default preferences;

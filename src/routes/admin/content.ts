@@ -9,7 +9,7 @@ import { isInPrimaryMenu, removeUrlFromMenus, syncPageMenu } from '../../lib/men
 import {
   bulkBar, card, emptyRow, listToolbar, notice, pageHead, pagination, table, tabs, LIST_JS,
 } from '../../admin/components';
-import { icon, PAGE_ICONS } from '../../admin/icons';
+import { icon, PAGE_ICONS, pageIcons } from '../../admin/icons';
 import { PICKER_JS, mediaPicker } from '../../admin/media-picker';
 import {
   claimLock, countRevisions, deleteRevisions, getRevision, latestAutosave, listRevisions,
@@ -423,7 +423,7 @@ const PAGE_PARENT_JS = `<script>
 </script>`;
 
 /** Server-rendered, keyboard-friendly tree for the Pages screen. */
-function pageTreeMarkup(pages: AdminPageRow[], base: string): Raw {
+function pageTreeMarkup(pages: AdminPageRow[], base: string, icons: { parent: string; child: string }): Raw {
   if (!pages.length) return html`<p class="muted" style="margin:0">No pages yet. Create a page to start the tree.</p>`;
   const byId = new Map(pages.map((page) => [page.id, page]));
   const byParent = new Map<number | null, AdminPageRow[]>();
@@ -445,7 +445,7 @@ function pageTreeMarkup(pages: AdminPageRow[], base: string): Raw {
         const parent = page.parent_id == null ? null : byId.get(page.parent_id) ?? null;
         return html`<li class="page-tree__node">
           <div class="page-tree__row">
-            <a href="${base}/pages/${page.id}">${icon(PAGE_ICONS.includes(page.icon as typeof PAGE_ICONS[number]) ? page.icon! : 'file', { cls: 'ico--sm' })} ${page.title}</a>
+            <a href="${base}/pages/${page.id}">${icon(PAGE_ICONS.includes(page.icon as typeof PAGE_ICONS[number]) ? page.icon! : (byParent.get(page.id)?.length ? icons.parent : icons.child), { cls: 'ico--sm' })} ${page.title}</a>
             <span class="badge ${page.status}">${page.status}</span>
             ${parent ? html`<span class="page-tree__parent">Parent: ${parent.title}</span>` : ''}
           </div>
@@ -456,7 +456,7 @@ function pageTreeMarkup(pages: AdminPageRow[], base: string): Raw {
   };
   const tree = render(null);
   const unvisited = pages.filter((page) => !visited.has(page.id)).sort(comparePageOrder);
-  return html`${tree}${unvisited.length ? html`<p class="hint">A broken or cyclic parent link was found. These pages are shown at the root so they remain editable.</p><ul class="page-tree__list">${unvisited.map((page) => html`<li class="page-tree__node"><div class="page-tree__row"><a href="${base}/pages/${page.id}">${icon(PAGE_ICONS.includes(page.icon as typeof PAGE_ICONS[number]) ? page.icon! : 'file', { cls: 'ico--sm' })} ${page.title}</a><span class="badge ${page.status}">${page.status}</span></div></li>`)}</ul>` : ''}`;
+  return html`${tree}${unvisited.length ? html`<p class="hint">A broken or cyclic parent link was found. These pages are shown at the root so they remain editable.</p><ul class="page-tree__list">${unvisited.map((page) => html`<li class="page-tree__node"><div class="page-tree__row"><a href="${base}/pages/${page.id}">${icon(PAGE_ICONS.includes(page.icon as typeof PAGE_ICONS[number]) ? page.icon! : (byParent.get(page.id)?.length ? icons.parent : icons.child), { cls: 'ico--sm' })} ${page.title}</a><span class="badge ${page.status}">${page.status}</span></div></li>`)}</ul>` : ''}`;
 }
 
 function pageListState(c: Ctx): PageListState {
@@ -550,7 +550,7 @@ async function pagesList(c: Ctx): Promise<Response> {
     `SELECT id, title, slug, status, ${hasIconColumn ? 'icon' : "'' AS icon"}, ${hasParentColumn ? 'parent_id' : 'NULL AS parent_id'}, COALESCE(menu_order,0) AS menu_order
      FROM content WHERE site_id=1 AND type='page' ORDER BY COALESCE(menu_order,0) ASC, title COLLATE NOCASE ASC LIMIT 500`,
   ).all<AdminPageRow>().catch(() => ({ results: [] as AdminPageRow[] }))).results;
-  const hierarchyTree = pageTreeMarkup(allPages, base);
+  const hierarchyTree = pageTreeMarkup(allPages, base, pageIcons(await getSettings(c.env)));
   const currentUrl = pageListHref(state);
   const bulkAction = `${base}/pages/bulk${currentUrl.slice('/pages'.length)}`;
   const monthOptions = months.results.filter((row) => /^\d{4}-(0[1-9]|1[0-2])$/.test(row.month));
@@ -988,6 +988,18 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
 </div>`;
   }
 
+  let pageFields = html``;
+  if (type === 'page') {
+    const featured = row?.featured_media_id ? await c.env.DB.prepare("SELECT r2_key, alt FROM media WHERE id=? AND site_id=1 AND mime LIKE 'image/%'").bind(row.featured_media_id).first<{ r2_key: string; alt: string }>() : null;
+    pageFields = html`<div class="card"><h2>Page card</h2>
+      <label for="excerpt">Short description</label><textarea id="excerpt" name="excerpt" maxlength="500">${row?.excerpt ?? ''}</textarea>
+      <p class="hint">Optional description shown on the parent page.</p>
+      <label for="featured-id">Feature image</label><input type="hidden" id="featured-id" name="featured_media_id" value="${row?.featured_media_id ?? ''}">
+      <div class="featured-picker"><span class="featured-picker__preview" data-featured-preview>${featured ? html`<img src="${mediaUrl(featured.r2_key)}" alt="${featured.alt || ''}">` : html`<span class="muted">No image chosen</span>`}</span>
+      <span class="row"><button class="btn ghost small" type="button" data-open-picker="featured">Choose image</button><button class="btn ghost small" type="button" data-clear-featured${featured ? '' : raw(' hidden')}>Remove</button></span></div>
+      <p class="hint">Optional. Choose an image from the library or upload one.</p></div>`;
+  }
+
   // Editing state: who else is here, and did a crashed tab leave work behind?
   let lockHolder: { username: string } | null = null;
   let autosave: RevisionRow | null = null;
@@ -1138,6 +1150,7 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
     ${can(c.var.user, 'manage_settings') ? html`<p class="hint">Admin HTML is not sanitized when you save.</p>` : html`<p class="hint">Unsafe HTML is removed when you save. YouTube embeds added with the YouTube button are allowed.</p>`}
   </div>
   ${postFields}
+  ${pageFields}
   <div class="card">
     <h2>SEO</h2>
     <label for="seo_title">SEO title</label>
@@ -1632,8 +1645,8 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   }
 
   const featuredRaw = Number(str('featured_media_id')) || 0;
-  const featured = type === 'post' && featuredRaw && (await db.prepare('SELECT 1 AS x FROM media WHERE id=? AND site_id=1').bind(featuredRaw).first()) ? featuredRaw : null;
-  const excerpt = type === 'post' ? str('excerpt').trim().slice(0, 500) : '';
+  const featured = f.has('featured_media_id') ? (featuredRaw && (await db.prepare("SELECT 1 AS x FROM media WHERE id=? AND site_id=1 AND mime LIKE 'image/%'").bind(featuredRaw).first()) ? featuredRaw : null) : (existing?.featured_media_id ?? null);
+  const excerpt = f.has('excerpt') ? str('excerpt').trim().slice(0, 500) : (existing?.excerpt ?? '');
   const seoTitle = str('seo_title').trim().slice(0, 200);
   const seoDesc = str('seo_description').trim().slice(0, 320);
   // A per-page template: only a template the active theme really has, else ''.

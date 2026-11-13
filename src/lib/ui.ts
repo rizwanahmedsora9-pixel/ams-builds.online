@@ -2,7 +2,7 @@ import type { Ctx } from '../types';
 import { ADMIN_CSS, assetLinks } from '../admin/bundles';
 import { APP_JS } from '../admin/components';
 import { titleFor } from './origin';
-import { icon, iconSprite } from '../admin/icons';
+import { icon, iconSprite, pageIcons, PAGE_ICONS } from '../admin/icons';
 import { commandsFor } from '../admin/search';
 import { PALETTE_JS, paletteConfig } from '../admin/palette';
 import { can } from './auth';
@@ -10,6 +10,8 @@ import { pendingComments } from './comments';
 import { getSettings } from './config';
 import { readPrefs } from './prefs';
 import { esc } from './security';
+import { hasColumn } from './schema';
+import { orderedPageTree, type PageHierarchyRow } from './page-hierarchy';
 
 /** Marks a string as already-safe HTML. Everything else interpolated into html`` is escaped. */
 export class Raw {
@@ -65,7 +67,7 @@ export const flash = (c: Ctx): Raw => {
 /* ------------------------------------------------------------- navigation */
 
 /** One sidebar entry: a top-level page with an optional list of sub-pages. */
-type NavChild = { path: string; label: string; show?: boolean };
+type NavChild = { path: string; label: string; show?: boolean; icon?: string; depth?: number };
 type NavGroup = { key: string; path: string; label: string; icon: string; show: boolean; badge?: number; children?: NavChild[] };
 
 const ADMIN_SECTIONS: Record<string, string> = {
@@ -188,7 +190,7 @@ function renderRail(c: Ctx, groups: NavGroup[], activeKey: string, path: string,
 <a class="rail__item" href="${base + g.path}"${activeKey === g.key ? raw(' aria-current="page"') : raw('')} title="${g.label}">
   ${icon(g.icon, { cls: 'rail__ico' })}<span class="rail__label">${g.label}</span>${g.badge ? html`<span class="rail__bubble" title="${g.badge} pending">${g.badge}</span>` : ''}
 </a>
-${open ? html`<div class="rail__sub">${children.map((ch) => html`<a href="${base + ch.path}"${isChildActive(ch.path) ? raw(' aria-current="page"') : raw('')}>${ch.label}</a>`)}</div>` : ''}`;
+${open ? html`<div class="rail__sub">${children.map((ch) => html`<a href="${base + ch.path}"${ch.depth != null ? raw(` style="padding-left:${1 + Math.min(ch.depth, 12) * .8}rem"`) : ''}${isChildActive(ch.path) ? raw(' aria-current="page"') : raw('')}>${ch.icon ? icon(ch.icon, { cls: 'ico--sm' }) : ''}${ch.label}</a>`)}</div>` : ''}`;
   });
   return html`<nav class="rail" id="admin-rail" aria-label="Admin sections">
   <div class="rail__section">${items}</div>
@@ -318,7 +320,16 @@ export async function layout(c: Ctx, title: string, body: Raw, _active = '', opt
   const groups = navGroups(user, pending);
   let siteTitle = '';
   try {
-    siteTitle = titleFor((await getSettings(c.env)).site_title || '', new URL(c.req.url));
+    const settings = await getSettings(c.env);
+    siteTitle = titleFor(settings.site_title || '', new URL(c.req.url));
+    if (can(user, 'manage_pages') && await hasColumn(c.env, 'content', 'parent_id')) {
+      const hasIcon = await hasColumn(c.env, 'content', 'icon');
+      const pages = (await c.env.DB.prepare(`SELECT id, title, slug, parent_id, status, ${hasIcon ? 'icon' : "'' AS icon"}, COALESCE(menu_order,0) AS menu_order FROM content WHERE site_id=1 AND type='page' ORDER BY menu_order, title LIMIT 500`).all<PageHierarchyRow>()).results;
+      const parents = new Set(pages.map(p => p.parent_id).filter(id => id != null));
+      const icons = pageIcons(settings);
+      const group = groups.find(g => g.key === 'pages');
+      if (group) group.children = [...(group.children || []), ...orderedPageTree(pages).map(({ page, depth }) => ({ path: '/pages/' + page.id, label: page.title || '(untitled)', depth, icon: PAGE_ICONS.includes(page.icon as typeof PAGE_ICONS[number]) ? page.icon : (parents.has(page.id) ? icons.parent : icons.child) }))];
+    }
   } catch {
     /* settings not readable yet */
   }

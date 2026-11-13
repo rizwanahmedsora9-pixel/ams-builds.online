@@ -4,6 +4,7 @@ import type { Settings } from './config';
 import { commentToken, commentsEnabled, approvedComments, renderCommentsHtml, type CommentRow } from './comments';
 import { esc, safeUrl } from './security';
 import { listPages, type ContentView } from './content';
+import { publicPageIcon } from '../admin/icons';
 import { type PublicPageHierarchy } from './page-hierarchy';
 import { defaultTheme } from '../themes/ams1';
 import type { ThemeBundle } from './theme-manifest';
@@ -42,11 +43,23 @@ const PAGE_HIERARCHY_CSS = `
 .page-breadcrumbs ol{display:flex;flex-wrap:wrap;gap:.4rem;list-style:none;margin:0;padding:0}
 .page-breadcrumbs li+li:before{content:"/";margin-right:.4rem;opacity:.65}
 .page-breadcrumbs a{color:inherit;text-underline-offset:.15em}
-.page-children{margin:2rem 0 0;padding:clamp(1rem,3vw,1.5rem);border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:1rem}
+.page-children{margin:2.5rem 0 0}
 .page-children h2{margin:0 0 1rem;font-size:1.3em}
-.page-children ul{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;list-style:none;margin:0;padding:0}
-.page-children a{display:flex;min-height:3.25rem;align-items:center;justify-content:space-between;gap:.75rem;padding:.75rem 1rem;border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:.75rem;color:inherit;text-decoration:none}
-.page-children a:hover,.page-children a:focus-visible{border-color:currentColor;text-decoration:underline;text-underline-offset:.15em}
+.page-children ul{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;list-style:none;margin:0;padding:0}
+.page-children li{min-width:0}
+.page-children a{display:flex;flex-direction:column;height:100%;overflow:hidden;border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:.65rem;color:inherit;text-decoration:none;box-shadow:0 2px 8px #0000000a;transition:box-shadow .15s,border-color .15s}
+.page-children a:hover,.page-children a:focus-visible{border-color:currentColor;box-shadow:0 5px 16px #00000018}
+.page-children__image,.page-children__fallback{display:block;width:100%;aspect-ratio:16/9}
+.page-children__image{object-fit:cover}
+.page-children__image[hidden]{display:none}
+.page-children__fallback{display:grid;place-items:center;background:color-mix(in srgb,currentColor 7%,transparent)}
+.page-children__fallback[hidden]{display:none}
+.page-children__fallback svg{width:2rem;height:2rem;opacity:.65}
+.page-children__body{padding:1rem;display:grid;gap:.4rem}
+.page-children__title{font-size:1.08em;font-weight:700;line-height:1.3}
+.page-children__description{font-size:.9em;line-height:1.5;opacity:.8}
+@media(max-width:800px){.page-children ul{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:480px){.page-children ul{grid-template-columns:1fr}}
 .page-posts{margin:2rem 0 0}
 .page-posts h2{margin:0 0 1rem;font-size:1.35em}
 .page-posts__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1rem;list-style:none;margin:0;padding:0}
@@ -86,7 +99,7 @@ function pageExtrasMarkup(
   }
   const afterParts: string[] = [];
   if (current && children.length) {
-    afterParts.push(`<nav class="page-children" aria-labelledby="page-children-heading"><h2 id="page-children-heading">Explore ${esc(current.title)}</h2><ul>${children.map((item) => `<li><a href="${safeHref(item.url)}"><span>${esc(item.title)}</span><span aria-hidden="true">&rarr;</span></a></li>`).join('')}</ul></nav>`);
+    afterParts.push(`<nav class="page-children" aria-labelledby="page-children-heading"><h2 id="page-children-heading">Explore ${esc(current.title)}</h2><ul>${children.map((item) => `<li><a href="${safeHref(item.url)}">${item.image ? `<img class="page-children__image" src="${esc(safeUrl(item.image))}" alt="" loading="lazy">` : ''}<span class="page-children__fallback"${item.image ? ' hidden' : ''}>${publicPageIcon(item.icon)}</span><span class="page-children__body"><span class="page-children__title">${esc(item.title)}</span>${item.excerpt ? `<span class="page-children__description">${esc(item.excerpt)}</span>` : ''}</span></a></li>`).join('')}</ul></nav>`);
   }
   if (posts.length) {
     const heading = pageTitle ? `Posts in ${esc(pageTitle)}` : 'Posts on this page';
@@ -96,6 +109,8 @@ function pageExtrasMarkup(
     }).join('');
     afterParts.push(`<section class="page-posts wrap" aria-labelledby="page-posts-heading"><h2 id="page-posts-heading">${heading}</h2><ul class="page-posts__grid">${cards}</ul></section>`);
   }
+  const fallbackScript = children.some(item => item.image) ? `<script nonce="${esc(nonce)}">document.querySelectorAll('.page-children__image').forEach(function(img){function fallback(){img.hidden=true;img.nextElementSibling.hidden=false}img.addEventListener('error',fallback);if(img.complete&&!img.naturalWidth)fallback()})</script>` : '';
+  if (fallbackScript) afterParts.push(fallbackScript);
   const styles = `<style nonce="${esc(nonce)}">${PAGE_HIERARCHY_CSS}</style>`;
   return { before, after: afterParts.join('\n'), styles };
 }

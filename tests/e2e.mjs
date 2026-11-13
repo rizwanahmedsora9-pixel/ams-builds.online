@@ -770,6 +770,35 @@ test('12a1. pages: parent/child hierarchy, hidden header children, and public br
   const bollywoodId = await createPage('Bollywood', 'bollywood-directory', moviesId);
   const azId = await createPage('Browse A to Z', 'movies-a-to-z', hollywoodId);
 
+  const upload = new FormData();
+  upload.set('_csrf', await csrf());
+  upload.append('files', new File([PNG], 'card-image.png', { type: 'image/png' }));
+  await request(`${admin}/media/upload`, { method: 'POST', body: upload });
+  const imageList = (await get(`${admin}/media?q=card-image`)).text;
+  const imageId = Number(imageList.match(/media\/(\d+)\/delete/)[1]);
+  const imageUrl = imageList.match(/data-copy="([^"]+)"/)[1];
+  const saveHollywood = (featured) => adminPost('/pages/save', { id: hollywoodId, title: 'Hollywood', slug: 'hollywood-directory', body: '<p>Hollywood section.</p>', status: 'published', parent_id: moviesId, excerpt: 'Explore cinema', featured_media_id: featured });
+  await saveHollywood(state.mediaId);
+  let hub = (await anon('/movies-directory')).text;
+  assert.ok(hub.includes(`src="${state.mediaUrl}"`));
+  assert.match(hub, /Explore cinema/);
+  assert.match(hub, /page-children__fallback/);
+  assert.match(hub, /Movies section/);
+  assert.match((await get(`${admin}/pages/${hollywoodId}`)).text, /data-featured-preview[^]*team-photo/);
+  await saveHollywood(imageId);
+  hub = (await anon('/movies-directory')).text;
+  assert.ok(hub.includes(`src="${imageUrl}"`), 'replacement appears on parent');
+  await saveHollywood('');
+  hub = (await anon('/movies-directory')).text;
+  assert.ok(!hub.includes(`src="${imageUrl}"`), 'removed image no longer appears');
+  assert.match(hub, /page-children__fallback/);
+  await adminPost('/preferences/page-icons', { parent_icon: 'grid', child_icon: 'globe' });
+  const iconPanel = (await get(`${admin}/pages`)).text;
+  assert.match(iconPanel, /href="#i-grid"[^]*Movies/);
+  assert.match(iconPanel, /href="#i-globe"[^]*Bollywood/);
+  assert.match(iconPanel, /class="rail__sub"[^]*href="#i-grid"[^]*Movies/);
+  await adminPost('/preferences/page-icons', { parent_icon: 'folder', child_icon: 'file' });
+
   const panelPages = await get(`${admin}/pages`);
   assert.match(panelPages.text, /Page hierarchy/);
   assert.match(panelPages.text, /Parent: Movies/);
