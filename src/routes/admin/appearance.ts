@@ -284,6 +284,12 @@ appearance.post('/appearance', async (c) => {
     if (f.has(field.key) && !tokenSettings[field.key]) clears.push(field.key);
   }
 
+  // Clearing a token must clear it: an empty value would still be a row, and
+  // `readTokens` reads any non-empty string, so a deleted brand colour would
+  // stay on the site forever.
+  if (clears.length) {
+    await c.env.DB.batch(clears.map((key) => c.env.DB.prepare('DELETE FROM settings WHERE site_id=1 AND key=?').bind(key)));
+  }
   await setSettings(c.env, {
     ...tokenSettings,
     custom_css: text('custom_css', 100000),
@@ -291,9 +297,6 @@ appearance.post('/appearance', async (c) => {
     custom_footer: text('custom_footer', 50000),
     custom_js: text('custom_js', 50000),
   });
-  if (clears.length) {
-    await c.env.DB.batch(clears.map((key) => c.env.DB.prepare("DELETE FROM settings WHERE site_id=1 AND key=? AND value=''").bind(key)));
-  }
   if (themeRows.length) {
     try {
       await c.env.DB.batch(themeRows.map((r) => c.env.DB.prepare(

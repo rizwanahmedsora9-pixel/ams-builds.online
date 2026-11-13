@@ -118,8 +118,17 @@ empty leftovers, so the stored markup is as clean as the writing.
   layer completely; turning the play button off keeps the welcome copy and **Enter site** but drops
   the player, the equalizer, the mute control and the audio download. Both answers default to Yes and
   are saved together with **Save landing options**.
+  The screen wears the active theme: its background, text, hairline, corner radius and body font are
+  read from the theme's own stylesheet (through its `var(…)` chains), and any colour set under
+  **Appearance → Colours** overrides them, so a brand colour reaches the welcome screen too. A theme
+  with a light and a dark palette gets both, switched the way its own stylesheet switches (the
+  browser's `prefers-color-scheme`, the site's *Colour scheme* setting, or a theme's own
+  light/dark toggle); a dark theme gets a dark card with light copy and a light theme the reverse.
+  Switching themes changes the screen with the rest of the site — there is nothing to restyle.
   Under **Settings → Landing soundtrack**, upload/select up to 20 audio tracks; the fixed screen has a
-  centered round play/pause icon button, equalizer, mute control and Enter button. The first track is
+  centered round play/pause icon button, equalizer, mute control and Enter button. **Enter site** has
+  its own row under the player, centred on the card's axis, so it stays aligned whether or not the
+  mute control and footnote are there. The first track is
   preloaded while the screen is up, so pressing Play starts sound immediately. Tracks play in order and
   loop after Play is pressed. Enter stops playback and reveals the regular home page. The welcome layer stays
   dismissed in that tab until the tab is closed; **Preview** on the Landing page screen (or the link in

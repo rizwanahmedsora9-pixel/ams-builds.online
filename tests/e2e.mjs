@@ -688,6 +688,84 @@ test('10e. landing page options: the screen and its play button have their own s
   log('landing page options: on/off and play-button switches save, hide the whole screen or just the player, preview unaffected');
 });
 
+test('10f. the landing screen wears the active theme, and Enter site sits on the card axis', async () => {
+  // The screen's palette is not its own: it is read from the active theme's
+  // stylesheet (through its `var(--token, fallback)` chains) and from the site's
+  // design tokens, so a welcome screen never looks like a foreign site.
+  const themed = async () => {
+    const html = (await anon('/')).text;
+    const css = html.match(/<style[^>]*>(#ams-landing-screen\{[^}]*\}[^<]*)<\/style>/)?.[1] ?? '';
+    // The first block is the base (light) palette; a second one, when the theme
+    // has a dark half, follows inside the media query.
+    const base = css.slice(0, css.indexOf('}') + 1);
+    const vars = Object.fromEntries([...base.matchAll(/--ams-([a-z-]+):([^;}]+)/g)].map((m) => [m[1], m[2].trim()]));
+    return { html, css, vars };
+  };
+  const activeRow = (page) => [...page.matchAll(/<li style="flex-wrap:wrap" data-theme-id="(\d+)" data-theme-slug="([^"]+)">([\s\S]*?)<\/li>/g)]
+    .find((row) => /badge published/.test(row[3]));
+
+  // AMS 1, the bundled theme: its light palette, not the old hard-coded navy.
+  const ams = await themed();
+  assert.equal(ams.vars.bg, '#ffffff', "the screen takes the active theme's background");
+  assert.equal(ams.vars.fg, '#0f1b2d', 'and its text colour');
+  assert.equal(ams.vars.brand, '#1a5cff', 'and its brand colour');
+  assert.match(ams.css, /@media \(prefers-color-scheme:dark\)\{#ams-landing-screen\{/, "a theme with a dark half carries both, on the browser's own switch");
+  assert.match(ams.css, /--ams-bg:#0d1420/, "the dark half is the theme's dark background");
+  assert.doesNotMatch(ams.html, /#090d16/, 'the old fixed navy gradient is gone');
+  assert.match(ams.css, /html\[data-ams-scheme="dark"\] #ams-landing-screen\{/, "a hand-switched theme's choice reaches the screen too");
+  assert.match(ams.html, /attributeFilter:\['data-theme'\]/, 'and is followed when the theme toggle is pressed');
+
+  // A brand colour from Appearance reaches the screen too.
+  const themedColors = await get(`${admin}/appearance`);
+  const appearanceForm = themedColors.text.match(/action="[^"]*\/appearance"[^>]*>/)?.[0];
+  assert.ok(appearanceForm, 'the appearance screen has a form');
+  await adminPost('/appearance', { token_brand: '#aa0055' });
+  assert.equal((await themed()).vars.brand, '#aa0055', "the site brand colour wins over the theme's own");
+  await adminPost('/appearance', { token_brand: '' });
+
+  // A store theme the admin activates: the screen follows it, including its own
+  // corner radius and an all-in-one dark palette with no media query.
+  const before = activeRow((await get(`${admin}/themes`)).text);
+  assert.ok(before, 'a theme is active before this test');
+  const install = await adminPost('/themes/store/ams-portfolio/install', { activate: 1 });
+  assert.equal(install.status, 303);
+  const portfolio = await themed();
+  assert.equal(portfolio.vars.bg, '#0e1116', 'a dark theme gets a dark welcome screen');
+  assert.equal(portfolio.vars.fg, '#f2f4f8', 'with its light copy');
+  assert.equal(portfolio.vars.brand, '#22d3a6', 'and its accent');
+  assert.equal(portfolio.vars.radius, '14px', 'even its corner radius');
+  assert.doesNotMatch(portfolio.css, /prefers-color-scheme/, 'a theme with one palette needs no dark block');
+
+  // Back to the theme this test found, and drop the one it installed.
+  const portfolioRow = activeRow((await get(`${admin}/themes`)).text);
+  assert.equal(portfolioRow?.[2], 'ams-portfolio', 'the store theme is now active');
+  await adminPost(`/themes/${before[1]}/activate`, {});
+  const removed = await adminPost(`/themes/${portfolioRow[1]}/delete`, {});
+  assert.equal(removed.status, 303);
+  assert.equal((await themed()).vars.bg, '#ffffff', 'the original theme is back on the screen');
+
+  // Enter site: its own row under the transport, on the card's centre axis —
+  // never a sibling of Mute in a wrapped flex row, which is what pulled it off
+  // centre whenever the mute button was present.
+  // With a track in the playlist Mute is present, which is the case that used to
+  // push Enter off centre (both sat in one wrapping flex row).
+  const track = new FormData();
+  track.set('_csrf', await csrf());
+  track.append('audio', new File([new Uint8Array(2048)], 'Theme Track.mp3', { type: 'audio/mpeg' }));
+  assert.equal((await request(`${admin}/settings/landing-audio`, { method: 'POST', body: track })).status, 200);
+  const back = (await anon('/')).text;
+  const cardMarkup = back.slice(back.indexOf('<div class="ams-landing-card">'), back.indexOf('<audio class="ams-landing-audio"'));
+  assert.match(cardMarkup, /<div class="ams-landing-transport">[^]*?<\/div>\s*<button class="ams-landing-enter"/, 'Enter sits outside and after the transport row');
+  const transportEnd = cardMarkup.indexOf('<button class="ams-landing-enter"');
+  assert.ok(transportEnd > 0, 'the transport row closes before Enter');
+  const transport = cardMarkup.slice(0, transportEnd);
+  assert.match(transport, /ams-landing-mute/, 'Mute keeps its slot, in the transport row');
+  assert.doesNotMatch(transport, /ams-landing-enter/, 'Enter is no longer grouped with Mute');
+  assert.match(back, /\.ams-landing-enter\{[^}]*margin:1\.6rem auto 0/, 'Enter centres itself on the card axis');
+  assert.match(back, /\.ams-landing-transport\{[^}]*flex-direction:column[^}]*align-items:center/, 'the transport row centres the play control too');
+  log('landing screen matches the active theme (light/dark, brand, radius) and Enter site is centred on the card axis');
+});
+
 test('11. profile: password change keeps this session and old password stops working', async () => {
   const wrong = await adminPost('/profile', { email: ADMIN.email, new_password: 'another long password', current_password: 'not it' });
   assert.match(wrong.location, /err=Current password/);

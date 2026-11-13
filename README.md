@@ -291,6 +291,20 @@ Yes/No choice saved with one button:
   button and the audio itself, so nothing is fetched. The soundtrack stays
   saved and comes back when the switch is turned on again.
 
+The screen is not styled by itself: it wears the active theme. Background,
+text, hairlines, corner radius and body font are read out of that theme's own
+stylesheet (its `var(--token, fallback)` chains), and anything set under
+**Appearance → Colours** — including an unsaved Customizer value in the preview —
+overrides them. A theme with light and dark palettes contributes both, switched
+the same way its stylesheet switches: the browser's `prefers-color-scheme`, the
+*Colour scheme* setting, or a theme's own light/dark toggle. A dark theme gets a
+dark card with light copy; a light theme the reverse. Activating another theme
+changes the welcome screen with the rest of the site.
+
+**Enter site** sits in its own row below the player, centred on the card's axis,
+so it stays aligned whether the mute control and the playlist footnote are
+present or not.
+
 Sound files added under **Settings → Landing soundtrack** become the screen's
 playlist. A centered round icon button (a play glyph that becomes pause while it
 plays; no text label) starts them in the saved order and loops the playlist
