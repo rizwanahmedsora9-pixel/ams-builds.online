@@ -1,0 +1,23 @@
+<article class="entry">
+  {{#if post.pages}}<nav class="back-links" aria-label="Back to page"><ul>{{#each post.pages}}<li><a href="{{url}}">Back to {{title}}</a></li>{{/each}}</ul></nav>{{/if}}
+  <header class="entry-header">
+    {{#if theme.post_label}}<p class="entry-kicker">{{theme.post_label}}</p>{{/if}}
+    <h1>{{post.title}}</h1>
+    <p class="meta entry-meta">
+      <time datetime="{{post.date_iso}}">{{post.date}}</time>{{#if post.author}} &middot; {{post.author}}{{/if}}{{#if theme.show_reading_time}} &middot; {{post.content | reading_time}} min read{{/if}}
+      {{#each post.categories}} &middot; <a href="{{url}}">{{name}}</a>{{/each}}
+    </p>
+  </header>
+
+  {{#if post.featured_image}}<img class="featured" src="{{post.featured_image}}" alt="{{post.featured_alt}}" loading="eager">{{/if}}
+
+  <div class="content">{{{post.content}}}</div>
+
+  {{#if theme.ad_slot_1}}{{{theme.ad_slot_1}}}{{/if}}
+
+  {{#if post.tags}}<p class="tags">{{#each post.tags}}<a href="{{url}}">#{{name}}</a>{{/each}}</p>{{/if}}
+
+  {{{comments_html}}}
+
+  {{#if theme.ad_slot_2}}{{{theme.ad_slot_2}}}{{/if}}
+</article>

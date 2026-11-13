@@ -1,8 +1,0 @@
-{
-  "settings_schema": [
-    { "key": "accent", "type": "color", "label": "Accent color", "default": "#2457d6", "help": "Used for links, buttons and active navigation." },
-    { "key": "hero_title", "type": "text", "label": "Homepage introduction", "default": "A good place to start" },
-    { "key": "show_search", "type": "toggle", "label": "Show search in the header", "default": true },
-    { "key": "content_width", "type": "number", "label": "Content width in pixels", "default": 1080 }
-  ]
-}

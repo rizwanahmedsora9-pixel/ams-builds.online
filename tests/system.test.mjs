@@ -41,14 +41,14 @@ after(async () => {
 
 test('a small site exists to lose: pages, a post, media and a redirect', async () => {
   const { anon, adminPost, request, csrf } = harness;
-  assert.match((await adminPost('/pages/save', { title: 'About', body: '<p>Who we are.</p>', status: 'published' })).location, /ok=/);
+  assert.match((await adminPost('/pages/save', { title: 'Legacy Page', slug: 'legacy-page', body: '<p>Who we are.</p>', status: 'published' })).location, /ok=/);
   assert.match((await adminPost('/posts/save', { title: 'First post', body: '<p>Hello.</p>', status: 'published' })).location, /ok=/);
   const body = new FormData();
   body.set('_csrf', await csrf());
   body.append('files', new File([PNG], 'team.png', { type: 'image/png' }));
   assert.match((await request(`${admin}/media/upload`, { method: 'POST', body })).location, /1 file uploaded/);
-  assert.match((await adminPost('/tools/redirects', { from_path: '/old', to_url: '/about', status: '301' })).location, /saved/);
-  assert.equal((await anon('/about')).status, 200);
+  assert.match((await adminPost('/tools/redirects', { from_path: '/old', to_url: '/legacy-page', status: '301' })).location, /saved/);
+  assert.equal((await anon('/legacy-page')).status, 200);
   assert.equal((await anon('/old')).status, 301);
   log('a page, a post, an upload and a redirect are live on the public site');
 });
@@ -63,8 +63,8 @@ test('the reset button is in Tools, and the screen counts what it will destroy',
   assert.equal(page.status, 200);
   assert.match(page.text, /Reset the panel/);
   assert.match(page.text, /This cannot be undone\./);
-  assert.match(page.text, /<dt>Pages<\/dt><dd>2<\/dd>/, 'the sample home page and About');
-  assert.match(page.text, /<dt>Posts<\/dt><dd>1<\/dd>/);
+  assert.match(page.text, /<dt>Pages<\/dt><dd>15<\/dd>/, 'the demo pages plus the About page');
+  assert.match(page.text, /<dt>Posts<\/dt><dd>9<\/dd>/);
   assert.match(page.text, /<dt>Media files<\/dt><dd>1<\/dd>/);
   assert.match(page.text, /<dt>Panel accounts, including yours<\/dt><dd>1<\/dd>/);
   assert.match(page.text, /<dt>Redirects<\/dt><dd>1<\/dd>/);
@@ -137,9 +137,9 @@ test('the site can be installed again from zero', async () => {
   assert.match(fresh, /Welcome to Fresh Start/, 'the sample home page is the only content');
   // A fresh install is the default theme: AMS 1 ships a layout for every page,
   // and its navigation and footer come with it.
-  assert.match(fresh, /class="site-header"/, 'AMS 1 is the theme a new site starts with');
-  assert.match(fresh, /class="foot-grid"/, 'with its four-column footer');
-  assert.equal((await anon('/about')).status, 404, 'the old page did not come back');
+  assert.match(fresh, /class="site-header"/, 'AMS Nova is the theme a new site starts with');
+  assert.match(fresh, /class="foot-grid"/, 'with its footer grid');
+  assert.equal((await anon('/legacy-page')).status, 404, 'the old page did not come back');
   assert.equal((await anon('/old')).status, 404, 'the old redirect did not come back');
   assert.equal((await anon('/admin-panel')).status, 404, 'the old admin URL is not the panel any more');
   assert.equal((await get('/fresh-panel')).status, 200);

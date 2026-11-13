@@ -1,8 +1,0 @@
-<section class="hero"{{#if theme.hero_image}} style="--hero-image:url('{{theme.hero_image}}')"{{/if}}>
-  <div class="shell hero__in">
-    <p class="hero__kicker">{{site.title}}</p>
-    <h1 class="hero__title">{{#if theme.hero_title}}{{theme.hero_title}}{{else}}{{site.title}}{{/if}}</h1>
-    {{#if theme.hero_sub}}<p class="hero__sub">{{theme.hero_sub}}</p>{{/if}}
-    {{#if theme.hero_cta}}<p class="hero__cta"><a class="button" href="{{#if theme.hero_cta_url}}{{theme.hero_cta_url}}{{else}}/blog{{/if}}">{{theme.hero_cta}}</a></p>{{/if}}
-  </div>
-</section>

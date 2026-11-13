@@ -263,7 +263,7 @@ function sortTemplates(a: string, b: string): number {
  * render.ts) so the panel and the renderer share one definition.
  */
 export async function activeThemeFor(env: Env): Promise<ThemeBundle> {
-  const { defaultTheme } = await import('../themes/ams1');
+  const { defaultTheme } = await import('../themes/nova');
   try {
     const hit = await env.DB.prepare('SELECT slug FROM themes WHERE active=1 LIMIT 1').first<{ slug: string }>();
     if (hit) {

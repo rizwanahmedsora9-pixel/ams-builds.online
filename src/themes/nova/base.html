@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{#if theme.ad_slot_1 or theme.ad_slot_2}}<link rel="preconnect" href="https://pagead2.googlesyndication.com" crossorigin>{{/if}}
+{{#if theme_css_url}}<link rel="stylesheet" href="{{{theme_css_url}}}">{{/if}}
+<style nonce="{{nonce}}">{{{theme_css}}}</style>
+<style nonce="{{nonce}}">:root{--nova-sidebar:{{theme.color_sidebar}};--nova-accent:{{theme.color_accent}};--nova-hero:{{theme.color_hero}};--nova-footer:{{theme.color_footer}};--brand:{{theme.color_accent}};--brand-alt:{{theme.color_accent}}}</style>
+{{{head}}}
+</head>
+<body class="{{body_class}}">
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar" aria-label="Site navigation">
+    <a class="brand" href="/">
+      {{#if site.logo}}<img src="{{site.logo}}" alt="" class="brand-logo"><span>{{site.title}}</span>{{else}}<span>{{site.title}}</span>{{/if}}
+    </a>
+    {{#if site.tagline}}<p class="brand-tag">{{site.tagline}}</p>{{/if}}
+
+    <nav class="side-nav" aria-label="Menu">
+      {{#if menu.primary}}<div class="side-group"><p class="side-label">{{#if theme.nav_heading}}{{theme.nav_heading}}{{else}}Menu{{/if}}</p><ul class="side-list">{{#each menu.primary}}<li><a href="{{url}}"{{#if active}} aria-current="page" class="active"{{/if}}>{{label}}</a></li>{{/each}}</ul></div>{{/if}}
+
+      {{#if nav_pages}}
+      <div class="side-group">
+        <p class="side-label">{{#if theme.nav_heading}}{{theme.nav_heading}}{{else}}Pages{{/if}}</p>
+        {{#if theme.nav_intro}}<p class="side-intro">{{theme.nav_intro}}</p>{{/if}}
+        <ul class="side-list side-tree">
+          {{#each nav_pages}}
+          <li><a href="{{url}}"{{#if active}} aria-current="page" class="active"{{/if}}>{{title}}</a>
+            {{#if children}}<ul class="side-list side-sub">{{#each children}}<li><a href="{{url}}"{{#if active}} aria-current="page" class="active"{{/if}}>{{title}}</a></li>{{/each}}</ul>{{/if}}
+          </li>
+          {{/each}}
+        </ul>
+      </div>
+      {{/if}}
+    </nav>
+
+    <div class="side-foot">
+      <a class="side-search" href="/search">Search the site</a>
+      <a class="side-feed" href="/feed.xml">RSS feed</a>
+    </div>
+  </aside>
+
+  <div class="content-area">
+    <header class="site-header">
+      <button class="menu-btn" type="button" data-sidebar-toggle aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar"><span></span><span></span><span></span></button>
+      <div class="header-inner">
+        <div class="header-title">{{#if site.tagline}}{{site.tagline}}{{else}}{{site.title}}{{/if}}</div>
+        <div class="header-tools">
+          <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to dark or light theme">
+            <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7"/></svg>
+            <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      {{{content}}}
+    </main>
+
+    {{> footer}}
+    {{{widgets.footer}}}
+    {{{footer}}}
+  </div>
+</div>
+
+<script nonce="{{nonce}}">
+(function () {
+  'use strict';
+  var root = document.documentElement;
+  var button = document.querySelector('[data-theme-toggle]');
+
+  function apply(scheme) {
+    if (scheme === 'light' || scheme === 'dark') {
+      root.setAttribute('data-theme', scheme);
+      root.setAttribute('data-ams-scheme', scheme);
+    } else {
+      root.removeAttribute('data-theme');
+      root.removeAttribute('data-ams-scheme');
+    }
+    if (button) {
+      button.setAttribute('aria-label', scheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+    }
+  }
+
+  // The saved choice wins; otherwise the browser's own preference applies.
+  try { apply(root.getAttribute('data-scheme') || ''); } catch (e) {}
+
+  if (button) {
+    button.addEventListener('click', function () {
+      var current = (root.getAttribute('data-theme') || '').toLowerCase();
+      var next = current === 'dark' ? 'light' : 'dark';
+      apply(next);
+      try { localStorage.setItem('nova-scheme', next); } catch (e) {}
+    });
+  }
+  // The page may load before the button exists; honour a saved choice.
+  try {
+    var saved = localStorage.getItem('nova-scheme');
+    if (saved) apply(saved);
+  } catch (e) {}
+
+  // Mobile sidebar drawer.
+  var sidebar = document.getElementById('sidebar');
+  var toggle = document.querySelector('[data-sidebar-toggle]');
+  if (sidebar && toggle) {
+    toggle.addEventListener('click', function () {
+      var open = sidebar.classList.toggle('is-open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    sidebar.addEventListener('click', function (event) {
+      if (event.target && event.target.closest('a')) {
+        sidebar.classList.remove('is-open');
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

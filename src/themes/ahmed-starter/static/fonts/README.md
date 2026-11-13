@@ -1,1 +1,0 @@
-Put WOFF, WOFF2, TTF, or OTF font files here. Reference fonts with a theme-scoped URL from CSS, for example `url("/theme-assets/ahmed-starter-theme/static/fonts/body.woff2")`. Avoid remote font services so the theme works without third-party requests.

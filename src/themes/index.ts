@@ -1,48 +1,16 @@
 import social from './partials/social.html';
 /**
  * The built-in theme store: themes shipped inside the app, installable from
- * Admin -> Themes with one click. To add one, create a folder like ./pro/ and
+ * Admin -> Themes with one click. To add one, create a folder like ./nova/ and
  * list it here.
  *
  * Each bundled theme is parsed by the same manifest validator an upload goes
  * through, so a store theme can never be shaped differently from a real one.
+ *
+ * There is exactly one bundled theme now — AMS Nova — and it is the default
+ * theme the installer writes and the theme a site falls back to.
  */
-import { defaultTheme } from './ams1';
-import { defaultTheme as baseTheme } from './default';
-import proManifest from './pro/theme.json';
-import proBase from './pro/base.html';
-import proHome from './pro/home.html';
-import proPage from './pro/page.html';
-import proPost from './pro/post.html';
-import proArchive from './pro/archive.html';
-import proNotFound from './pro/404.html';
-import proCss from './pro/style.css';
-import journalManifest from './journal/theme.json';
-import journalBase from './journal/base.html';
-import journalHome from './journal/home.html';
-import journalPage from './journal/page.html';
-import journalPost from './journal/post.html';
-import journalArchive from './journal/archive.html';
-import journal404 from './journal/404.html';
-import journalHeader from './journal/partials/header.html';
-import journalFooter from './journal/partials/footer.html';
-import journalCss from './journal/style.css';
-import journalShot from './journal/screenshot.png';
-import portfolioManifest from './portfolio/theme.json';
-import portfolioBase from './portfolio/base.html';
-import portfolioHome from './portfolio/home.html';
-import portfolioPage from './portfolio/page.html';
-import portfolioPost from './portfolio/post.html';
-import portfolioArchive from './portfolio/archive.html';
-import portfolio404 from './portfolio/404.html';
-import portfolioHero from './portfolio/partials/hero.html';
-import portfolioFooter from './portfolio/partials/footer.html';
-import portfolioCss from './portfolio/style.css';
-import portfolioShot from './portfolio/screenshot.png';
-import premiumManifest from './premium/theme.json';
-import premiumBase from './premium/base.html';
-import premiumHome from './premium/home.html';
-import premiumCss from './premium/style.css';
+import { defaultTheme } from './nova';
 import { parseManifest, type ThemeBundle, type ThemeManifest } from '../lib/theme-manifest';
 
 export type StoreTheme = ThemeBundle & {
@@ -68,85 +36,16 @@ function bundle(manifest: Record<string, unknown>, templates: Record<string, str
   };
 }
 
-const pro = bundle(
-  proManifest as unknown as Record<string, unknown>,
-  { base: proBase, home: proHome, page: proPage, post: proPost, archive: proArchive, '404': proNotFound },
-  proCss,
-);
-
 /**
- * Premium inherits Pro's inner templates explicitly (`"parent": "ams-pro"`)
- * instead of copying them: the store now demonstrates layout inheritance, and
- * a fix to Pro's post markup reaches Premium too. Premium ships its own layout,
- * home page, stylesheet and partials.
+ * AMS Nova is both the bundled default theme and the one store card. Its card is
+ * built from the very bundle that ships — not from a second copy of the files —
+ * so the store, the installer and the fallback all agree on one theme.
  */
-const premium = bundle(
-  { ...(premiumManifest as unknown as Record<string, unknown>), parent: 'ams-pro' },
-  { base: premiumBase, home: premiumHome },
-  premiumCss,
-);
-
-/**
- * A store theme that ships a screenshot. The file is bundled as bytes, so the
- * installer writes exactly the PNG the theme's zip would carry and the preview
- * card can show it without a second upload step.
- */
-/**
- * A store theme that ships a screenshot. The installer writes exactly the PNG the
- * theme's zip would carry, so the store card can show the real thing.
- */
-function withScreenshot(theme: StoreTheme, path: string, source: PackagedBytes): StoreTheme {
-  // The bytes are inlined by both builds: esbuild's `binary` loader gives a
-  // Uint8Array on Node, Wrangler's Data rule an ArrayBuffer.
-  const data = source instanceof Uint8Array ? source : new Uint8Array(source);
-  return { ...theme, packageFiles: [{ path, data, mime: 'image/png' }] };
-}
-
-const journal = withScreenshot(
-  bundle(
-    journalManifest as unknown as Record<string, unknown>,
-    { base: journalBase, home: journalHome, page: journalPage, post: journalPost, archive: journalArchive, '404': journal404 },
-    journalCss,
-    { header: journalHeader, footer: journalFooter },
-  ),
-  'screenshot.png',
-  journalShot,
-);
-
-const portfolio = withScreenshot(
-  bundle(
-    portfolioManifest as unknown as Record<string, unknown>,
-    { base: portfolioBase, home: portfolioHome, page: portfolioPage, post: portfolioPost, archive: portfolioArchive, '404': portfolio404 },
-    portfolioCss,
-    { hero: portfolioHero, footer: portfolioFooter },
-  ),
-  'screenshot.png',
-  portfolioShot,
-);
-
-/**
- * The bundled themes are also store cards. AMS 1 is the default theme the
- * installer writes and the theme a site falls back to, so its card is built from
- * the very bundle that ships — not from a second copy of the files.
- */
-const ams1 = bundle(
+const nova = bundle(
   defaultTheme.manifest as unknown as Record<string, unknown>,
   defaultTheme.templates,
   defaultTheme.css,
   defaultTheme.partials,
 );
-const base = bundle(
-  baseTheme.manifest as unknown as Record<string, unknown>,
-  baseTheme.templates,
-  baseTheme.css,
-  baseTheme.partials,
-);
 
-export const storeThemes: StoreTheme[] = [
-  { ...ams1, description: ams1.manifest.description, preview: ams1.manifest.preview },
-  { ...base, description: base.manifest.description, preview: base.manifest.preview },
-  pro,
-  premium,
-  journal,
-  portfolio,
-];
+export const storeThemes: StoreTheme[] = [nova];

@@ -1,1 +1,0 @@
-Put theme image assets in this directory. Supported image types include PNG, JPEG, GIF, WebP, AVIF, and ICO. Reference a file from a template with `{{asset "static/images/your-image.png"}}`. Keep each file within the upload limits documented in the Theme Developer Guide.

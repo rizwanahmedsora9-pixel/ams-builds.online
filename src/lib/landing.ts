@@ -152,10 +152,14 @@ export function schemeLayers(css: string): { base: string; dark: string } {
  * deeper than that.
  */
 function declarations(layer: string): string[] {
+  // Comments inside a block are not part of any declaration, and a comment
+  // sitting right before one (`/* Surfaces */\n--bg: …`) would otherwise be
+  // carried along with it and hide the declaration from the matcher below.
+  const css = layer.replace(/\/\*[\s\S]*?\*\//g, '');
   const out: string[] = [];
   let depth = 0;
   let buffer = '';
-  for (const ch of layer) {
+  for (const ch of css) {
     if (ch === '{') {
       // Whatever accumulated outside a block was selector text: throw it away.
       depth++;

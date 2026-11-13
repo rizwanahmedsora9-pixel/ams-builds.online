@@ -1,6 +1,0 @@
-<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation"><span class="nav-toggle__icon" aria-hidden="true">☰</span><span class="sr-only">Toggle navigation</span></button>
-<nav class="site-nav" id="primary-navigation" aria-label="Primary navigation">
-  {{#each menu.primary}}<a href="{{url}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>{{/each}}
-  {{#unless menu.primary}}<a href="/">Home</a><a href="/blog">Blog</a>{{/unless}}
-  {{#if theme.show_search}}<a class="nav-search" href="/search">Search</a>{{/if}}
-</nav>

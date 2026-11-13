@@ -6,7 +6,7 @@ import { esc, safeUrl } from './security';
 import { listPages, type ContentView } from './content';
 import { publicPageIcon } from '../admin/icons';
 import { type PublicPageHierarchy } from './page-hierarchy';
-import { defaultTheme } from '../themes/ams1';
+import { defaultTheme } from '../themes/nova';
 import type { ThemeBundle } from './theme-manifest';
 import { activeThemeFor, applyLayout, loadTheme, renderWithTheme, themeAssetUrl } from './theme-store';
 import { variablesFor } from './tokens';
@@ -36,6 +36,58 @@ async function loadMenus(env: Env, path: string): Promise<Record<string, MenuIte
   const out: Record<string, MenuItem[]> = {};
   for (const r of results) (out[r.location] ||= []).push({ label: r.label, url: r.url, active: r.url === path });
   return out;
+}
+
+/**
+ * Builds the page tree the sidebar navigation renders: top-level pages with
+ * their published children nested underneath, each carrying its URL and an
+ * `active` flag. A page is active when it is the current path or an ancestor
+ * of the current page (so its sub-page link stays highlighted).
+ */
+function buildNavTree(
+  pageRows: { id: number; title: string; slug: string; parent_id?: number | null; status: string; menu_order?: number; template?: string }[],
+  settings: Settings,
+  currentPath: string,
+): { title: string; url: string; active: boolean; children: { title: string; url: string; active: boolean }[] }[] {
+  const urlFor = (p: { id: number; slug: string }) =>
+    settings.home_page_id === String(p.id) ? '/' : '/' + p.slug;
+  const published = pageRows.filter((p) => p.status === 'published');
+  const byId = new Map(published.map((p) => [p.id, p]));
+  const childrenOf = new Map<number, typeof published>();
+  for (const page of published) {
+    if (page.parent_id == null || !byId.has(page.parent_id)) continue;
+    const siblings = childrenOf.get(page.parent_id) ?? [];
+    siblings.push(page);
+    childrenOf.set(page.parent_id, siblings);
+  }
+  const order = (a: { menu_order?: number; title: string; id: number }, b: { menu_order?: number; title: string; id: number }) =>
+    (a.menu_order ?? 0) - (b.menu_order ?? 0) || a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }) || a.id - b.id;
+  for (const siblings of childrenOf.values()) siblings.sort(order);
+  const isActive = (url: string) => url === currentPath;
+  // A parent is active when the current page is one of its descendants.
+  const isAncestorOf = (pageId: number, targetId: number, seen = new Set<number>()): boolean => {
+    if (seen.has(pageId) || pageId === targetId) return pageId === targetId;
+    seen.add(pageId);
+    for (const child of childrenOf.get(pageId) ?? []) {
+      if (isAncestorOf(child.id, targetId, seen)) return true;
+    }
+    return false;
+  };
+  const targetId = published.find((p) => urlFor(p) === currentPath)?.id;
+  const roots = published
+    .filter((p) => p.parent_id == null || !byId.has(p.parent_id))
+    .sort(order);
+  return roots.map((page) => {
+    const url = urlFor(page);
+    const children = (childrenOf.get(page.id) ?? []).map((child) => ({
+      title: child.title, url: urlFor(child), active: isActive(urlFor(child)),
+    }));
+    return {
+      title: page.title, url,
+      active: isActive(url) || (targetId != null && isAncestorOf(page.id, targetId)),
+      children,
+    };
+  });
 }
 
 const PAGE_HIERARCHY_CSS = `
@@ -293,7 +345,7 @@ export async function renderTheme(
   const assetUrl = (path: string): string => themeAssetUrl(theme.slug, path.replace(/^\.?\//, ''));
   // Themes installed in the panel have their stylesheet stored as an asset, so a
   // v2 layout can link it (`{{{theme_css_url}}}`) instead of inlining it. The
-  // bundled copy of AMS 1 (used before an install has written its row) has no
+  // bundled copy of AMS Nova (used before an install has written its row) has no
   // asset to link: its CSS is inlined, and every layout that asks for
   // `{{{theme_css}}}` keeps working either way.
   const cssUrl = `${assetUrl('style.css')}?v=${encodeURIComponent(theme.version)}`;
@@ -352,6 +404,10 @@ export async function renderTheme(
       // `{{#if template eq "tool"}}`. Empty means the kind's default template.
       template: p.template || '',
     })),
+    // {{#each nav_pages}} - the same pages as a nested tree (parent -> children),
+    // so a sidebar can show sub-pages under their parent. `active` marks the
+    // current page or any of its descendants.
+    nav_pages: buildNavTree(pageRows, settings, url.pathname),
     year: new Date().getUTCFullYear(),
     body_class: `tpl-${opts.template}`,
     comments: commentRows.map((c) => ({ id: c.id, name: c.author_name, body: c.body, date: c.created_at })),
@@ -404,7 +460,7 @@ export async function renderTheme(
 
 /**
  * Rendering failures are remembered per isolate so the Themes screen can show
- * "this theme failed, the site is falling back to AMS 1".
+ * "this theme failed, the site is falling back to AMS Nova".
  */
 const themeFailures = new Map<string, { at: string; message: string }>();
 export function markThemeFailure(slug: string, err: unknown): void {
