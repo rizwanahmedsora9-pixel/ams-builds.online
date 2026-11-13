@@ -15,6 +15,7 @@ import { can } from '../lib/capabilities';
 import type { ThemeBundle } from '../lib/theme-manifest';
 import { clientIp, cspFor, nonceFor, rateCount, rateHit, safeUrl, sameOrigin, stripTags, type CspMode } from '../lib/security';
 import { landingEnabled, landingPlayShown, landingScreenMarkup, parseLandingAudioIds, type LandingAudioTrack } from '../lib/landing';
+import { readTokens, schemeMeta } from '../lib/tokens';
 import { titleFor } from '../lib/origin';
 import { publicPageHierarchy, type PublicPageHierarchy } from '../lib/page-hierarchy';
 import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
@@ -464,6 +465,11 @@ site.get('*', async (c) => {
         .map((item) => ({ id: item.id, url: mediaUrl(item.r2_key), filename: item.filename }));
     }
     const nonce = body.match(/<(?:script|style)\b[^>]*\bnonce="([^"]+)"/i)?.[1] || nonceFor();
+    // The screen wears the active theme: its stylesheet supplies the palette the
+    // admin did not set, and the site's tokens (with any unsaved Customizer
+    // value) win over it — the same order the page itself uses.
+    const theme = previewTheme ?? await activeTheme(c.env);
+    const tokens = landingTokens(settings, unsaved);
     const markup = landingScreenMarkup({
       siteTitle: settings.site_title || '',
       tagline: settings.tagline || '',
@@ -471,6 +477,8 @@ site.get('*', async (c) => {
       tracks,
       showPlay: landingPlayShown(settings),
       nonce,
+      look: { css: theme.css, scheme: schemeMeta(tokens.token_scheme) as 'light' | 'dark' | null },
+      tokens,
     });
     body = injectLandingScreen(body, markup);
   }
@@ -489,6 +497,14 @@ site.get('*', async (c) => {
 site.all('*', (c) => c.text('Method not allowed', 405));
 
 /* --------------------------------------------------------------- helpers */
+
+/**
+ * The design tokens the landing screen paints with: saved values, plus an
+ * unsaved Customizer preview on top when there is one.
+ */
+function landingTokens(settings: Settings, unsaved: { tokens?: Record<string, string> } | null): Record<string, string> {
+  return { ...readTokens(settings), ...(unsaved?.tokens ?? {}) };
+}
 
 /** Put the first-visit splash in the document head/body without replacing the theme's home page. */
 function injectLandingScreen(pageHtml: string, markup: { head: string; body: string }): string {
