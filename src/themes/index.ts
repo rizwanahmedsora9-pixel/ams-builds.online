@@ -6,8 +6,8 @@
  * Each bundled theme is parsed by the same manifest validator an upload goes
  * through, so a store theme can never be shaped differently from a real one.
  */
-import { defaultTheme } from './default';
-import baseManifest from './default/theme.json';
+import { defaultTheme } from './ams1';
+import { defaultTheme as baseTheme } from './default';
 import proManifest from './pro/theme.json';
 import proBase from './pro/base.html';
 import proHome from './pro/home.html';
@@ -123,8 +123,27 @@ const portfolio = withScreenshot(
   portfolioShot,
 );
 
+/**
+ * The bundled themes are also store cards. AMS 1 is the default theme the
+ * installer writes and the theme a site falls back to, so its card is built from
+ * the very bundle that ships — not from a second copy of the files.
+ */
+const ams1 = bundle(
+  defaultTheme.manifest as unknown as Record<string, unknown>,
+  defaultTheme.templates,
+  defaultTheme.css,
+  defaultTheme.partials,
+);
+const base = bundle(
+  baseTheme.manifest as unknown as Record<string, unknown>,
+  baseTheme.templates,
+  baseTheme.css,
+  baseTheme.partials,
+);
+
 export const storeThemes: StoreTheme[] = [
-  { ...defaultTheme, description: defaultTheme.manifest.description, preview: defaultTheme.manifest.preview },
+  { ...ams1, description: ams1.manifest.description, preview: ams1.manifest.preview },
+  { ...base, description: base.manifest.description, preview: base.manifest.preview },
   pro,
   premium,
   journal,

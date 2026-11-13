@@ -1065,7 +1065,7 @@ test('phase 4: the Customizer keeps working without JavaScript', async () => {
 /* ------------------------------------------- phase 5: store & lifecycle */
 
 // The theme store as a *lifecycle*: preview → install → edit → export → roll
-// back, entirely in the panel. These cases use the five bundled themes (two of
+// back, entirely in the panel. These cases use the six bundled themes (two of
 // them new: Journal and Portfolio) and the zip writer/reader round trip.
 
 const zipNames = async (bytes) => {
@@ -1088,12 +1088,12 @@ const zipNames = async (bytes) => {
   return names.sort();
 };
 
-test('phase 5: the store shows five themes with screenshots, tags and a live preview', async () => {
+test('phase 5: the store shows six themes with screenshots, tags and a live preview', async () => {
   const page = await panel.get(`${panel.admin}/themes`);
-  for (const name of ['AMS Base', 'AMS Pro', 'AMS Premium', 'AMS Journal', 'AMS Portfolio']) {
+  for (const name of ['AMS 1', 'AMS Base', 'AMS Pro', 'AMS Premium', 'AMS Journal', 'AMS Portfolio']) {
     assert.ok(page.text.includes(`<h3>${name} `), `${name} is a store card`);
   }
-  assert.equal((page.text.match(/class="store-item__shot"/g) || []).length, 5, 'every card has art');
+  assert.equal((page.text.match(/class="store-item__shot"/g) || []).length, 6, 'every card has art');
   assert.match(page.text, /class="tag">serif/, 'a theme shows its tags');
   assert.match(page.text, /themes\/preview\/ams-journal/, 'each card links to the live preview');
 
@@ -1124,7 +1124,7 @@ test('phase 5: the store shows five themes with screenshots, tags and a live pre
   await panel.adminPost('/widgets', { widget_after_post_1_body: '<p>After the post</p>' });
   assert.match((await panel.anon('/')).text, /site-widgets--after-post/, 'an area the layout does not draw is appended');
   // Restore the default theme for later cases.
-  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ams-1/install', { activate: 1 });
 });
 
 test('phase 5: a theme can be edited in the panel, validated, and rolled back', async () => {
@@ -1168,7 +1168,7 @@ test('phase 5: a theme can be edited in the panel, validated, and rolled back', 
   await panel.adminPost(`/themes/ams-portfolio/versions/${snapshots[snapshots.length - 1]}/restore`, {});
   assert.doesNotMatch((await panel.anon('/')).text, /Edited in the panel/, 'rollback brought the original back');
   assert.match((await panel.anon('/')).text, /Design with intent/);
-  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ams-1/install', { activate: 1 });
 });
 
 test('phase 5: export is a zip that uploads back byte-for-byte', async () => {
@@ -1212,7 +1212,7 @@ test('phase 5: export is a zip that uploads back byte-for-byte', async () => {
   const assets = (await panel.get(`${panel.admin}/themes/ams-journal`)).text;
   assert.match(assets.text ?? assets, /screenshot\.png/, 'the binary asset round-tripped');
   assert.ok(size > 5000, 'the zip carries the PNG, not just text');
-  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ams-1/install', { activate: 1 });
 });
 
 test('phase 5: a new theme can be created from a template in the panel', async () => {
@@ -1242,7 +1242,7 @@ test('phase 5: a new theme can be created from a template in the panel', async (
   const ids = (await panel.get(`${panel.admin}/themes`)).text;
   const childId = ids.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="panel-child"/)[1];
   const madeId = ids.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="panel-made"/)[1];
-  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ams-1/install', { activate: 1 });
   await panel.adminPost(`/themes/${childId}/delete`, {});
   await panel.adminPost(`/themes/${madeId}/delete`, {});
   assert.match((await panel.get(`${panel.admin}/themes`)).text, /AMS Journal/, 'the store is unchanged');
@@ -1255,7 +1255,7 @@ test('phase 6: every mutation writes an audit entry a person can read', async ()
   // mutation, four entries, each naming what happened rather than an id.
   await panel.adminPost('/pages/save', { title: 'Audit Trail Page', slug: 'audit-trail', body: '<p>x</p>', status: 'published' });
   await panel.adminPost('/themes/store/ams-portfolio/install', { activate: 1 });
-  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ams-1/install', { activate: 1 });
 
   const page = await panel.get(`${panel.admin}/tools/audit`);
   assert.equal(page.status, 200);
@@ -1453,7 +1453,7 @@ test('phase 5: a preview runs the real site, and a local edit is never silently 
   assert.match(audit, /Saved your edits to/);
   assert.match(audit, /partials\/header\.html|Edited partials\/header\.html/);
 
-  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ams-1/install', { activate: 1 });
 });
 
 test('phase 5: an older install shows "Update available vX → vY" with its changelog', async () => {
@@ -1476,5 +1476,5 @@ test('phase 5: an older install shows "Update available vX → vY" with its chan
   assert.doesNotMatch((await panel.get(`${panel.admin}/themes`)).text, /Update available v0\.9\.0/);
   const detail = (await panel.get(`${panel.admin}/themes/ams-journal`)).text;
   assert.match(detail, /Before store update/, 'the replaced version is in the history');
-  await panel.adminPost('/themes/store/default/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ams-1/install', { activate: 1 });
 });

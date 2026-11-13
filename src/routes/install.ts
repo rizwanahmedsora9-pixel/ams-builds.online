@@ -7,7 +7,7 @@ import { markInstalled, saveConfig, validAdminSlug } from '../lib/config';
 import { cleanDomain, sameOrigin } from '../lib/security';
 import { displayTitle, siteNameFromHost } from '../lib/origin';
 import { html, raw, shell, type Raw } from '../lib/ui';
-import { defaultTheme } from '../themes/default';
+import { defaultTheme } from '../themes/ams1';
 
 /**
  * First-run wizard. The root app only routes here while the KV "installed"

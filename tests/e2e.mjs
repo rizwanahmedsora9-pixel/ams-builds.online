@@ -907,19 +907,73 @@ test('12b. themes: upload JSON and zip, activate, replace, download, delete', as
   assert.equal(manage.status, 200);
   assert.match(manage.text, /data-asset|\/theme-assets\/zip-theme\/style\.css/, 'the manager lists the stylesheet asset');
   assert.match((await get(`${admin}/themes/zip-theme/validate`)).text, /No problems found|Warning/, 'the validator reports on an installed theme');
-  const baseId = await themeId('AMS Base');
+  const baseId = await themeId('AMS 1');
   await adminPost(`/themes/${baseId}/activate`, {});
   assert.match((await anon('/')).text, /class="site-header"/);
   assert.match(decodeURIComponent((await adminPost(`/themes/${zipId}/delete`, {})).location), /deleted/);
   assert.match(decodeURIComponent((await adminPost(`/themes/${jsonId}/delete`, {})).location), /deleted/);
-  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only AMS Base is left');
+  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only AMS 1 is left');
   log('5 bad uploads rejected with reasons; JSON + zip themes installed, activated, replaced live, downloaded, deleted');
 });
 
-test('12c. theme store: five bundled themes install and switch with one click', async () => {
+test('12b1. AMS 1: the default theme ships a layout for every page and labelled ad slots', async () => {
+  const at = (html) => (html.match(/<main id="main">[\s\S]*?<\/main>/) || [''])[0];
+
+  // The home page: one hero, the sample page body, a call-to-action band and the
+  // footer, with nothing left unrendered.
+  const home = await anon('/');
+  assert.match(home.text, /<section class="hero">[^]*<h1>/);
+  assert.doesNotMatch(home.text, /\{\{/, 'no template tags leak into the page');
+
+  // The extra page layouts render through the editor's Template dropdown. Each
+  // one is a real layout, not the generic page template with a different title.
+  const pages = {
+    tools: /class="grid tools"/,
+    tool: /class="tool-box"/,
+    services: /class="grid services"/,
+    contact: /class="two-col"/,
+  };
+  const madeIds = [];
+  for (const [template, marker] of Object.entries(pages)) {
+    const made = await adminPost('/pages/save', {
+      title: `AMS ${template}`, slug: `ams-${template}`, body: `<p>Body of ${template}</p>`,
+      status: 'published', template,
+    });
+    assert.match(made.location, /ok=/, `${template} page saved`);
+    madeIds.push(idFrom(made.location));
+    const page = await anon(`/ams-${template}`);
+    assert.equal(page.status, 200, template);
+    assert.match(at(page.text), marker, `${template} has its own layout`);
+    assert.doesNotMatch(page.text, /\{\{/, `${template} renders cleanly`);
+  }
+  // The tools index lists the page laid out as a tool, and the tool page links
+  // back to the index — the two layouts know about each other.
+  assert.match(at((await anon('/ams-tools')).text), /href="\/ams-tool"/);
+  assert.match(at((await anon('/ams-tool')).text), /href="\/tools"/);
+
+  // Ad slots are off by default and exist only on posts and tool pages.
+  assert.equal((home.text.match(/class="ad-slot"/g) || []).length, 0, 'no ad slot on the home page');
+  assert.equal((at((await anon(currentPostUrl())).text).match(/class="ad-slot"/g) || []).length, 0, 'a post prints no ad slot until one is filled in');
+  await adminPost('/appearance', {
+    ad_slot_1: '<ins class="adsbygoogle" data-ad-slot="111"></ins>',
+    ad_slot_tool: '<ins class="adsbygoogle" data-ad-slot="222"></ins>',
+  });
+  const post = at((await anon(currentPostUrl())).text);
+  assert.match(post, /<div class="ad-slot" role="complementary" aria-label="Advertisement"><ins class="adsbygoogle" data-ad-slot="111"><\/ins><\/div>/);
+  assert.match(at((await anon('/ams-tool')).text), /data-ad-slot="222"/, 'the tool slot lands below the tool');
+  assert.doesNotMatch((await anon('/')).text, /adsbygoogle/, 'the home page is never monetised');
+  await adminPost('/appearance', { ad_slot_1: '', ad_slot_tool: '' });
+
+  // Clean up: the pages this case made, so later cases count what they expect.
+  for (const id of madeIds) assert.match((await adminPost(`/pages/${id}/delete`, {})).location, /deleted|trash/i, 'the test pages are removed');
+});
+
+test('12c. theme store: six bundled themes install and switch with one click', async () => {
   const store = await get(`${admin}/themes`);
-  for (const name of ['AMS Base', 'AMS Pro', 'AMS Premium', 'AMS Journal', 'AMS Portfolio']) assert.ok(store.text.includes(`<h3>${name} `), name);
-  assert.equal((store.text.match(/store\/[a-z-]+\/install/g) || []).length, 8, 'the four installable themes each offer Install and Install-and-activate');
+  // `<h3>AMS 1 <small …` — the version suffix is not part of the name.
+  const storeCards = (html) => [...html.matchAll(/<h3>([^<]+?)\s*<small/g)].map((m) => m[1]);
+  for (const name of ['AMS 1', 'AMS Base', 'AMS Pro', 'AMS Premium', 'AMS Journal', 'AMS Portfolio']) assert.ok(storeCards(store.text).includes(name), `${name} is a store card: ${JSON.stringify(storeCards(store.text))}`);
+  assert.equal((store.text.match(/store\/[a-z-]+\/install/g) || []).length, 10, 'the five not-installed themes each offer Install and Install-and-activate');
   // A store card shows a screenshot (or a palette gradient when it ships none),
   // and its tags, so the store looks like a store.
   assert.match(store.text, /class="store-item__shot"/);
@@ -959,7 +1013,11 @@ test('12c. theme store: five bundled themes install and switch with one click', 
   assert.match((await anon('/')).text, /<a href="\/" aria-current="page">Home<\/a>/, 'current tab is marked');
 
   const after = await get(`${admin}/themes`);
-  assert.equal((after.text.match(/store\/[a-z-]+\/install/g) || []).length, 6, 'installed themes only offer Activate');
+  // Six cards. An installed card renders one install form (Activate); an
+  // uninstalled card renders two (Install, Install and activate). Base, Pro and
+  // Premium are installed by now, so 3 + 3×2 = 9 — and the active one is Premium,
+  // whose install form is replaced by its Preview link.
+  assert.equal((after.text.match(/store\/[a-z0-9-]+\/install/g) || []).length, 8, 'installed themes only offer Activate');
   assert.match((await adminPost('/themes/store/nope/install', {})).text, /not in the store/);
   // Installing Journal writes the screenshot the app ships with it, so its card
   // shows the real thing from then on.
@@ -985,7 +1043,7 @@ test('12c. theme store: five bundled themes install and switch with one click', 
   assert.match(portfolio.text, /class="hero__title">Design with intent/, 'Portfolio renders its hero setting');
   assert.match(portfolio.text, /class="grid"/, 'and its grid');
   assert.match(portfolio.text, /--cols:3/, 'the grid-columns setting reaches the CSS');
-  assert.match((await adminPost('/themes/store/default/install', { activate: 1 })).location, /AMS Base is now your active theme/);
+  assert.match((await adminPost('/themes/store/ams-1/install', { activate: 1 })).location, /AMS 1 is now your active theme/);
   assert.match((await anon('/')).text, /class="site-header"/);
   log('store lists 3 themes; Pro and Premium render home, blog, post, page and 404 with tabs + footer; switched back to Base');
 });
@@ -1541,7 +1599,9 @@ test('17. the editor markup for images, links, blocks and breaks survives the sa
   const url = JSON.parse((await anon(`/api/posts/${slug}`)).text).url;
   // Render with a known theme: earlier tests leave a fixture theme active, and
   // this test is about the saved markup, not about which theme is current.
-  const page = await get(`${url}?preview=1&theme=default`);
+  // The bundled theme's folder is `ams1` (its store slug is `ams-1`); `default`
+  // is the id of the older "AMS Base" package.
+  const page = await get(`${url}?preview=1&theme=ams-1`);
   assert.equal(page.status, 200, `${url} renders in the bundled theme`);
 
   // Alignment + width are the two things the editor's bar writes.
@@ -1563,9 +1623,9 @@ test('17. the editor markup for images, links, blocks and breaks survives the sa
   // The bundled themes style the break and the figure placement (the store
   // themes that earlier tests activate are CSS-only and render the markup
   // as-is, so the figure rules are checked in the stylesheet itself).
-  const defaultCss = (await anon('/theme-assets/default/style.css')).text || '';
+  const defaultCss = (await anon('/theme-assets/ams-1/style.css')).text || '';
   assert.match(defaultCss, /hr\.page-break\{border-top-style:dashed/);
-  assert.match(defaultCss, /figure\.image-block\{margin:1\.5em auto/);
+  assert.match(defaultCss, /content figure\.image-block\{margin:1\.5em auto/);
 
   // An admin saves raw HTML by design; an author or editor goes through the
   // sanitizer, which keeps exactly the declarations the editor writes and

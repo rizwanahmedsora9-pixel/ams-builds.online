@@ -133,7 +133,12 @@ test('the site can be installed again from zero', async () => {
   assert.equal(again.admin, '/fresh-panel');
   assert.equal((await health(harness)).installed, true);
 
-  assert.match((await anon('/')).text, /Welcome to Fresh Start/, 'the sample home page is the only content');
+  const fresh = (await anon('/')).text;
+  assert.match(fresh, /Welcome to Fresh Start/, 'the sample home page is the only content');
+  // A fresh install is the default theme: AMS 1 ships a layout for every page,
+  // and its navigation and footer come with it.
+  assert.match(fresh, /class="site-header"/, 'AMS 1 is the theme a new site starts with');
+  assert.match(fresh, /class="foot-grid"/, 'with its four-column footer');
   assert.equal((await anon('/about')).status, 404, 'the old page did not come back');
   assert.equal((await anon('/old')).status, 404, 'the old redirect did not come back');
   assert.equal((await anon('/admin-panel')).status, 404, 'the old admin URL is not the panel any more');

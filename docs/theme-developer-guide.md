@@ -43,7 +43,7 @@ built this is in [the roadmap](panel-overhaul-roadmap.md).
 
 Upload a `.zip` with this `theme.json` next to the files it names (or a single `.json` bundle, the way
 themes were written before — those still load). Only `base` — or a `parent` to inherit from — is required;
-anything else falls back to AMS Base. `partials/header.html` is picked up without being declared, and
+anything else falls back to AMS 1 (the bundled default theme). `partials/header.html` is picked up without being declared, and
 everything under `assets/` is stored as a theme asset.
 
 **Limits:** 6 MB upload, 512 KB per asset, 80 assets, PNG/JPEG/GIF/WebP/AVIF/ICO, WOFF/WOFF2/TTF/OTF and a
@@ -114,7 +114,7 @@ slot) before it ever goes live.
 - **Local edits vs the store** — if you edit a theme in the panel that the store also ships, the store shows
   **Update available vX → vY** with the changelog, and asks whether to keep your changes, replace them with
   the store version, or save yours as a copy under a new slug.
-- **A theme that throws** while rendering cannot take the site down: the page falls back to AMS Base and
+- **A theme that throws** while rendering cannot take the site down: the page falls back to AMS 1 (the bundled default theme) and
   the Themes screen says which theme failed and why.
 - Themes contain markup, so only install themes you trust.
 

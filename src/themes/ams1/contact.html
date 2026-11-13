@@ -1,0 +1,28 @@
+<div class="section wrap">
+  <h1>{{#if page}}{{page.title}}{{else}}Contact{{/if}}</h1>
+  {{#if page}}<div class="content intro-body">{{{page.content}}}</div>{{/if}}
+  <div class="two-col">
+    {{#if theme.contact_form_action}}
+    <form class="form" method="post" action="{{theme.contact_form_action}}">
+      <label for="c-name">Name</label><input id="c-name" name="name" required>
+      <label for="c-email">Email</label><input id="c-email" name="email" type="email" required>
+      <label for="c-message">Message</label><textarea id="c-message" name="message" rows="6" required></textarea>
+      <button class="btn" type="submit">Send message</button>
+    </form>
+    {{else}}
+    <div class="card"><div class="body">
+      <h3>Send a message</h3>
+      <p>Add a form endpoint under Appearance &rarr; Theme settings to collect messages here, or write to the address on the right.</p>
+    </div></div>
+    {{/if}}
+    <div>
+      <h3>Details</h3>
+      <p>
+        {{#if theme.contact_email}}Email: <a href="mailto:{{theme.contact_email}}">{{theme.contact_email}}</a><br>{{/if}}
+        {{#if theme.contact_phone}}Phone/WhatsApp: {{theme.contact_phone}}<br>{{/if}}
+        {{#if theme.contact_hours}}{{theme.contact_hours}}{{/if}}
+      </p>
+      <p class="muted">We reply within 24 hours.</p>
+    </div>
+  </div>
+</div>

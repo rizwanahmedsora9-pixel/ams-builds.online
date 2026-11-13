@@ -4,7 +4,7 @@ import { commentToken, commentsEnabled, approvedComments, renderCommentsHtml, ty
 import { esc, safeUrl } from './security';
 import { listPages } from './content';
 import { type PublicPageHierarchy } from './page-hierarchy';
-import { defaultTheme } from '../themes/default';
+import { defaultTheme } from '../themes/ams1';
 import type { ThemeBundle } from './theme-manifest';
 import { activeThemeFor, applyLayout, loadTheme, renderWithTheme, themeAssetUrl } from './theme-store';
 import { variablesFor } from './tokens';
@@ -245,8 +245,9 @@ export async function renderTheme(
   const assetUrl = (path: string): string => themeAssetUrl(theme.slug, path.replace(/^\.?\//, ''));
   // Themes installed in the panel have their stylesheet stored as an asset, so a
   // v2 layout can link it (`{{{theme_css_url}}}`) instead of inlining it. The
-  // bundled AMS Base has no assets: its CSS is inlined, and every old layout that
-  // still asks for `{{{theme_css}}}` keeps working either way.
+  // bundled copy of AMS 1 (used before an install has written its row) has no
+  // asset to link: its CSS is inlined, and every layout that asks for
+  // `{{{theme_css}}}` keeps working either way.
   const cssUrl = `${assetUrl('style.css')}?v=${encodeURIComponent(theme.version)}`;
   // A per-item template (content.template) is resolved by the caller into
   // `opts.template`; when the current theme has no such template the default
@@ -293,6 +294,10 @@ export async function renderTheme(
     pages: pageRows.map((p) => ({
       title: p.title, slug: p.slug,
       url: settings.home_page_id === String(p.id) ? '/' : '/' + p.slug,
+      // The template the editor picked for this page, so a theme can build a
+      // list of one kind of page (a Tools index of the pages laid out as tools):
+      // `{{#if template eq "tool"}}`. Empty means the kind's default template.
+      template: p.template || '',
     })),
     year: new Date().getUTCFullYear(),
     body_class: `tpl-${opts.template}`,
@@ -346,7 +351,7 @@ export async function renderTheme(
 
 /**
  * Rendering failures are remembered per isolate so the Themes screen can show
- * "this theme failed, the site is falling back to AMS Base".
+ * "this theme failed, the site is falling back to AMS 1".
  */
 const themeFailures = new Map<string, { at: string; message: string }>();
 export function markThemeFailure(slug: string, err: unknown): void {
