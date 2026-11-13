@@ -1,0 +1,4 @@
+{
+  "supported_locations": ["primary", "footer"],
+  "notes": "Menu records are owned by the CMS. Assign existing menus under the CMS Menus screen; this theme only renders the declared locations."
+}

@@ -865,7 +865,37 @@ test('12a1. pages: parent/child hierarchy, hidden header children, and public br
   log('page tree, parent picker, cycle guard, automatic child cards, breadcrumbs, and menu hiding work');
 });
 
-test('12b. themes: upload JSON and zip, activate, replace, download, delete', async () => {
+test('12b. themes: official sample ZIP round-trips, renders, previews, searches and activates', async () => {
+  const manager = await get(`${admin}/themes`);
+  const activeRows = [...manager.text.matchAll(/<li style="flex-wrap:wrap" data-theme-id="(\d+)" data-theme-slug="([^"]+)">([\s\S]*?)<\/li>/g)];
+  const activeRow = activeRows.find((row) => /badge published/.test(row[3]));
+  assert.ok(activeRow, 'an active installed theme exists before sample upload');
+  const oldActiveId = Number(activeRow[1]);
+  const oldActiveSlug = activeRow[2];
+
+  const sample = await get(`${admin}/themes/sample.zip`);
+  assert.equal(sample.status, 200, 'sample endpoint returns a downloadable package');
+  assert.equal(sample.headers.get('content-type'), 'application/zip');
+  assert.match(sample.headers.get('content-disposition'), /ahmed-starter-theme\.zip/);
+  assert.equal(new DataView(sample.bytes.buffer, sample.bytes.byteOffset).getUint32(0, true), 0x04034b50, 'sample is a ZIP archive');
+  const roundTrip = await uploadTheme('ahmed-starter-theme.zip', sample.bytes);
+  assert.match(roundTrip.location, /v1\.0\.0 installed/, roundTrip.location);
+  const sampleRow = (await get(`${admin}/themes`)).text.match(/data-theme-id="(\d+)" data-theme-slug="ahmed-starter-theme"/);
+  assert.ok(sampleRow, 'uploaded sample appears in the installed theme registry');
+  assert.equal((await get(`${admin}/themes`)).text.includes(`data-theme-id="${oldActiveId}" data-theme-slug="${oldActiveSlug}"`), true);
+  const previewPanel = await get(`${admin}/themes/preview/ahmed-starter-theme`);
+  assert.match(previewPanel.text, /id="theme-preview-frame"/);
+  assert.match((await get('/?preview=1&theme=ahmed-starter-theme')).text, /class="hero"/, 'inactive theme preview renders existing CMS data');
+  assert.match((await get('/search?q=Welcome&preview=1&theme=ahmed-starter-theme')).text, /search-form/, 'the sample search template uses real CMS search results');
+  assert.match((await anon('/')).text, /AMS 1|site-shell|site-header/, 'sample upload and preview leave the active public theme unchanged');
+  await adminPost(`/themes/${sampleRow[1]}/activate`, {});
+  assert.match((await anon('/')).text, /class="hero"/, 'activation uses the selected theme on public routes');
+  await adminPost(`/themes/${oldActiveId}/activate`, {});
+  assert.match((await get(`${admin}/themes`)).text, /ahmed-starter-theme/, 'switching back preserves the installed theme');
+  await adminPost(`/themes/${sampleRow[1]}/delete`, {});
+});
+
+test('12c. themes: upload JSON and zip, activate, replace, download, delete', async () => {
   const bad = [
     ['not json', 'nope.json', 'not valid JSON'],
     [JSON.stringify({ name: 'X', templates: { home: 'x' } }), 'x.json', '"base" template'],

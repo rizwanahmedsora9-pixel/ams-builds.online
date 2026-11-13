@@ -3,7 +3,12 @@
  * DecompressionStream, so theme bundles can be uploaded without a dependency.
  * Sizes are enforced while inflating, so a "zip bomb" cannot exhaust memory.
  */
-export type ZipLimits = { maxEntries: number; maxTotalBytes: number };
+export type ZipLimits = {
+  maxEntries: number;
+  maxTotalBytes: number;
+  maxCompressedBytes?: number;
+  maxCompressionRatio?: number;
+};
 
 async function inflateRaw(data: Uint8Array, limit: number): Promise<Uint8Array> {
   const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
@@ -36,47 +41,114 @@ export async function unzip(buf: ArrayBuffer, limits: ZipLimits): Promise<Map<st
   const bytes = new Uint8Array(buf);
   const view = new DataView(buf);
   const bad = () => new Error('This is not a valid zip file.');
+  const maxCompressed = limits.maxCompressedBytes ?? 6 * 1024 * 1024;
+  const maxRatio = limits.maxCompressionRatio ?? 200;
+  if (bytes.length > maxCompressed) throw new Error('The zip file exceeds the compressed-size limit.');
 
   // End-of-central-directory record: search backwards (it may be followed by a comment).
   let eocd = -1;
   for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 0xffff); i--) {
-    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (i + 22 <= bytes.length && view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
   }
   if (eocd < 0) throw bad();
+  const disk = view.getUint16(eocd + 4, true);
+  const centralDisk = view.getUint16(eocd + 6, true);
+  const diskCount = view.getUint16(eocd + 8, true);
   const count = view.getUint16(eocd + 10, true);
-  let ptr = view.getUint32(eocd + 16, true);
+  const centralSize = view.getUint32(eocd + 12, true);
+  const centralStart = view.getUint32(eocd + 16, true);
+  if (disk || centralDisk || diskCount !== count || count === 0xffff || centralSize === 0xffffffff || centralStart === 0xffffffff) {
+    throw new Error('Multi-disk and ZIP64 archives are not supported.');
+  }
   if (count > limits.maxEntries) throw new Error(`The zip file has too many files (limit ${limits.maxEntries}).`);
+  if (centralStart + centralSize > eocd) throw bad();
 
   const files = new Map<string, Uint8Array>();
-  const decoder = new TextDecoder();
+  const names = new Map<string, 'file' | 'directory'>();
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let total = 0;
+  let ptr = centralStart;
+  const rejectPath = (name: string): string => {
+    if (!name || name.includes('\0') || name.startsWith('/') || name.startsWith('\\') || /^[a-z]:/i.test(name)) {
+      throw new Error('The zip contains an absolute or invalid path.');
+    }
+    const normalized = name.replace(/\\/g, '/');
+    const directory = normalized.endsWith('/');
+    const parts = normalized.split('/');
+    if (directory) parts.pop();
+    if (!parts.length || parts.some((part) => !part || part === '.' || part === '..')) {
+      throw new Error('The zip contains an unsafe path (empty, dot, or parent segment).');
+    }
+    return normalized;
+  };
+
   for (let n = 0; n < count; n++) {
-    if (ptr + 46 > bytes.length || view.getUint32(ptr, true) !== 0x02014b50) throw bad();
+    if (ptr + 46 > centralStart + centralSize || view.getUint32(ptr, true) !== 0x02014b50) throw bad();
+    const madeBy = view.getUint16(ptr + 4, true) >>> 8;
     const flags = view.getUint16(ptr + 8, true);
     const method = view.getUint16(ptr + 10, true);
+    const expectedCrc = view.getUint32(ptr + 16, true);
     const compSize = view.getUint32(ptr + 20, true);
+    const uncompSize = view.getUint32(ptr + 24, true);
     const nameLen = view.getUint16(ptr + 28, true);
     const extraLen = view.getUint16(ptr + 30, true);
     const commentLen = view.getUint16(ptr + 32, true);
+    const diskStart = view.getUint16(ptr + 34, true);
+    const externalAttrs = view.getUint32(ptr + 38, true);
     const local = view.getUint32(ptr + 42, true);
-    const name = decoder.decode(bytes.subarray(ptr + 46, ptr + 46 + nameLen)).replace(/\\/g, '/');
-    ptr += 46 + nameLen + extraLen + commentLen;
-
-    if (name.endsWith('/') || name.startsWith('__MACOSX/')) continue;
+    const next = ptr + 46 + nameLen + extraLen + commentLen;
+    if (next > centralStart + centralSize || diskStart !== 0 || compSize === 0xffffffff || uncompSize === 0xffffffff || local === 0xffffffff) throw bad();
+    let decodedName: string;
+    try { decodedName = decoder.decode(bytes.subarray(ptr + 46, ptr + 46 + nameLen)); }
+    catch { throw new Error('The zip contains a filename that is not valid UTF-8.'); }
+    const name = rejectPath(decodedName);
+    const directory = name.endsWith('/');
+    if (madeBy === 3) {
+      const mode = externalAttrs >>> 16;
+      if ((mode & 0xf000) === 0xa000) throw new Error('Symbolic links are not allowed in a theme zip.');
+    }
     if (flags & 1) throw new Error('Password-protected zip files are not supported.');
-    if (local + 30 > bytes.length || view.getUint32(local, true) !== 0x04034b50) throw bad();
-    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
-    if (start + compSize > bytes.length) throw bad();
-    const raw = bytes.subarray(start, start + compSize);
+    if (method !== 0 && method !== 8) throw new Error(`"${name}" uses an unsupported compression method.`);
 
+    const key = name.toLowerCase();
+    if (names.has(key)) throw new Error(`The zip contains a duplicate or case-conflicting path: "${name}".`);
+    const baseName = directory ? name.slice(0, -1) : name;
+    const segments = baseName.split('/');
+    for (let i = 1; i < segments.length; i++) {
+      const parent = segments.slice(0, i).join('/').toLowerCase();
+      if (names.get(parent) === 'file') throw new Error(`The zip has conflicting file and directory paths near "${name}".`);
+    }
+    if (!directory && [...names].some(([seen, kind]) => kind === 'file' && seen.startsWith(key + '/'))) {
+      throw new Error(`The zip has conflicting file and directory paths near "${name}".`);
+    }
+    names.set(key, directory ? 'directory' : 'file');
+    ptr = next;
+    if (directory || name.startsWith('__MACOSX/')) continue;
+    if (uncompSize > limits.maxTotalBytes - total) throw new Error('The zip file is too large once unpacked.');
+    if (uncompSize && (!compSize || uncompSize / compSize > maxRatio)) {
+      throw new Error(`"${name}" has a suspicious compression ratio.`);
+    }
+    if (local + 30 > centralStart || view.getUint32(local, true) !== 0x04034b50) throw bad();
+    const localFlags = view.getUint16(local + 6, true);
+    const localMethod = view.getUint16(local + 8, true);
+    const localNameLength = view.getUint16(local + 26, true);
+    const localExtraLength = view.getUint16(local + 28, true);
+    const localNameStart = local + 30;
+    const start = localNameStart + localNameLength + localExtraLength;
+    if (localFlags !== flags || localMethod !== method || start + compSize > centralStart) throw bad();
+    let localName: string;
+    try { localName = decoder.decode(bytes.subarray(localNameStart, localNameStart + localNameLength)); }
+    catch { throw bad(); }
+    if (localName.replace(/\\/g, '/') !== decodedName.replace(/\\/g, '/')) throw bad();
+    const raw = bytes.subarray(start, start + compSize);
     let data: Uint8Array;
     if (method === 0) data = raw.slice();
-    else if (method === 8) data = await inflateRaw(raw, limits.maxTotalBytes - total);
-    else throw new Error(`"${name}" uses an unsupported compression method.`);
+    else data = await inflateRaw(raw, limits.maxTotalBytes - total);
+    if (data.length !== uncompSize || crc32(data) !== expectedCrc) throw new Error(`"${name}" failed ZIP integrity validation.`);
     total += data.length;
-    if (total > limits.maxTotalBytes) throw new Error('The zip file is too large once unpacked.');
     files.set(name, data);
   }
+  if (ptr !== centralStart + centralSize) throw bad();
   return files;
 }
 

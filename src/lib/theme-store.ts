@@ -61,7 +61,9 @@ function toBundle(row: ThemeRow): ThemeBundle {
     name: row.name, slug: row.slug, version: row.version,
     author: '', authorUrl: '', homepage: '', description: '', parent: null,
     layout: 'base', tags: [], supports: [], screenshot: '', preview: [],
-    settings: [], widgets: DEFAULT_WIDGET_AREAS, changelog: [], assets: [], manifestVersion: 2,
+    settings: [], settings_schema: [], widgets: DEFAULT_WIDGET_AREAS, changelog: [], assets: [],
+    cms_compatibility: { min: '0.0.0' }, required_templates: ['base'], optional_templates: [], features: [],
+    menu_locations: ['primary', 'footer'], asset_entrypoints: { css: '', js: [] }, manifest_version: 2,
   };
   return {
     name: row.name, slug: row.slug, version: row.version,

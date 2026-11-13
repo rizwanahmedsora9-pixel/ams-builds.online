@@ -3,7 +3,7 @@ import { getCookie } from 'hono/cookie';
 import type { AppEnv, Ctx, Env } from '../types';
 import { SESSION_COOKIE, sessionUser } from '../lib/auth';
 import { bumpCache, cfgFor, getConfig, getSettings, type Settings } from '../lib/config';
-import { findContent, listPosts, mediaUrl, permalinkStyle, postAssignedPages, postUrl, toViews, type ContentView } from '../lib/content';
+import { findContent, listPosts, mediaUrl, permalinkStyle, postAssignedPages, postUrl, searchContent, toViews, type ContentView } from '../lib/content';
 import { hasTable } from '../lib/schema';
 import { commentsEnabled, commentsModerated, validCommentToken } from '../lib/comments';
 import { getFile } from '../lib/files';
@@ -117,6 +117,27 @@ async function resolve(c: Ctx, settings: Settings, path: string, preview: boolea
       data: { page: page ?? null, posts: await toViews(env, rows, settings), page_posts: homePagePosts, is_home: true },
       pageHierarchy: row ? await publicPageHierarchy(env, row.id, settings.home_page_id) : undefined,
       pagePosts: homePagePosts.length ? homePagePosts : undefined,
+    };
+  }
+
+  // Search results use the same ContentView contract as archive templates; the
+  // query is never cached because the page cache key intentionally omits query strings.
+  if (path === '/search') {
+    const query = String(c.req.query('q') || '').trim().slice(0, 120);
+    const pageNo = Math.max(1, Math.min(1000, Number(c.req.query('page')) || 1));
+    const { rows, total } = await searchContent(env, { query, page: pageNo, perPage });
+    return {
+      status: 200, template: 'search',
+      meta: { title: query ? `Search: ${query} – ${siteTitle}` : `Search – ${siteTitle}`, canonical: '/search', noindex: true },
+      data: {
+        search: { query, total }, q: query,
+        posts: await toViews(env, rows, settings),
+        pagination: {
+          page: pageNo, pages: Math.max(1, Math.ceil(total / perPage)),
+          prev: pageNo > 1 ? `/search?q=${encodeURIComponent(query)}&page=${pageNo - 1}` : null,
+          next: pageNo * perPage < total ? `/search?q=${encodeURIComponent(query)}&page=${pageNo + 1}` : null,
+        },
+      },
     };
   }
 
@@ -360,6 +381,9 @@ site.get('*', async (c) => {
   // editor's "Preview in theme" menu and the theme store use this).
   const hasSession = !!getCookie(c, SESSION_COOKIE);
   const signedIn = hasSession ? await sessionUser(c, c.var.cfg) : null;
+  if (url.searchParams.has('theme') && (!signedIn || !can(signedIn, 'manage_themes'))) {
+    return c.notFound();
+  }
   const preview = hasSession && url.searchParams.has('preview') && !!signedIn;
   // The Customizer's channel: unsaved values live in a signed cookie, never in
   // the query string, and are read only for a signed-in admin.
@@ -372,7 +396,7 @@ site.get('*', async (c) => {
   // must render per request: the page cache is keyed by path, not by query, and a
   // cached home response would answer the preview with the stripped-down page.
   const previewLanding = url.searchParams.get('landing') === '1';
-  const cacheable = !hasSession && path.length <= 200 && !previewLanding && !url.searchParams.has('comment') && !url.searchParams.has('reply_to');
+  const cacheable = !hasSession && path.length <= 200 && path !== '/search' && !previewLanding && !url.searchParams.has('comment') && !url.searchParams.has('reply_to');
   const key = cacheKey(c.var.cfg, url);
   const headers = { 'Cache-Control': hasSession ? 'private, no-store' : 'public, max-age=0, must-revalidate' };
 
