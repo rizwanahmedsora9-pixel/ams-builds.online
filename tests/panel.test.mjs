@@ -1482,12 +1482,14 @@ test('phase 5: an older install shows "Update available vX → vY" with its chan
   await panel.adminPost('/themes/store/ams-1/install', { activate: 1 });
 });
 
-test('shell confines wide content and gives each column its own scroll area', async () => {
+test('shell uses document scrolling and an overlay drawer', async () => {
   const css = (await panel.get(`${panel.admin}/assets/app.css`)).text;
   assert.doesNotMatch(css, /\b100vh\b/);
-  assert.match(css, /\.shell\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)[^}]*height:\s*calc\(100dvh/s);
+  assert.match(css, /\.shell\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)[^}]*min-height:\s*calc\(100dvh/s);
   assert.match(css, /\.shell\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/s);
-  assert.match(css, /\.main\s*\{[^}]*min-width:\s*0[^}]*min-height:\s*0[^}]*overflow-y:\s*auto[^}]*overflow-x:\s*clip/s);
+  assert.doesNotMatch(css.match(/\.main\s*\{[^}]*\}/s)[0], /overflow-y/);
+  assert.match(css, /\.rail\s*\{[^}]*position:\s*fixed[^}]*visibility:\s*hidden/s);
+  assert.match(css, /#nav-t:checked\s*~\s*\.nav-backdrop/);
   assert.match(css, /\.table-wrap\s*\{[^}]*max-width:\s*100%[^}]*overflow-x:\s*auto/s);
 });
 

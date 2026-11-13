@@ -190,7 +190,7 @@ function renderRail(c: Ctx, groups: NavGroup[], activeKey: string, path: string,
 </a>
 ${open ? html`<div class="rail__sub">${children.map((ch) => html`<a href="${base + ch.path}"${isChildActive(ch.path) ? raw(' aria-current="page"') : raw('')}>${ch.label}</a>`)}</div>` : ''}`;
   });
-  return html`<nav class="rail" aria-label="Admin sections">
+  return html`<nav class="rail" id="admin-rail" aria-label="Admin sections">
   <div class="rail__section">${items}</div>
   <div class="rail__foot">
     <a class="rail__item" href="${base}/preferences"${activeKey === 'preferences' ? raw(' aria-current="page"') : raw('')} title="Preferences">${icon('settings', { cls: 'rail__ico' })}<span class="rail__label">Preferences</span></a>
@@ -326,7 +326,7 @@ export async function layout(c: Ctx, title: string, body: Raw, _active = '', opt
   const page = html`<input type="checkbox" id="nav-t" aria-hidden="true" tabindex="-1">
 <input type="checkbox" id="side-c" aria-hidden="true" tabindex="-1"${prefs.railCollapsed ? raw(' checked') : raw('')}>
 <header class="topbar">
-  <label for="nav-t" class="burger" aria-label="Menu">${icon('menu')}</label>
+  <label for="nav-t" class="burger" role="button" tabindex="0" aria-label="Menu" aria-controls="admin-rail" aria-expanded="false">${icon('menu')}</label>
   <a class="topbar__brand" href="${base}">${icon('globe')}<span class="topbar__title">${siteTitle || 'Dashboard'}</span></a>
   <span class="topbar__spacer"></span>
   <div class="topbar__actions">
@@ -338,6 +338,7 @@ export async function layout(c: Ctx, title: string, body: Raw, _active = '', opt
     ${renderUserMenu(c, prefs, path)}
   </div>
 </header>
+<label for="nav-t" class="nav-backdrop" aria-hidden="true"></label>
 <div class="shell">
   ${renderRail(c, groups, activeKey, path, search, prefs)}
   <main class="main${opts.wide ? ' main--wide' : ''}" id="main">
