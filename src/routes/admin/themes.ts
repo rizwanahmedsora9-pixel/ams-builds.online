@@ -174,11 +174,11 @@ themes.get('/themes', async (c) => {
 
   return layout(c, 'Themes', html`
 <h1>Themes</h1>
-${failure ? notice(html`<b>${failure.slug}</b> failed to render, so the site is falling back to AMS Base. Check its templates in <a href="${base}/themes/${encodeURIComponent(failure.slug)}/edit">Edit</a> — the message was “${failure.fail!.message}”.`, { tone: 'danger', title: 'Theme failed' }) : ''}
+${failure ? notice(html`<b>${failure.slug}</b> failed to render, so the site is falling back to AMS 1. Check its templates in <a href="${base}/themes/${encodeURIComponent(failure.slug)}/edit">Edit</a> — the message was “${failure.fail!.message}”.`, { tone: 'danger', title: 'Theme failed' }) : ''}
 ${v2 ? '' : ''}
 ${rows.some((t) => t.active)
   ? ''
-  : notice(html`No theme is active, so pages use the bundled AMS Base theme. <a href="${base}/themes/store/default/install?activate=1">Activate AMS Base</a>`, { tone: 'warn' })}
+  : notice(html`No theme is active, so pages use the bundled AMS 1 theme. <a href="${base}/themes/store/ams-1/install?activate=1">Activate AMS 1</a>`, { tone: 'warn' })}
 
 <h2>Theme store</h2>
 <div class="store">
@@ -249,7 +249,7 @@ ${rows.some((t) => t.active)
 
 ${card({
   title: 'Ready-made themes',
-  body: html`<p class="muted">Three themes ship with the app: <b>AMS Base</b> (light, minimal), <b>AMS Pro</b> (business, tabbed header) and <b>AMS Premium</b> (dark header, serif headlines) — Premium inherits Pro's page, post and archive templates through <code>"parent": "ams-pro"</code>, which is what a store theme looks like now.</p>`,
+  body: html`<p class="muted">Six themes ship with the app. <b>AMS 1</b> is the default: a sticky header, a featured card and the full AMS page set (home, blog, post, page, tools, a tool page, services, contact and 404) with labelled ad slots on posts only. <b>AMS Base</b> is the older light-and-minimal theme. <b>AMS Pro</b> (business, tabbed header) and <b>AMS Premium</b> (dark header, serif headlines) build on it — Premium inherits Pro's page, post and archive templates through <code>"parent": "ams-pro"</code>, which is what a store theme looks like now. <b>AMS Journal</b> and <b>AMS Portfolio</b> cover reading and portfolio sites.</p>`,
 })}
 
 <div class="card">
@@ -491,7 +491,7 @@ ${theme.active ? html`<p><span class="badge published">Active theme</span> <a cl
       <form method="post" action="${base}/themes/${theme.id}/activate" class="inline">${csrfField(c)}<button class="btn small" type="submit">Activate</button></form>
       <a class="btn ghost small" href="/?preview=1&theme=${encodeURIComponent(slug)}" target="_blank" rel="noopener">Preview on your site</a>
       <a class="btn ghost small" href="${base}/themes/${encodeURIComponent(slug)}/edit">Edit templates</a></p>`}
-${failure ? notice(html`This theme threw while rendering, so visitors saw AMS Base instead. ${failure.message}`, { tone: 'danger', title: 'Render failed' }) : ''}
+${failure ? notice(html`This theme threw while rendering, so visitors saw AMS 1 instead. ${failure.message}`, { tone: 'danger', title: 'Render failed' }) : ''}
 ${theme.manifest.description ? html`<p class="muted">${theme.manifest.description}</p>` : ''}
 ${theme.manifest.author ? html`<p class="muted">By ${theme.manifest.author}${theme.manifest.homepage ? html` · <a href="${theme.manifest.homepage}" target="_blank" rel="noopener noreferrer">homepage</a>` : ''}</p>` : ''}
 ${parent ? html`<p class="muted">Inherits templates, partials and assets from <a href="${base}/themes/${encodeURIComponent(parent.slug)}">${parent.name}</a>.</p>` : ''}

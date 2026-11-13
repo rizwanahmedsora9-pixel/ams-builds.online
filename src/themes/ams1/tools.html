@@ -1,0 +1,19 @@
+<div class="section wrap">
+  <h1>{{#if page}}{{page.title}}{{else}}Free tools{{/if}}</h1>
+  <p class="muted">{{#if theme.tools_blurb}}{{theme.tools_blurb}}{{else}}Simple tools that run in your browser. Nothing is uploaded anywhere.{{/if}}</p>
+  {{#if page}}<div class="content intro-body">{{{page.content}}}</div>{{/if}}
+  {{#if pages}}
+  <div class="grid tools">
+    {{#each pages}}{{#if template eq "tool"}}
+    <article class="card">
+      <div class="body">
+        <h3><a href="{{url}}">{{title}}</a></h3>
+        <p class="meta">{{#if content}}{{content | strip_html | truncate 90}}{{else}}Open the tool{{/if}}</p>
+      </div>
+    </article>
+    {{/if}}{{/each}}
+  </div>
+  {{else}}
+  <p class="empty">No tools have been published yet.</p>
+  {{/if}}
+</div>

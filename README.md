@@ -520,15 +520,19 @@ becomes controls with no code — are in the [Panel Guide](docs/panel-guide.md#a
 validator. A theme package can ship templates, partials, a stylesheet and binary assets (logo, fonts, one
 `theme.js`), and a theme can inherit from another one.
 
+**AMS 1 is the default theme**: a new install starts with it, a site with no active theme renders with it,
+and a theme that throws while rendering falls back to it.
+
 | Store theme | Look |
 | --- | --- |
-| AMS Base | The standard theme: light and minimal. Installed by default. |
+| **AMS 1** | **The default theme.** Sticky header, one centred hero, a featured card, post and tool grids, a four-column footer, and a *layout for every page*: home, blog list, post, page, tools index, a tool page, services, contact and 404. Labelled ad slots on posts and tool pages only, filled from **Appearance → Theme settings**. Ships 25 theme settings (hero copy, call-to-action, contact details, ad code `ad_slot_1`, `ad_slot_2`, `ad_slot_tool`) and two widget areas (`footer`, `after-post`). Its palette, radius, type and width all read the Customizer's design tokens. |
+| AMS Base | The older light-and-minimal theme: one reading column, cards, no page-specific layouts. |
 | AMS Pro | Sticky header with pill-style tab navigation, colour hero, post grid, three-column dark footer. |
 | AMS Premium | Dark header with top bar and underlined tabs, serif headlines, large hero, rich footer. Inherits Pro's page, post and archive templates through `"parent": "ams-pro"`. |
 | AMS Journal | Single column, serif text, a 34rem measure and large images. Header and footer are partials, six settings (measure, serif, accent, rules, byline, drop cap). |
 | AMS Portfolio | A responsive grid with a full-width hero. Eight settings including hero text, grid columns and accent, driven by `--cols` and `--p-*` tokens. |
 
-All five use system fonts, load nothing from other servers, need no JavaScript and follow the visitor's
+All six use system fonts, load nothing from other servers, need no JavaScript and follow the visitor's
 light or dark setting. Each ships a `screenshot.png` that the store card shows (and a palette gradient when
 a theme ships none). Store themes live in `src/themes/`; add a folder and list it in `src/themes/index.ts`
 to ship another.
@@ -680,6 +684,7 @@ src/
     ui.ts                  admin HTML helpers and CSS
   themes/
     index.ts               theme store list
+    ams1/                  AMS 1 (the default: the full page set)
     default/               AMS Base
     pro/                   AMS Pro
     premium/               AMS Premium

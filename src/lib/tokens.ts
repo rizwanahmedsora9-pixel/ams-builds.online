@@ -227,7 +227,7 @@ export function supportedTokens(css: string): TokenField[] {
 const ALIASES: Record<string, string[]> = {
   '--brand': ['--accent', '--primary', '--link', '--gold'],
   '--brand-alt': ['--accent-2', '--primary-2'],
-  '--on-brand': ['--accent-fg', '--on-accent'],
+  '--on-brand': ['--accent-fg', '--on-accent', '--accent-ink'],
   '--text': ['--fg', '--ink', '--body'],
   '--text-muted': ['--muted', '--muted-fg', '--subtle'],
   '--bg': ['--background', '--page', '--surface-page'],
@@ -237,7 +237,7 @@ const ALIASES: Record<string, string[]> = {
   '--font-body': ['--font', '--font-sans', '--serif', '--body-font'],
   '--font-head': ['--font-heading', '--headings', '--heading-font'],
   '--type-scale': ['--font-size', '--base-font-size'],
-  '--width': ['--max', '--container', '--wrap', '--read'],
+  '--width': ['--max', '--container', '--wrap', '--read', '--w'],
 };
 /**
  * Builds the `:root` block. Only variables the theme reads are emitted, so a

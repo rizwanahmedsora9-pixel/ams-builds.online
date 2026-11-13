@@ -60,7 +60,7 @@ updates.get('/updates', async (c) => {
   <dl class="kv" style="margin-top:.8rem">
     <dt>Installed version</dt><dd>${APP_VERSION}</dd>
     <dt>Database schema</dt><dd>${schema} of ${SCHEMA_VERSION}</dd>
-    <dt>Active theme</dt><dd>${activeTheme ? `${activeTheme.name} v${activeTheme.version}` : 'AMS Base (bundled)'}</dd>
+    <dt>Active theme</dt><dd>${activeTheme ? `${activeTheme.name} v${activeTheme.version}` : 'AMS 1 (bundled)'}</dd>
     <dt>Last checked</dt><dd>${lastChecked} UTC</dd>
   </dl>
   ${pending.length ? html`

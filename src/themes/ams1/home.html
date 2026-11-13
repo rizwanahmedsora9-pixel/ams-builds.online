@@ -1,0 +1,69 @@
+<section class="hero">
+  <div class="wrap">
+    <h1>{{#if theme.hero_title}}{{theme.hero_title}}{{else}}{{site.title}}{{/if}}</h1>
+    <p>{{#if theme.hero_text}}{{theme.hero_text}}{{else}}{{#if site.tagline}}{{site.tagline}}{{else}}Practical tutorials and tools tested by a working developer.{{/if}}{{/if}}</p>
+    <div class="btns">
+      <a class="btn" href="{{#if theme.hero_button_url}}{{theme.hero_button_url}}{{else}}/blog{{/if}}">{{#if theme.hero_button_label}}{{theme.hero_button_label}}{{else}}Read the blog{{/if}}</a>
+      <a class="btn ghost" href="{{#if theme.hero_second_url}}{{theme.hero_second_url}}{{else}}/tools{{/if}}">{{#if theme.hero_second_label}}{{theme.hero_second_label}}{{else}}Use free tools{{/if}}</a>
+    </div>
+  </div>
+</section>
+
+{{#if page}}
+<section class="section wrap">
+  <div class="content home-content">{{{page.content}}}</div>
+</section>
+{{/if}}
+
+{{#if posts}}
+<section class="section wrap">
+  {{#each posts limit=1}}
+  <article class="card featured">
+    {{#if featured_image}}<a class="featured-img" href="{{url}}" tabindex="-1"><img src="{{featured_image}}" alt="{{featured_alt}}" loading="eager"></a>{{/if}}
+    <div class="body">
+      <p class="meta">{{#if categories}}{{#each categories}}{{name}}{{/each}}{{else}}Latest{{/if}}</p>
+      <h2><a href="{{url}}">{{title}}</a></h2>
+      <p>{{excerpt}}</p>
+      <p><a class="btn" href="{{url}}">Read this guide</a></p>
+    </div>
+  </article>
+  {{/each}}
+</section>
+
+<section class="section wrap">
+  <div class="section-head"><h2>Latest posts</h2><a href="/blog">View all &rarr;</a></div>
+  <div class="grid posts">
+    {{#each posts offset=1 limit=6}}
+    <article class="card">
+      {{#if featured_image}}<a href="{{url}}" tabindex="-1"><img src="{{featured_image}}" alt="{{featured_alt}}" loading="lazy"></a>{{/if}}
+      <div class="body">
+        <p class="meta">{{#if categories}}{{#each categories}}{{name}}{{/each}}{{else}}Post{{/if}}</p>
+        <h3><a href="{{url}}">{{title}}</a></h3>
+        <p class="meta"><time datetime="{{date_iso}}">{{date}}</time></p>
+      </div>
+    </article>
+    {{/each}}
+  </div>
+</section>
+{{else}}
+<p class="empty wrap">Nothing published yet.</p>
+{{/if}}
+
+{{#if pages}}
+<section class="section wrap">
+  <div class="section-head"><h2>Explore the site</h2><a href="/about">About &rarr;</a></div>
+  <div class="grid tools">
+    {{#each pages limit=4}}{{#if url ne "/"}}
+    <article class="card"><div class="body"><h3><a href="{{url}}">{{title}}</a></h3><p class="meta">Page</p></div></article>
+    {{/if}}{{/each}}
+  </div>
+</section>
+{{/if}}
+
+<section class="section wrap">
+  <div class="hire">
+    <h2>{{#if theme.cta_title}}{{theme.cta_title}}{{else}}Need a website or app built?{{/if}}</h2>
+    <p>{{#if theme.cta_text}}{{theme.cta_text}}{{else}}Flask apps, websites, Android apps and business software.{{/if}}</p>
+    <a class="btn" href="{{#if theme.cta_url}}{{theme.cta_url}}{{else}}/contact{{/if}}">Start a project</a>
+  </div>
+</section>
