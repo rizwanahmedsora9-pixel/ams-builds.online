@@ -6,7 +6,7 @@ import { resetSchemaCache } from '../../lib/schema';
  * by the installer; each entry here upgrades an already-installed database.
  * Append new entries with the next version number - never edit old ones.
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 /**
  * A migration statement that must not take the whole batch down.
@@ -164,6 +164,16 @@ const PAGE_HIERARCHY = [
   'CREATE INDEX IF NOT EXISTS idx_content_parent ON content (site_id, type, parent_id, menu_order)',
 ];
 
+/** Posts targeted exclusively to one or more CMS Pages / sub-pages. */
+const POST_PAGES = [
+  `CREATE TABLE IF NOT EXISTS content_pages (
+    content_id INTEGER NOT NULL,
+    page_id INTEGER NOT NULL,
+    PRIMARY KEY (content_id, page_id)
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_content_pages_page ON content_pages (page_id)',
+];
+
 export const migrations: { version: number; name: string; statements: string[] }[] = [
   { version: 2, name: 'Comments', statements: COMMENTS },
   { version: 3, name: 'Revisions, edit locks and page ordering', statements: EDITOR_WORKFLOW },
@@ -172,6 +182,7 @@ export const migrations: { version: number; name: string; statements: string[] }
   { version: 6, name: 'Per-page templates', statements: TEMPLATES },
   { version: 7, name: 'Audit log', statements: AUDIT },
   { version: 8, name: 'Hierarchical pages', statements: PAGE_HIERARCHY },
+  { version: 9, name: 'Page-specific posts', statements: POST_PAGES },
 ];
 
 /** Runs one migration statement, tolerating the errors marked in its comment. */

@@ -109,6 +109,7 @@ empty leftovers, so the stored markup is as clean as the writing.
   Preview in theme. *Quick edit* changes title, slug, status, date, categories and tags in place;
   *Duplicate* makes a draft copy; *Pin* floats a row to the top.
 - **Page hierarchy and order.** In the page editor, **Parent page** nests a page under another page; the Pages screen shows the resulting tree. A parent page automatically lists its published children as linked cards, and child pages show breadcrumbs back up the tree. Keep child pages out of the header by leaving **Show in the main menu** unchecked. Page URLs stay at their existing `/<slug>` addresses when you move them, so links do not break. The *Page order* panel sets sibling order and the same ordering reaches themes through `{{#each pages}}`.
+- **Page-specific posts.** In the post editor (under **Post options → Show on page(s) only**) and in *Quick edit*, tick one or more pages or sub-pages to publish a post exclusively on those selected pages. Assigned posts render as cards directly on each chosen page and remain reachable at their own post URL, while staying out of `/blog`, category/tag archives, the RSS feed, `/api/posts` and the Home page's general latest-posts feed. Leave every page unchecked for a regular blog post.
 - **Fixed first-visit landing screen.** The welcome screen is built into the site and cannot be
   replaced by a CMS Page or sample content. It takes the company name from **Settings → Site title**,
   the welcome line from **Settings → Tagline**, and an optional image from **Appearance → Identity**.

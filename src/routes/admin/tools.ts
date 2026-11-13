@@ -7,7 +7,7 @@ import { deleteFile, getFile, putFile } from '../../lib/files';
 import { safeUrl, slugify } from '../../lib/security';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 import { APP_VERSION } from '../../lib/version';
-import { hasColumn } from '../../lib/schema';
+import { hasColumn, hasTable } from '../../lib/schema';
 import { dbLockState } from '../../lib/dblock';
 import { MAX_PAGE_DEPTH } from '../../lib/page-hierarchy';
 import { BUDGETS, kb } from '../../lib/budgets';
@@ -48,10 +48,11 @@ async function exportData(c: Ctx): Promise<Record<string, unknown>> {
       return { results: [] };
     }
   };
-  const [content, terms, contentTerms, menus, menuItems, redirects, comments, users, settings, site, themes, themeSettings, revisions] = await Promise.all([
+  const [content, terms, contentTerms, contentPages, menus, menuItems, redirects, comments, users, settings, site, themes, themeSettings, revisions] = await Promise.all([
     query('SELECT * FROM content WHERE site_id=1 ORDER BY id'),
     query('SELECT * FROM terms WHERE site_id=1 ORDER BY id'),
     query('SELECT ct.* FROM content_terms ct JOIN content c ON c.id=ct.content_id WHERE c.site_id=1'),
+    query('SELECT cp.* FROM content_pages cp JOIN content c ON c.id=cp.content_id WHERE c.site_id=1'),
     query('SELECT * FROM menus WHERE site_id=1 ORDER BY id'),
     query('SELECT i.* FROM menu_items i JOIN menus m ON m.id=i.menu_id WHERE m.site_id=1 ORDER BY i.menu_id, i.position'),
     query('SELECT * FROM redirects WHERE site_id=1 ORDER BY id'),
@@ -79,6 +80,7 @@ async function exportData(c: Ctx): Promise<Record<string, unknown>> {
     content: content.results,
     terms: terms.results,
     content_terms: contentTerms.results,
+    content_pages: contentPages.results,
     menus: menus.results,
     menu_items: menuItems.results,
     redirects: redirects.results,
@@ -305,6 +307,26 @@ async function importData(c: Ctx, payload: any): Promise<ImportResult> {
     const termId = termMap.get(Number(row?.term_id));
     if (contentId && termId) {
       await db.prepare('INSERT OR IGNORE INTO content_terms (content_id,term_id) VALUES (?,?)').bind(contentId, termId).run();
+    }
+  }
+
+  if (Array.isArray(payload.content_pages) && await hasTable(c.env, 'content_pages')) {
+    const importedPostIds = new Set<number>();
+    for (const row of Array.isArray(payload.content) ? payload.content.slice(0, 5000) : []) {
+      if (row?.type === 'post') {
+        const localId = contentMap.get(Number(row?.id));
+        if (localId) importedPostIds.add(localId);
+      }
+    }
+    if (importedPostIds.size) {
+      await db.batch([...importedPostIds].map((postId) => db.prepare('DELETE FROM content_pages WHERE content_id=?').bind(postId)));
+    }
+    for (const row of payload.content_pages.slice(0, 20000)) {
+      const postId = contentMap.get(Number(row?.content_id));
+      const pageId = importedPageIds.get(Number(row?.page_id));
+      if (postId && pageId && importedPostIds.has(postId)) {
+        await db.prepare('INSERT OR IGNORE INTO content_pages (content_id,page_id) VALUES (?,?)').bind(postId, pageId).run();
+      }
     }
   }
 

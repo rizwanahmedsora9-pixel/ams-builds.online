@@ -88,9 +88,9 @@ slot) before it ever goes live.
 | --- | --- |
 | every template | `site.title`, `site.tagline`, `site.url`, `site.logo`, `site.social_image`, `site.favicon`, `year`, `body_class`, `nonce`, `tokens` (the design tokens as data), `scheme`, `widget_areas`, `menu.primary` and `menu.footer` (lists of `label`, `url`, `active`), `pages` (published pages in the order set on the Pages screen) |
 | `base` (or the layout) | `{{{head}}}`, `{{{theme_css}}}`, `{{{theme_css_url}}}`, `{{{content}}}`, `{{{footer}}}`, `{{{widgets.footer}}}`, `{{{widgets.sidebar}}}` |
-| `home` | `page` (the chosen home page, may be empty), `posts` (latest five) |
-| `page` | `page.title`, `{{{page.content}}}` |
-| `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`), `{{{comments_html}}}`, `comments_count`, `comments_open` |
+| `home` | `page` (the chosen home page, may be empty), `posts` (latest five), `page_posts` (posts assigned exclusively to the home page) |
+| `page` | `page.title`, `{{{page.content}}}`, `posts` / `page_posts` (posts assigned to this page; rendered automatically as cards when the template does not reference `posts` or `page_posts`) |
+| `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`), `post.pages` (assigned pages), `{{{comments_html}}}`, `comments_count`, `comments_open` |
 | `archive` | `archive.title`, `posts`, `pagination.prev`, `pagination.next` |
 | each item of `posts` | `title`, `url`, `excerpt`, `date`, `date_iso`, `featured_image`, `featured_alt` |
 

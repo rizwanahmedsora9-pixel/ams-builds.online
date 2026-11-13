@@ -24,5 +24,5 @@
 
   {{#if theme.ad_slot_2}}<div class="ad-slot" role="complementary" aria-label="Advertisement">{{{theme.ad_slot_2}}}</div>{{/if}}
 
-  <p class="back"><a href="/blog">&larr; All posts</a></p>
+  <p class="back">{{#if post.pages}}{{#each post.pages limit=1}}<a href="{{url}}">&larr; Back to {{title}}</a>{{/each}}{{else}}<a href="/blog">&larr; All posts</a>{{/if}}</p>
 </article>

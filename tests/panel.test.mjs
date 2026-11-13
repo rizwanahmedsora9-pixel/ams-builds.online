@@ -553,9 +553,11 @@ test('an upgrade path: a database without the Phase 2 tables still works', async
   db.exec('DROP TABLE content_lock');
   db.exec("UPDATE settings SET value='2' WHERE key='schema_version'");
   // Simulate a genuinely old Pages schema too; migration 8 must add the new
-  // nullable parent link while preserving existing rows.
+  // nullable parent link while preserving existing rows, and migration 9 adds
+  // the content_pages join table.
   db.exec('DROP INDEX IF EXISTS idx_content_parent');
   db.exec('ALTER TABLE content DROP COLUMN parent_id');
+  db.exec('DROP TABLE IF EXISTS content_pages');
   db.close();
 
   const created = await panel.adminPost('/posts/save', { title: 'Pre Migration Post', body: '<p>Old install.</p>', status: 'draft' });
@@ -583,6 +585,7 @@ test('an upgrade path: a database without the Phase 2 tables still works', async
   const after = await panel.adminPost(`/posts/${id}/autosave`, { title: 'Pre Migration Post', body: '<p>Typed now.</p>' });
   assert.equal(after.status, 200, 'after the update, autosave works');
   assert.match((await panel.get(`${panel.admin}/pages/new`)).text, /id="page-parent"/, 'the same update adds the parent-page control to old sites');
+  assert.match((await panel.get(`${panel.admin}/posts/new`)).text, /id="post-pages-picker"/, 'and the page-specific post picker');
 });
 
 /* ---------------------------------------------------------------- Phase 3 */
