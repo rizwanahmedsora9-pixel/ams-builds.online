@@ -122,6 +122,18 @@ test('the palette is in the document, keyboard-reachable and script-backed', asy
   assert.match(page.text, /setAttribute\('data-search-url', "\/admin-panel\/search"\)/, 'palette knows its endpoint');
   assert.match(page.text, /metaKey \|\| event\.ctrlKey/, 'Cmd/Ctrl+K is wired');
   assert.match(page.text, /data-palette-item/, 'commands are listed before typing');
+
+  // The dialog is mounted in every admin page, so any display the closed state
+  // picks up paints its command list ("Create", "Go to") as an extra panel
+  // below the content. A class selector beats the UA's
+  // `dialog:not([open]) { display: none }`, which is how that panel appeared.
+  const css = (await panel.get(`${panel.admin}/assets/app.css`)).text;
+  for (const [selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!/(^|[\s,])\.palette\b/.test(selector) || selector.includes('[open]')) continue;
+    assert.doesNotMatch(body, /(?<!-)display\s*:/, `closed .palette must not set display: ${selector.trim()}`);
+  }
+  assert.match(css, /\.palette:not\(\[open\]\)\s*\{\s*display:\s*none/, 'a closed palette is never laid out');
+  assert.match(css, /\.palette\[open\]\s*\{[^}]*display:\s*flex/, 'the open palette keeps its column layout');
 });
 
 test('global search finds content and returns a bare fragment for the palette', async () => {
