@@ -11,6 +11,7 @@ import { parseLandingAudioIds } from '../../lib/landing';
 import { LANDING_UPLOAD_JS } from '../../admin/landing-upload';
 import { titleFor } from '../../lib/origin';
 import { cleanDomain, safeUrl, slugify } from '../../lib/security';
+import { SOCIAL_PROFILES, socialUrl } from '../../lib/social';
 import { validTimezone } from '../../lib/time';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 
@@ -63,6 +64,12 @@ settings.get('/settings', async (c) => {
     <input type="text" id="timezone" name="timezone" value="${s.timezone || 'UTC'}" list="zones" required autocapitalize="none">
     <datalist id="zones">${COMMON_ZONES.map((z) => html`<option value="${z}">`)}</datalist>
     <p class="hint">IANA name, e.g. Asia/Karachi. Used for post dates and scheduling.</p>
+  </div>
+  <div class="card" id="social">
+    <h2>Social profiles</h2>
+    <p class="hint">Enter full http or https profile URLs. Empty profiles are omitted.</p>
+    ${SOCIAL_PROFILES.map(([key, label]) => html`<label for="social_${key}">${label}</label><input type="url" id="social_${key}" name="social_${key}" value="${s['social_' + key] || ''}" maxlength="2048" placeholder="https://">`)}
+    <label class="check"><input type="checkbox" name="social_footer" value="1"${s.social_footer === '1' ? raw(' checked') : ''}> Show social links in the footer</label>
   </div>
   <div class="card" id="reading">
     <h2>Reading</h2>
@@ -222,6 +229,15 @@ settings.post('/settings', async (c) => {
     return go(c, '/settings', { err: 'A page already uses that slug.' });
   }
 
+  const social: Record<string, string> = {};
+  for (const [key, label] of SOCIAL_PROFILES) {
+    if (!f.has('social_' + key)) continue;
+    const value = str('social_' + key);
+    if (value && !socialUrl(value)) return go(c, '/settings#social', { err: `Enter a valid HTTP or HTTPS URL for ${label}.` });
+    social['social_' + key] = value ? socialUrl(value) : '';
+  }
+  if (f.has('social_facebook')) social.social_footer = str('social_footer') === '1' ? '1' : '0';
+
   const favicon = str('favicon');
   const homeId = Number(str('home_page_id')) || 0;
   const homeOk = homeId && (await c.env.DB.prepare("SELECT 1 AS x FROM content WHERE id=? AND site_id=1 AND type='page'").bind(homeId).first());
@@ -291,6 +307,7 @@ settings.post('/settings', async (c) => {
   }
 
   await setSettings(c.env, {
+    ...social,
     site_title: siteTitle,
     tagline: str('tagline').slice(0, 200),
     favicon: favicon ? safeUrl(favicon) : '',

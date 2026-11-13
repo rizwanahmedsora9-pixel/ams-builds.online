@@ -12,6 +12,7 @@ type Symbol = [name: string, inner: string];
 const SYMBOLS: Symbol[] = [
   ['home', '<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/>'],
   ['pin', '<path d="M12 17v5"/><path d="M9 3h6l-1 3 3 3v2H7V9l3-3-1-3Z"/><path d="M8 14h8"/>'],
+  ['folder', '<path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>'],
   ['file', '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>'],
   ['image', '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 16-5-5-9 9"/>'],
   ['message', '<path d="M20 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z"/><path d="M8 8h8M8 12h5"/>'],
@@ -72,3 +73,6 @@ export function icon(name: string, opts: { label?: string; cls?: string } = {}) 
 
 /** Names are exported for tests that assert every nav entry has a real icon. */
 export const ICON_NAMES = SYMBOLS.map(([name]) => name);
+
+/** Allowed page icon names; empty uses the default page icon. */
+export const PAGE_ICONS = ['file', 'folder', 'home', 'globe', 'image', 'tools', 'users', 'message', 'play', 'grid', 'pin'] as const;

@@ -1,3 +1,4 @@
+import { SOCIAL_PROFILES, socialUrl } from './social';
 import type { Config, Env } from '../types';
 import type { Settings } from './config';
 import { commentToken, commentsEnabled, approvedComments, renderCommentsHtml, type CommentRow } from './comments';
@@ -311,6 +312,8 @@ export async function renderTheme(
   const shared = {
     site: {
       title: settings.site_title || '', tagline: settings.tagline || '', url: url.origin,
+      social: SOCIAL_PROFILES.map(([key, label]) => ({ name: key, label, url: socialUrl(settings['social_' + key] || '') })).filter((profile) => profile.url),
+      social_footer: settings.social_footer === '1',
       // Identity images, so a theme can draw the logo instead of the title
       // (`{{#if site.logo}}<img src="{{site.logo}}" alt="{{site.title}}">{{/if}}`).
       logo: safeUrl(settings.site_logo || ''), social_image: safeUrl(settings.social_image || ''), favicon: safeUrl(settings.favicon || ''),
@@ -325,7 +328,7 @@ export async function renderTheme(
     menu,
     // {{#each pages}} - every published page in editor order, for a nav of its own.
     pages: pageRows.map((p) => ({
-      title: p.title, slug: p.slug,
+      title: p.title, slug: p.slug, icon: p.icon || '',
       url: settings.home_page_id === String(p.id) ? '/' : '/' + p.slug,
       // The template the editor picked for this page, so a theme can build a
       // list of one kind of page (a Tools index of the pages laid out as tools):

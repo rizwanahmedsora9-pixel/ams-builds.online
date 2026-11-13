@@ -1,3 +1,4 @@
+import social from '../partials/social.html';
 import manifest from './theme.json';
 import base from './base.html';
 import home from './home.html';
@@ -24,7 +25,7 @@ export const defaultTheme: ThemeBundle = {
   slug: manifest.slug,
   version: manifest.version,
   templates,
-  partials: {},
+  partials: { social },
   css,
   manifest: parsed.manifest,
 };

@@ -1,3 +1,4 @@
+import social from './partials/social.html';
 /**
  * The built-in theme store: themes shipped inside the app, installable from
  * Admin -> Themes with one click. To add one, create a folder like ./pro/ and
@@ -61,7 +62,7 @@ function bundle(manifest: Record<string, unknown>, templates: Record<string, str
   const m: ThemeManifest = parsed.manifest;
   return {
     name: m.name, slug: m.slug, version: m.version,
-    templates: parsed.templates, partials: parsed.partials, css: parsed.css,
+    templates: parsed.templates, partials: { ...parsed.partials, social }, css: parsed.css,
     manifest: m,
     description: m.description, preview: m.preview,
   };

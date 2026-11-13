@@ -9,7 +9,7 @@ import { isInPrimaryMenu, removeUrlFromMenus, syncPageMenu } from '../../lib/men
 import {
   bulkBar, card, emptyRow, listToolbar, notice, pageHead, pagination, table, tabs, LIST_JS,
 } from '../../admin/components';
-import { icon } from '../../admin/icons';
+import { icon, PAGE_ICONS } from '../../admin/icons';
 import { PICKER_JS, mediaPicker } from '../../admin/media-picker';
 import {
   claimLock, countRevisions, deleteRevisions, getRevision, latestAutosave, listRevisions,
@@ -445,7 +445,7 @@ function pageTreeMarkup(pages: AdminPageRow[], base: string): Raw {
         const parent = page.parent_id == null ? null : byId.get(page.parent_id) ?? null;
         return html`<li class="page-tree__node">
           <div class="page-tree__row">
-            <a href="${base}/pages/${page.id}">${page.title}</a>
+            <a href="${base}/pages/${page.id}">${icon(PAGE_ICONS.includes(page.icon as typeof PAGE_ICONS[number]) ? page.icon! : 'file', { cls: 'ico--sm' })} ${page.title}</a>
             <span class="badge ${page.status}">${page.status}</span>
             ${parent ? html`<span class="page-tree__parent">Parent: ${parent.title}</span>` : ''}
           </div>
@@ -456,7 +456,7 @@ function pageTreeMarkup(pages: AdminPageRow[], base: string): Raw {
   };
   const tree = render(null);
   const unvisited = pages.filter((page) => !visited.has(page.id)).sort(comparePageOrder);
-  return html`${tree}${unvisited.length ? html`<p class="hint">A broken or cyclic parent link was found. These pages are shown at the root so they remain editable.</p><ul class="page-tree__list">${unvisited.map((page) => html`<li class="page-tree__node"><div class="page-tree__row"><a href="${base}/pages/${page.id}">${page.title}</a><span class="badge ${page.status}">${page.status}</span></div></li>`)}</ul>` : ''}`;
+  return html`${tree}${unvisited.length ? html`<p class="hint">A broken or cyclic parent link was found. These pages are shown at the root so they remain editable.</p><ul class="page-tree__list">${unvisited.map((page) => html`<li class="page-tree__node"><div class="page-tree__row"><a href="${base}/pages/${page.id}">${icon(PAGE_ICONS.includes(page.icon as typeof PAGE_ICONS[number]) ? page.icon! : 'file', { cls: 'ico--sm' })} ${page.title}</a><span class="badge ${page.status}">${page.status}</span></div></li>`)}</ul>` : ''}`;
 }
 
 function pageListState(c: Ctx): PageListState {
@@ -545,8 +545,9 @@ async function pagesList(c: Ctx): Promise<Response> {
   const statusTabs: [PageStatusFilter, string][] = [['all', 'All'], ['published', 'Published'], ['draft', 'Draft']];
   const installedThemes = (await c.env.DB.prepare('SELECT slug, name FROM themes ORDER BY name').all<{ slug: string; name: string }>().catch(() => ({ results: [] as { slug: string; name: string }[] }))).results;
   const hasParentColumn = await hasColumn(c.env, 'content', 'parent_id');
+  const hasIconColumn = await hasColumn(c.env, 'content', 'icon');
   const allPages = (await c.env.DB.prepare(
-    `SELECT id, title, slug, status, ${hasParentColumn ? 'parent_id' : 'NULL AS parent_id'}, COALESCE(menu_order,0) AS menu_order
+    `SELECT id, title, slug, status, ${hasIconColumn ? 'icon' : "'' AS icon"}, ${hasParentColumn ? 'parent_id' : 'NULL AS parent_id'}, COALESCE(menu_order,0) AS menu_order
      FROM content WHERE site_id=1 AND type='page' ORDER BY COALESCE(menu_order,0) ASC, title COLLATE NOCASE ASC LIMIT 500`,
   ).all<AdminPageRow>().catch(() => ({ results: [] as AdminPageRow[] }))).results;
   const hierarchyTree = pageTreeMarkup(allPages, base);
@@ -1151,6 +1152,9 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
       ${opt('draft', 'Draft')}${opt('published', 'Published')}${type === 'post' ? opt('scheduled', 'Scheduled') : ''}
     </select>
     ${pageParentField}
+    ${type === 'page' && await hasColumn(c.env, 'content', 'icon') ? html`<label for="page-icon">Page icon</label>
+    <select id="page-icon" name="icon"><option value="">Default page icon</option>${PAGE_ICONS.map((name) => html`<option value="${name}"${row?.icon === name ? raw(' selected') : raw('')}>${name}</option>`)}</select>
+    <p class="hint">Used in the Pages tree and available to themes.</p>` : ''}
     ${type === 'post' ? html`<div id="when">
       <label for="publish_at">Publish date (${tz})</label>
       <input type="datetime-local" id="publish_at" name="publish_at" value="${row?.published_at ? utcToLocal(row.published_at, tz) : ''}">
@@ -1648,17 +1652,21 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
   let savedId = id;
   const trackEditor = await hasColumn(c.env, 'content', 'updated_by');
   const saveParent = type === 'page' && hierarchyAvailable;
+  const saveIcon = type === 'page' && await hasColumn(c.env, 'content', 'icon');
+  const pageIcon = f.has('icon') ? (PAGE_ICONS.includes(str('icon') as typeof PAGE_ICONS[number]) ? str('icon') : '') : (existing?.icon || '');
   if (existing) {
     const parentSet = saveParent ? ', parent_id=?' : '';
-    await db.prepare(`UPDATE content SET title=?, slug=?, body=?, excerpt=?, status=?, seo_title=?, seo_description=?, featured_media_id=?, published_at=?, template=?${parentSet}, updated_at=?${trackEditor ? ', updated_by=?' : ''} WHERE id=?`)
+    const iconSet = saveIcon ? ', icon=?' : '';
+    await db.prepare(`UPDATE content SET title=?, slug=?, body=?, excerpt=?, status=?, seo_title=?, seo_description=?, featured_media_id=?, published_at=?, template=?${parentSet}${iconSet}, updated_at=?${trackEditor ? ', updated_by=?' : ''} WHERE id=?`)
       .bind(title, slug, body, excerpt, status, seoTitle, seoDesc, featured, publishedAt, template,
-        ...(saveParent ? [parentId] : []), now, ...(trackEditor ? [c.var.user.id] : []), id).run();
+        ...(saveParent ? [parentId] : []), ...(saveIcon ? [pageIcon] : []), now, ...(trackEditor ? [c.var.user.id] : []), id).run();
   } else {
     const columns = ['site_id', 'type', 'title', 'slug', 'body', 'excerpt', 'status', 'seo_title', 'seo_description',
       'featured_media_id', 'author_id', 'published_at', 'template'];
     const values: (string | number | null)[] = [type, title, slug, body, excerpt, status, seoTitle, seoDesc,
       featured, c.var.user.id, publishedAt, template];
     if (saveParent) { columns.push('parent_id'); values.push(parentId); }
+    if (saveIcon) { columns.push('icon'); values.push(pageIcon); }
     columns.push('created_at', 'updated_at');
     values.push(now, now);
     if (trackEditor) { columns.push('updated_by'); values.push(c.var.user.id); }

@@ -11,6 +11,7 @@ export type PageHierarchyRow = {
   parent_id: number | null;
   status: string;
   menu_order: number;
+  icon?: string;
 };
 
 export type PageHierarchyLink = {

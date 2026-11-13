@@ -1,3 +1,4 @@
+import social from '../partials/social.html';
 import manifest from './theme.json';
 import base from './base.html';
 import home from './home.html';
@@ -25,7 +26,7 @@ const templates = {
   // through the editor's Template dropdown (`content.template`).
   tools, tool, services, contact,
 };
-const partials = { footer };
+const partials = { footer, social };
 
 /** The bundled manifest, validated by the same parser as an uploaded one. */
 const parsed = parseManifest({ ...manifest, templates, partials });
