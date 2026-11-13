@@ -76,3 +76,16 @@ export const ICON_NAMES = SYMBOLS.map(([name]) => name);
 
 /** Allowed page icon names; empty uses the default page icon. */
 export const PAGE_ICONS = ['file', 'folder', 'home', 'globe', 'image', 'tools', 'users', 'message', 'play', 'grid', 'pin'] as const;
+
+/** Validated panel defaults shared by the page tree and sidebar. */
+export function pageIcons(settings: Record<string, string>): { parent: string; child: string } {
+  const valid = (value: string | undefined, fallback: string) => PAGE_ICONS.includes(value as typeof PAGE_ICONS[number]) ? value! : fallback;
+  return { parent: valid(settings.page_parent_icon, 'folder'), child: valid(settings.page_child_icon, 'file') };
+}
+
+/** Standalone decorative icon for public pages, which do not include the admin sprite. */
+export function publicPageIcon(name: string | undefined): string {
+  const selected = PAGE_ICONS.includes(name as typeof PAGE_ICONS[number]) ? name : 'file';
+  const inner = SYMBOLS.find(([key]) => key === selected)?.[1] || '';
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+}

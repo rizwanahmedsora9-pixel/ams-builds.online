@@ -1,5 +1,6 @@
 import type { Env } from '../types';
 import { hasColumn } from './schema';
+import { mediaUrl } from './content';
 
 /** Maximum permitted depth, counting a top-level page as depth zero. */
 export const MAX_PAGE_DEPTH = 12;
@@ -12,6 +13,8 @@ export type PageHierarchyRow = {
   status: string;
   menu_order: number;
   icon?: string;
+  excerpt?: string;
+  media_key?: string | null;
 };
 
 export type PageHierarchyLink = {
@@ -19,6 +22,9 @@ export type PageHierarchyLink = {
   title: string;
   slug: string;
   url: string;
+  excerpt?: string;
+  image?: string;
+  icon?: string;
 };
 
 export type PublicPageHierarchy = {
@@ -133,8 +139,9 @@ export async function publicPageHierarchy(
   homePageId: string | undefined,
 ): Promise<PublicPageHierarchy> {
   if (!(await hasColumn(env, 'content', 'parent_id'))) return { current: null, ancestors: [], children: [] };
+  const hasIcon = await hasColumn(env, 'content', 'icon');
   const { results } = await env.DB.prepare(
-    "SELECT id, title, slug, parent_id, status, COALESCE(menu_order,0) AS menu_order FROM content WHERE site_id=1 AND type='page'",
+    `SELECT c.id, c.title, c.slug, c.parent_id, c.status, COALESCE(c.menu_order,0) AS menu_order, c.excerpt, ${hasIcon ? "c.icon" : "'' AS icon"}, m.r2_key AS media_key FROM content c LEFT JOIN media m ON m.id=c.featured_media_id AND m.site_id=c.site_id AND m.mime LIKE 'image/%' WHERE c.site_id=1 AND c.type='page'`,
   ).all<PageHierarchyRow>();
   const byId = new Map(results.map((page) => [page.id, page]));
   const current = byId.get(pageId);
@@ -145,6 +152,7 @@ export async function publicPageHierarchy(
     title: page.title,
     slug: page.slug,
     url: homePageId === String(page.id) ? '/' : '/' + page.slug,
+    excerpt: page.excerpt || '', image: page.media_key ? mediaUrl(page.media_key) : '', icon: page.icon,
   });
   const ancestors: PageHierarchyLink[] = [];
   const seen = new Set<number>([pageId]);
