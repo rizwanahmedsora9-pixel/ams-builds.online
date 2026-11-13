@@ -268,7 +268,7 @@ admin.get('/', async (c) => {
         body: html`<dl class="kv kv--tight">
           <dt>Version</dt><dd>${APP_VERSION}</dd>
           <dt>Schema</dt><dd>${schema}${pendingUpdates ? html` · <a href="${base}/updates">${pendingUpdates} update${pendingUpdates === 1 ? '' : 's'} ready</a>` : ' · up to date'}</dd>
-          <dt>Theme</dt><dd>${theme ? `${theme.name} v${theme.version}` : 'AMS 1'}</dd>
+          <dt>Theme</dt><dd>${theme ? `${theme.name} v${theme.version}` : 'AMS Nova'}</dd>
           <dt>Comments</dt><dd>${counts.pending} pending · ${counts.approved} approved</dd>
           <dt>Moderation</dt><dd>${moderated ? 'New comments wait for you' : 'Comments appear immediately'}</dd>
         </dl>`,

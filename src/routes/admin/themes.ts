@@ -22,7 +22,6 @@ import { inspectTemplate } from '../../lib/template';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 import { card, emptyState, notice } from '../../admin/components';
 import { storeThemes, type StoreTheme } from '../../themes';
-import { sampleThemeEntries } from '../../themes/sample';
 import { themeFailureFor } from '../../lib/render';
 import { clearThemeValueCache } from '../public';
 
@@ -92,7 +91,7 @@ function locallyEditedFiles(st: StoreTheme, theme: StoredTheme): string[] {
 
 const STOPWORDS = new Set(['theme', 'ams', 'the', 'and']);
 
-/** "AMS Journal" and "Journal" are the same theme as far as a person is concerned. */
+/** A store name and an installed name can differ by a suffix; match them loosely. */
 const storeNameKey = (name: string): string =>
   name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter((w) => w && !STOPWORDS.has(w)).join('-');
 
@@ -176,11 +175,11 @@ themes.get('/themes', async (c) => {
 
   return layout(c, 'Themes', html`
 <h1>Themes</h1>
-${failure ? notice(html`<b>${failure.slug}</b> failed to render, so the site is falling back to AMS 1. Check its templates in <a href="${base}/themes/${encodeURIComponent(failure.slug)}/edit">Edit</a> — the message was “${failure.fail!.message}”.`, { tone: 'danger', title: 'Theme failed' }) : ''}
+${failure ? notice(html`<b>${failure.slug}</b> failed to render, so the site is falling back to AMS Nova. Check its templates in <a href="${base}/themes/${encodeURIComponent(failure.slug)}/edit">Edit</a> — the message was “${failure.fail!.message}”.`, { tone: 'danger', title: 'Theme failed' }) : ''}
 ${v2 ? '' : ''}
 ${rows.some((t) => t.active)
   ? ''
-  : notice(html`No theme is active, so pages use the bundled AMS 1 theme. <a href="${base}/themes/store/ams-1/install?activate=1">Activate AMS 1</a>`, { tone: 'warn' })}
+  : notice(html`No theme is active, so pages use the bundled AMS Nova theme. <a href="${base}/themes/store/nova/install?activate=1">Activate AMS Nova</a>`, { tone: 'warn' })}
 
 <h2>Theme store</h2>
 <div class="store">
@@ -251,13 +250,13 @@ ${rows.some((t) => t.active)
 
 ${card({
   title: 'Ready-made themes',
-  body: html`<p class="muted">Six themes ship with the app. <b>AMS 1</b> is the default: a sticky header, a featured card and the full AMS page set (home, blog, post, page, tools, a tool page, services, contact and 404) with labelled ad slots on posts only. <b>AMS Base</b> is the older light-and-minimal theme. <b>AMS Pro</b> (business, tabbed header) and <b>AMS Premium</b> (dark header, serif headlines) build on it — Premium inherits Pro's page, post and archive templates through <code>"parent": "ams-pro"</code>, which is what a store theme looks like now. <b>AMS Journal</b> and <b>AMS Portfolio</b> cover reading and portfolio sites.</p>`,
+  body: html`<p class="muted">One theme ships with the app: <b>AMS Nova</b>, and it is the default. AMS Nova is a full-colour sidebar-navigation theme with dark and light options, a hero header, clean cards, a proper footer, and labelled, AdSense-ready ad slots on posts. It renders every page, sub-page and post from the same shell, and its colour scheme is changeable from its four colour settings (sidebar, accent, hero, footer) or from Appearance &rarr; Brand.</p>`,
 })}
 
 <div class="card">
   <h2>Make your own</h2>
-  <p>Start with the official, upload-ready theme package. It contains editable templates, partials, responsive CSS, a JavaScript example, a screenshot, settings, menu locations, and developer instructions.</p>
-  <p><a class="btn" href="${base}/themes/sample.zip">Download sample theme ZIP</a> <a class="btn ghost" href="${base}/themes/validate">Validate a package</a></p>
+  <p>Build a theme from a <code>theme.json</code> plus its files, or upload a ZIP. A theme is a manifest, templates, partials, a stylesheet and optional assets.</p>
+  <p><a class="btn ghost" href="${base}/themes/validate">Validate a package</a></p>
   <p>Legacy JSON packages remain supported. A theme is a <code>theme.json</code> plus its files:</p>
   <pre class="pre">{
   "name": "Journal",
@@ -276,30 +275,6 @@ ${card({
   <p class="hint">Only <b>base</b> is required (or a <b>parent</b> to inherit from). In a template: <code>{{post.title}}</code>, <code>{{{post.content}}}</code>, <code>{{#if post.comments_count gt 0}}</code>, <code>{{#each posts limit=3}}</code>, <code>{{> header}}</code>, <code>{{post.date | date "d MMM yyyy"}}</code>, <code>{{asset "logo.png"}}</code>, <code>{{{theme_css_url}}}</code>. Every new theme can be checked with <a href="${base}/themes/validate">Validate a theme</a> before it goes live.</p>
 </div>
 ${raw(`<script>document.querySelectorAll('[data-confirm]').forEach(function(f){f.addEventListener('submit',function(e){if(!confirm(f.getAttribute('data-confirm')))e.preventDefault()})});</script>`)}`, '/themes');
-});
-
-themes.get('/themes/sample.zip', async (c) => {
-  try {
-    const bytes = zipFiles(sampleThemeEntries());
-    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    const inspected = await readUpload(buffer);
-    if (inspected.manifest.slug !== 'ahmed-starter-theme' || inspected.manifest.required_templates.length !== 6) {
-      throw new ThemeError('The official sample package failed its own manifest validation.');
-    }
-    await audit(c, 'exported', 'theme', 'Downloaded the official Ahmed Starter Theme package', inspected.manifest.slug);
-    return new Response(bytes, {
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="ahmed-starter-theme.zip"',
-        'Cache-Control': 'no-store',
-        'X-Content-Type-Options': 'nosniff',
-      },
-    });
-  } catch (error) {
-    console.error('sample theme package generation failed:', error);
-    await audit(c, 'failed', 'theme', 'Official sample theme package generation failed');
-    return errorPage(c, 500, 'The sample theme ZIP could not be generated. No theme or site data was changed.');
-  }
 });
 
 /* ------------------------------------------------------------- activation */
@@ -519,7 +494,7 @@ ${theme.active ? html`<p><span class="badge published">Active theme</span> <a cl
       <form method="post" action="${base}/themes/${theme.id}/activate" class="inline">${csrfField(c)}<button class="btn small" type="submit">Activate</button></form>
       <a class="btn ghost small" href="/?preview=1&theme=${encodeURIComponent(slug)}" target="_blank" rel="noopener">Preview on your site</a>
       <a class="btn ghost small" href="${base}/themes/${encodeURIComponent(slug)}/edit">Edit templates</a></p>`}
-${failure ? notice(html`This theme threw while rendering, so visitors saw AMS 1 instead. ${failure.message}`, { tone: 'danger', title: 'Render failed' }) : ''}
+${failure ? notice(html`This theme threw while rendering, so visitors saw AMS Nova instead. ${failure.message}`, { tone: 'danger', title: 'Render failed' }) : ''}
 ${theme.manifest.description ? html`<p class="muted">${theme.manifest.description}</p>` : ''}
 ${theme.manifest.author ? html`<p class="muted">By ${theme.manifest.author}${theme.manifest.homepage ? html` · <a href="${theme.manifest.homepage}" target="_blank" rel="noopener noreferrer">homepage</a>` : ''}</p>` : ''}
 ${parent ? html`<p class="muted">Inherits templates, partials and assets from <a href="${base}/themes/${encodeURIComponent(parent.slug)}">${parent.name}</a>.</p>` : ''}

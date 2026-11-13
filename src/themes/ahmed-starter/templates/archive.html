@@ -1,7 +1,0 @@
-<section class="content-wide archive-content">
-  <p class="eyebrow">Browse</p>
-  <h1>{{archive.title}}</h1>
-  {{#if posts}}<div class="post-grid">{{#each posts}}<article class="post-card">{{#if featured_image}}<a href="{{url}}"><img class="post-card__image" src="{{featured_image}}" alt="{{featured_alt}}" loading="lazy"></a>{{/if}}<p class="eyebrow">{{date}}</p><h2><a href="{{url}}">{{title}}</a></h2><p>{{excerpt}}</p></article>{{/each}}</div>{{else}}<p class="empty">There is nothing published in this archive yet.</p>{{/if}}
-  {{#if pagination.prev}}<a class="button button--quiet" href="{{pagination.prev}}">Newer posts</a>{{/if}}
-  {{#if pagination.next}}<a class="button button--quiet" href="{{pagination.next}}">Older posts</a>{{/if}}
-</section>

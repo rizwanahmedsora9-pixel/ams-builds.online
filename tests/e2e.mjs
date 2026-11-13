@@ -98,7 +98,17 @@ const themeId = async (name) => {
   return Number(row[1]);
 };
 
-const nav = (htmlText) => [...htmlText.match(/<nav class="site-nav"[^]*?<\/nav>/)[0].matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
+// Reads the primary menu. Nova renders it in the sidebar's first side-group;
+// older themes put it in a site-nav in the header. Only the first group is
+// read so the page tree (a second group) is not included.
+const nav = (htmlText) => {
+  const side = htmlText.match(/<nav class="side-nav"[^]*?<\/nav>/)?.[0];
+  const header = htmlText.match(/<nav class="site-nav"[^]*?<\/nav>/)?.[0];
+  const block = side ?? header;
+  assert.ok(block, 'a navigation block is present');
+  const group = block.match(/<div class="side-group">[\s\S]*?<\/div>/)?.[0] ?? block;
+  return [...group.matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
+};
 
 const currentPostUrl = () => {
   const y = new Date().getUTCFullYear(), m = String(new Date().getUTCMonth() + 1).padStart(2, '0');
@@ -186,10 +196,12 @@ test('5. admin panel: protected, CSRF enforced, login works', async () => {
   assert.equal(ok.location, admin);
   const dash = await get(admin);
   assert.equal(dash.status, 200);
-  assert.match(dash.text, /<b>1<\/b><span>Pages/);
-  assert.match(dash.text, /<b>0<\/b><span>Posts/);
+  // The installer seeds a home page plus demo pages and posts, so the counts
+  // are no longer 1/0/0 — the dashboard reflects the seeded content.
+  assert.match(dash.text, /<b>14<\/b><span>Pages/);
+  assert.match(dash.text, /<b>8<\/b><span>Posts/);
   assert.match(dash.text, /<b>0<\/b><span>Media/);
-  log('anonymous access redirected, missing/foreign CSRF rejected, logged in by email, dashboard 1/0/0');
+  log('anonymous access redirected, missing/foreign CSRF rejected, logged in by email, dashboard 14/8/0');
 });
 
 test('6. pages: create, publish, edit, cache is invalidated', async () => {
@@ -334,10 +346,12 @@ test('8. posts: categories, tags, featured image, archives and JSON API', async 
   }
   assert.equal((await anon('/category/nothing')).status, 404);
   const api = JSON.parse((await anon('/api/posts')).text);
-  assert.equal(api.total, 1);
-  assert.equal(api.posts[0].url, '/blog/launch-day-more');
-  assert.equal(api.posts[0].excerpt, 'Short summary');
-  assert.deepEqual(api.posts[0].tags.map((t) => t.slug).sort(), ['launch', 'updates']);
+  // Eight demo posts are seeded at install; this one makes nine.
+  assert.equal(api.total, 9);
+  const createdPost = api.posts.find((p) => p.url === '/blog/launch-day-more');
+  assert.ok(createdPost, 'the new post is in the API list');
+  assert.equal(createdPost.excerpt, 'Short summary');
+  assert.deepEqual(createdPost.tags.map((t) => t.slug).sort(), ['launch', 'updates']);
   assert.equal(JSON.parse((await anon('/api/posts/launch-day-more')).text).title, 'Launch Day & More');
   const editor = await get(`${admin}/posts/${state.postId}`);
   assert.equal((editor.text.match(/type="checkbox" name="cat" value="\d+" checked/g) || []).length, 2, 'categories stay ticked');
@@ -352,7 +366,7 @@ test('8. posts: categories, tags, featured image, archives and JSON API', async 
   assert.equal((videoPage.text.match(/class="html-block"/g) || []).length, 2, 'multiple HTML blocks are rendered');
   assert.match(videoPage.text, /<iframe src="https:\/\/www\.youtube-nocookie\.com\/embed\/dQw4w9WgXcQ" title="Demo video"/);
   assert.match(videoPage.text, /aspect-ratio:16\/9/, 'video embed is responsive');
-  await adminPost(`/posts/${videoId}/delete`, {});
+  assert.equal((await adminPost(`/posts/${videoId}/delete`, {})).status, 303, 'the video post is deleted');
   log(`post #${state.postId} on /blog, 2 category pages, tag page, home page and API; HTML blocks and YouTube embed rendered`);
 });
 
@@ -407,7 +421,8 @@ test('9. drafts and scheduled posts stay hidden; preview needs a login', async (
   assert.match(later.location, /scheduled/);
   for (const path of ['/blog/secret-draft', '/blog/next-century', '/blog/secret-draft?preview=1']) assert.equal((await anon(path)).status, 404, path);
   assert.doesNotMatch((await anon('/blog')).text, /Secret Draft|Next Century/);
-  assert.equal(JSON.parse((await anon('/api/posts')).text).total, 1);
+  // Eight demo posts plus the Launch Day post from test 8 are published.
+  assert.equal(JSON.parse((await anon('/api/posts')).text).total, 9);
   const preview = await get('/blog/secret-draft?preview=1');
   assert.equal(preview.status, 200);
   assert.match(preview.text, /noindex/);
@@ -701,19 +716,17 @@ test('10f. the landing screen wears the active theme, and Enter site sits on the
     const vars = Object.fromEntries([...base.matchAll(/--ams-([a-z-]+):([^;}]+)/g)].map((m) => [m[1], m[2].trim()]));
     return { html, css, vars };
   };
-  const activeRow = (page) => [...page.matchAll(/<li style="flex-wrap:wrap" data-theme-id="(\d+)" data-theme-slug="([^"]+)">([\s\S]*?)<\/li>/g)]
-    .find((row) => /badge published/.test(row[3]));
 
-  // AMS 1, the bundled theme: its light palette, not the old hard-coded navy.
-  const ams = await themed();
-  assert.equal(ams.vars.bg, '#ffffff', "the screen takes the active theme's background");
-  assert.equal(ams.vars.fg, '#0f1b2d', 'and its text colour');
-  assert.equal(ams.vars.brand, '#1a5cff', 'and its brand colour');
-  assert.match(ams.css, /@media \(prefers-color-scheme:dark\)\{#ams-landing-screen\{/, "a theme with a dark half carries both, on the browser's own switch");
-  assert.match(ams.css, /--ams-bg:#0d1420/, "the dark half is the theme's dark background");
-  assert.doesNotMatch(ams.html, /#090d16/, 'the old fixed navy gradient is gone');
-  assert.match(ams.css, /html\[data-ams-scheme="dark"\] #ams-landing-screen\{/, "a hand-switched theme's choice reaches the screen too");
-  assert.match(ams.html, /attributeFilter:\['data-theme'\]/, 'and is followed when the theme toggle is pressed');
+  // AMS Nova, the bundled theme: its light palette, not a hard-coded navy.
+  const nova = await themed();
+  assert.equal(nova.vars.bg, '#f4f6fb', "the screen takes the active theme's background");
+  assert.equal(nova.vars.fg, '#1a2238', 'and its text colour');
+  assert.equal(nova.vars.brand, '#e94560', 'and its brand colour');
+  assert.match(nova.css, /@media \(prefers-color-scheme:dark\)\{#ams-landing-screen\{/, "a theme with a dark half carries both, on the browser's own switch");
+  assert.match(nova.css, /--ams-bg:#0d1320/, "the dark half is the theme's dark background");
+  assert.doesNotMatch(nova.html, /#090d16/, 'the old fixed navy gradient is gone');
+  assert.match(nova.css, /html\[data-ams-scheme="dark"\] #ams-landing-screen\{/, "a hand-switched theme's choice reaches the screen too");
+  assert.match(nova.html, /attributeFilter:\['data-theme'\]/, 'and is followed when the theme toggle is pressed');
 
   // A brand colour from Appearance reaches the screen too.
   const themedColors = await get(`${admin}/appearance`);
@@ -722,27 +735,6 @@ test('10f. the landing screen wears the active theme, and Enter site sits on the
   await adminPost('/appearance', { token_brand: '#aa0055' });
   assert.equal((await themed()).vars.brand, '#aa0055', "the site brand colour wins over the theme's own");
   await adminPost('/appearance', { token_brand: '' });
-
-  // A store theme the admin activates: the screen follows it, including its own
-  // corner radius and an all-in-one dark palette with no media query.
-  const before = activeRow((await get(`${admin}/themes`)).text);
-  assert.ok(before, 'a theme is active before this test');
-  const install = await adminPost('/themes/store/ams-portfolio/install', { activate: 1 });
-  assert.equal(install.status, 303);
-  const portfolio = await themed();
-  assert.equal(portfolio.vars.bg, '#0e1116', 'a dark theme gets a dark welcome screen');
-  assert.equal(portfolio.vars.fg, '#f2f4f8', 'with its light copy');
-  assert.equal(portfolio.vars.brand, '#22d3a6', 'and its accent');
-  assert.equal(portfolio.vars.radius, '14px', 'even its corner radius');
-  assert.doesNotMatch(portfolio.css, /prefers-color-scheme/, 'a theme with one palette needs no dark block');
-
-  // Back to the theme this test found, and drop the one it installed.
-  const portfolioRow = activeRow((await get(`${admin}/themes`)).text);
-  assert.equal(portfolioRow?.[2], 'ams-portfolio', 'the store theme is now active');
-  await adminPost(`/themes/${before[1]}/activate`, {});
-  const removed = await adminPost(`/themes/${portfolioRow[1]}/delete`, {});
-  assert.equal(removed.status, 303);
-  assert.equal((await themed()).vars.bg, '#ffffff', 'the original theme is back on the screen');
 
   // Enter site: its own row under the transport, on the card's centre axis —
   // never a sibling of Mute in a wrapped flex row, which is what pulled it off
@@ -791,18 +783,20 @@ test('12. data survives a restart', async () => {
 });
 
 test('12a. menus: pages join the main menu with one tick; reorder, custom links, footer', async () => {
-  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog'], 'seeded menu');
-  const made = await adminPost('/pages/save', { title: 'Services', body: '<p>What we do</p>', status: 'published', in_menu: 1 });
+  // The installer seeds a primary menu (Home, Blog, About, Services, Guides,
+  // Contact) alongside the demo pages.
+  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog', 'About=/about', 'Services=/services', 'Guides=/guides', 'Contact=/contact'], 'seeded menu');
+  const made = await adminPost('/pages/save', { title: 'Projects', body: '<p>What we do</p>', status: 'published', in_menu: 1 });
   const servicesId = idFrom(made.location);
-  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog', 'Services=/services'], 'ticked page appears in the header');
+  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog', 'About=/about', 'Services=/services', 'Guides=/guides', 'Contact=/contact', 'Projects=/projects'], 'ticked page appears in the sidebar');
   assert.match((await get(`${admin}/pages/${servicesId}`)).text, /name="in_menu" value="1" checked/);
   assert.match((await get(`${admin}/pages/new`)).text, /name="in_menu" value="1" checked/, 'new pages start ticked');
 
-  await adminPost('/pages/save', { id: servicesId, title: 'Services', slug: 'what-we-do', body: '<p>x</p>', status: 'published', in_menu: 1 });
-  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog', 'Services=/what-we-do'], 'menu link follows a slug change');
+  await adminPost('/pages/save', { id: servicesId, title: 'Projects', slug: 'what-we-do', body: '<p>x</p>', status: 'published', in_menu: 1 });
+  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog', 'About=/about', 'Services=/services', 'Guides=/guides', 'Contact=/contact', 'Projects=/what-we-do'], 'menu link follows a slug change');
 
   const draft = await adminPost('/pages/save', { title: 'Hidden Draft', body: '', status: 'draft', in_menu: 1 });
-  assert.equal(nav((await anon('/')).text).length, 3, 'drafts are never linked');
+  assert.equal(nav((await anon('/')).text).length, 7, 'drafts are never linked');
 
   // reorder + rename + custom link through the menu editor (row order = menu order)
   const editor = await get(`${admin}/menus`);
@@ -810,27 +804,27 @@ test('12a. menus: pages join the main menu with one tick; reorder, custom links,
   const menuId = Number(editor.text.match(/menus\/(\d+)\/save/)[1]);
   const saved = await adminPost(`/menus/${menuId}/save`, {
     name: 'Main', location: 'primary',
-    label: ['Our Services', 'Home', 'Docs', 'Bad', ''], url: ['/what-we-do', '/', 'https://example.org/docs', 'javascript:alert(1)', ''],
+    label: ['Our Projects', 'Home', 'Docs', 'Bad', ''], url: ['/what-we-do', '/', 'https://example.org/docs', 'javascript:alert(1)', ''],
   });
   assert.match(saved.location, /1 link was skipped/);
-  assert.deepEqual(nav((await anon('/')).text), ['Our Services=/what-we-do', 'Home=/', 'Docs=https://example.org/docs']);
+  assert.deepEqual(nav((await anon('/')).text), ['Our Projects=/what-we-do', 'Home=/', 'Docs=https://example.org/docs']);
 
   // a second menu in the footer
   await adminPost('/menus/new', { name: 'Footer links' });
   const footerId = Math.max(...[...(await get(`${admin}/menus`)).text.matchAll(/menus\/(\d+)\/save/g)].map((m) => Number(m[1])));
   await adminPost(`/menus/${footerId}/save`, { name: 'Footer links', location: 'footer', label: ['Privacy'], url: ['/privacy'] });
-  assert.match((await anon('/')).text, /<nav class="footer-nav"[^]*<a href="\/privacy">Privacy<\/a>/);
+  assert.match((await anon('/')).text, /<nav class="foot-col" aria-label="Footer menu"[^]*<a href="\/privacy">Privacy<\/a>/);
   await adminPost(`/menus/${footerId}/delete`, {});
-  assert.doesNotMatch((await anon('/')).text, /<nav class="footer-nav"/);
+  assert.doesNotMatch((await anon('/')).text, /aria-label="Footer menu"/);
 
   // unticking removes the link; deleting a page removes it too
-  await adminPost('/pages/save', { id: servicesId, title: 'Services', slug: 'what-we-do', body: '<p>x</p>', status: 'published' });
+  await adminPost('/pages/save', { id: servicesId, title: 'Projects', slug: 'what-we-do', body: '<p>x</p>', status: 'published' });
   assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Docs=https://example.org/docs']);
-  await adminPost('/pages/save', { id: servicesId, title: 'Services', slug: 'what-we-do', body: '<p>x</p>', status: 'published', in_menu: 1 });
+  await adminPost('/pages/save', { id: servicesId, title: 'Projects', slug: 'what-we-do', body: '<p>x</p>', status: 'published', in_menu: 1 });
   await adminPost(`/pages/${servicesId}/delete`, {});
   await adminPost(`/pages/${idFrom(draft.location)}/delete`, {});
   assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Docs=https://example.org/docs']);
-  log('tick adds page to header, link follows slug, reorder/rename/custom link saved, unsafe link dropped, footer menu works');
+  log('tick adds page to sidebar, link follows slug, reorder/rename/custom link saved, unsafe link dropped, footer menu works');
 });
 
 test('12a1. pages: parent/child hierarchy, hidden header children, and public browsing', async () => {
@@ -943,33 +937,36 @@ test('12a1. pages: parent/child hierarchy, hidden header children, and public br
   log('page tree, parent picker, cycle guard, automatic child cards, breadcrumbs, and menu hiding work');
 });
 
-test('12b. themes: official sample ZIP round-trips, renders, previews, searches and activates', async () => {
+test('12b. themes: the Nova theme previews the real site and a custom upload round-trips', async () => {
   const manager = await get(`${admin}/themes`);
   const activeRows = [...manager.text.matchAll(/<li style="flex-wrap:wrap" data-theme-id="(\d+)" data-theme-slug="([^"]+)">([\s\S]*?)<\/li>/g)];
   const activeRow = activeRows.find((row) => /badge published/.test(row[3]));
-  assert.ok(activeRow, 'an active installed theme exists before sample upload');
-  const oldActiveId = Number(activeRow[1]);
-  const oldActiveSlug = activeRow[2];
+  assert.ok(activeRow, 'an active installed theme exists');
+  assert.equal(activeRow[2], 'nova', 'the active theme is Nova');
 
-  const sample = await get(`${admin}/themes/sample.zip`);
-  assert.equal(sample.status, 200, 'sample endpoint returns a downloadable package');
-  assert.equal(sample.headers.get('content-type'), 'application/zip');
-  assert.match(sample.headers.get('content-disposition'), /ahmed-starter-theme\.zip/);
-  assert.equal(new DataView(sample.bytes.buffer, sample.bytes.byteOffset).getUint32(0, true), 0x04034b50, 'sample is a ZIP archive');
-  const roundTrip = await uploadTheme('ahmed-starter-theme.zip', sample.bytes);
-  assert.match(roundTrip.location, /v1\.0\.0 installed/, roundTrip.location);
-  const sampleRow = (await get(`${admin}/themes`)).text.match(/data-theme-id="(\d+)" data-theme-slug="ahmed-starter-theme"/);
-  assert.ok(sampleRow, 'uploaded sample appears in the installed theme registry');
-  assert.equal((await get(`${admin}/themes`)).text.includes(`data-theme-id="${oldActiveId}" data-theme-slug="${oldActiveSlug}"`), true);
-  const previewPanel = await get(`${admin}/themes/preview/ahmed-starter-theme`);
+  // The Nova store card offers a live preview of the real site.
+  const previewPanel = await get(`${admin}/themes/preview/nova`);
   assert.match(previewPanel.text, /id="theme-preview-frame"/);
-  assert.match((await get('/?preview=1&theme=ahmed-starter-theme')).text, /class="hero"/, 'inactive theme preview renders existing CMS data');
-  assert.match((await get('/search?q=Welcome&preview=1&theme=ahmed-starter-theme')).text, /search-form/, 'the sample search template uses real CMS search results');
-  assert.match((await anon('/')).text, /AMS 1|site-shell|site-header/, 'sample upload and preview leave the active public theme unchanged');
+  assert.match((await get('/?preview=1&theme=nova')).text, /class="hero"/, 'the Nova preview renders existing CMS data');
+
+  // A custom theme uploads, appears in the registry, and can be switched to.
+  const custom = {
+    name: 'Json Theme', version: '2.1.0',
+    templates: {
+      base: '<!doctype html><html><head>{{{head}}}<style>{{{theme_css}}}</style></head><body data-theme="json">{{#each menu.primary}}<a class="jn" href="{{url}}">{{label}}</a>{{/each}}<main>{{{content}}}</main></body></html>',
+      page: '<h1 class="json-page">{{page.title}}</h1>{{{page.content}}}',
+    },
+    css: 'body{color:#123456}',
+  };
+  const roundTrip = await uploadTheme('json-theme.json', JSON.stringify(custom));
+  assert.match(roundTrip.location, /Json Theme/);
+  const sampleRow = (await get(`${admin}/themes`)).text.match(/data-theme-id="(\d+)" data-theme-slug="json-theme"/);
+  assert.ok(sampleRow, 'uploaded theme appears in the installed theme registry');
+  assert.doesNotMatch((await anon('/')).text, /data-theme="json"/, 'uploading does not activate');
   await adminPost(`/themes/${sampleRow[1]}/activate`, {});
-  assert.match((await anon('/')).text, /class="hero"/, 'activation uses the selected theme on public routes');
-  await adminPost(`/themes/${oldActiveId}/activate`, {});
-  assert.match((await get(`${admin}/themes`)).text, /ahmed-starter-theme/, 'switching back preserves the installed theme');
+  assert.match((await anon('/')).text, /data-theme="json"/);
+  await adminPost(`/themes/${activeRow[1]}/activate`, {});
+  assert.match((await anon('/')).text, /class="hero"/, 'switching back to Nova restores the hero');
   await adminPost(`/themes/${sampleRow[1]}/delete`, {});
 });
 
@@ -1044,145 +1041,81 @@ test('12c. themes: upload JSON and zip, activate, replace, download, delete', as
   assert.equal(manage.status, 200);
   assert.match(manage.text, /data-asset|\/theme-assets\/zip-theme\/style\.css/, 'the manager lists the stylesheet asset');
   assert.match((await get(`${admin}/themes/zip-theme/validate`)).text, /No problems found|Warning/, 'the validator reports on an installed theme');
-  const baseId = await themeId('AMS 1');
+  const baseId = await themeId('AMS Nova');
   await adminPost(`/themes/${baseId}/activate`, {});
   assert.match((await anon('/')).text, /class="site-header"/);
   assert.match(decodeURIComponent((await adminPost(`/themes/${zipId}/delete`, {})).location), /deleted/);
   assert.match(decodeURIComponent((await adminPost(`/themes/${jsonId}/delete`, {})).location), /deleted/);
-  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only AMS 1 is left');
+  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only AMS Nova is left');
   log('5 bad uploads rejected with reasons; JSON + zip themes installed, activated, replaced live, downloaded, deleted');
 });
 
-test('12b1. AMS 1: the default theme ships a layout for every page and labelled ad slots', async () => {
+test('12b1. AMS Nova: hero home, clean pages, and labelled ad slots on posts', async () => {
   const at = (html) => (html.match(/<main id="main">[\s\S]*?<\/main>/) || [''])[0];
 
-  // The home page: one hero, the sample page body, a call-to-action band and the
-  // footer, with nothing left unrendered.
+  // The home page: a full hero, the sample page body, post cards and the footer,
+  // with nothing left unrendered.
   const home = await anon('/');
   assert.match(home.text, /<section class="hero">[^]*<h1>/);
+  assert.match(home.text, /class="sidebar"/, 'the sidebar navigation is present');
   assert.doesNotMatch(home.text, /\{\{/, 'no template tags leak into the page');
 
-  // The extra page layouts render through the editor's Template dropdown. Each
-  // one is a real layout, not the generic page template with a different title.
-  const pages = {
-    tools: /class="grid tools"/,
-    tool: /class="tool-box"/,
-    services: /class="grid services"/,
-    contact: /class="two-col"/,
-  };
-  const madeIds = [];
-  for (const [template, marker] of Object.entries(pages)) {
-    const made = await adminPost('/pages/save', {
-      title: `AMS ${template}`, slug: `ams-${template}`, body: `<p>Body of ${template}</p>`,
-      status: 'published', template,
-    });
-    assert.match(made.location, /ok=/, `${template} page saved`);
-    madeIds.push(idFrom(made.location));
-    const page = await anon(`/ams-${template}`);
-    assert.equal(page.status, 200, template);
-    assert.match(at(page.text), marker, `${template} has its own layout`);
-    assert.doesNotMatch(page.text, /\{\{/, `${template} renders cleanly`);
-  }
-  // The tools index lists the page laid out as a tool, and the tool page links
-  // back to the index — the two layouts know about each other.
-  assert.match(at((await anon('/ams-tools')).text), /href="\/ams-tool"/);
-  assert.match(at((await anon('/ams-tool')).text), /href="\/tools"/);
+  // A page renders with its title and content in the same shell.
+  const about = await anon('/about');
+  assert.equal(about.status, 200);
+  assert.match(about.text, /class="entry-header"/);
+  assert.match(about.text, /About us/);
+  assert.doesNotMatch(about.text, /\{\{/, 'the page renders cleanly');
 
-  // Ad slots are off by default and exist only on posts and tool pages.
+  // Ad slots are off by default and exist only on posts.
   assert.equal((home.text.match(/class="ad-slot"/g) || []).length, 0, 'no ad slot on the home page');
   assert.equal((at((await anon(currentPostUrl())).text).match(/class="ad-slot"/g) || []).length, 0, 'a post prints no ad slot until one is filled in');
   await adminPost('/appearance', {
     ad_slot_1: '<ins class="adsbygoogle" data-ad-slot="111"></ins>',
-    ad_slot_tool: '<ins class="adsbygoogle" data-ad-slot="222"></ins>',
+    ad_slot_2: '<ins class="adsbygoogle" data-ad-slot="222"></ins>',
   });
   const post = at((await anon(currentPostUrl())).text);
-  assert.match(post, /<div class="ad-slot" role="complementary" aria-label="Advertisement"><ins class="adsbygoogle" data-ad-slot="111"><\/ins><\/div>/);
-  assert.match(at((await anon('/ams-tool')).text), /data-ad-slot="222"/, 'the tool slot lands below the tool');
-  assert.doesNotMatch((await anon('/')).text, /adsbygoogle/, 'the home page is never monetised');
-  await adminPost('/appearance', { ad_slot_1: '', ad_slot_tool: '' });
-
-  // Clean up: the pages this case made, so later cases count what they expect.
-  for (const id of madeIds) assert.match((await adminPost(`/pages/${id}/delete`, {})).location, /deleted|trash/i, 'the test pages are removed');
+  assert.match(post, /<ins class="adsbygoogle" data-ad-slot="111">/, 'the first ad slot lands after the article');
+  assert.match(post, /<ins class="adsbygoogle" data-ad-slot="222">/, 'the second ad slot lands at the end');
+  assert.doesNotMatch((await anon('/')).text, /<ins[^>]*adsbygoogle/, 'the home page is never monetised');
+  await adminPost('/appearance', { ad_slot_1: '', ad_slot_2: '' });
 });
 
-test('12c. theme store: six bundled themes install and switch with one click', async () => {
+test('12c. theme store: Nova is the single bundled theme and installs with one click', async () => {
   const store = await get(`${admin}/themes`);
-  // `<h3>AMS 1 <small …` — the version suffix is not part of the name.
+  // `<h3>AMS Nova <small …` — the version suffix is not part of the name.
   const storeCards = (html) => [...html.matchAll(/<h3>([^<]+?)\s*<small/g)].map((m) => m[1]);
-  for (const name of ['AMS 1', 'AMS Base', 'AMS Pro', 'AMS Premium', 'AMS Journal', 'AMS Portfolio']) assert.ok(storeCards(store.text).includes(name), `${name} is a store card: ${JSON.stringify(storeCards(store.text))}`);
-  assert.equal((store.text.match(/store\/[a-z-]+\/install/g) || []).length, 10, 'the five not-installed themes each offer Install and Install-and-activate');
-  // A store card shows a screenshot (or a palette gradient when it ships none),
-  // and its tags, so the store looks like a store.
+  assert.deepEqual(storeCards(store.text), ['AMS Nova'], 'Nova is the only store card');
+  // Nova is already installed (the installer activates it), so its card renders
+  // an Activate form, not Install / Install-and-activate.
   assert.match(store.text, /class="store-item__shot"/);
-  // Nothing is installed yet, so every card falls back to its palette gradient.
-  assert.doesNotMatch(store.text, /store-item__shot[^>]*url\(/, 'an uninstalled theme shows a generated card, not a broken image');
+  // Any install form on the page targets Nova only (an active theme shows no
+  // install button of its own; the install route is exercised below).
+  const installLinks = [...store.text.matchAll(/store\/([a-z0-9-]+)\/install/g)].map((m) => m[1]);
+  assert.ok(installLinks.every((slug) => slug === 'nova'), 'no theme other than Nova is offered');
 
-  assert.match((await adminPost('/themes/store/ams-pro/install', {})).location, /AMS Pro v1\.0\.0 installed/);
-  assert.match((await anon('/')).text, /class="site-header"/, 'installing alone does not switch theme');
-  assert.match((await adminPost('/themes/store/ams-pro/install', { activate: 1 })).location, /AMS Pro is now your active theme/);
-  const paths = ['/', '/blog', `/${new Date().getUTCFullYear()}/${String(new Date().getUTCMonth() + 1).padStart(2, '0')}/launch-day-more`, '/about-us', '/nowhere'];
-  const check = async (marker) => {
-    for (const path of paths) {
-      const res = await anon(path);
-      assert.equal(res.status, path === '/nowhere' ? 404 : 200, path);
-      assert.match(res.text, marker, path);
-      assert.match(res.text, /<nav class="tabs"[^]*<a href="\/"[^>]*>Home<\/a>/, `${path} has the tab navigation`);
-      assert.match(res.text, /<footer class="ftr">[^]*All rights reserved|<footer class="ftr">[^]*Back to top/, `${path} has the footer`);
-      assert.doesNotMatch(res.text, /\{\{/, `${path} has no unrendered template tags`);
-      assert.doesNotMatch(res.text, /https?:\/\/(?!127\.0\.0\.1|example\.)/, `${path} loads nothing external`);
-      if (path === '/') {
-        // The fixed landing screen is part of this page. Its own scripts are
-        // nonce-stamped; no theme or third-party script may join them.
-        for (const tag of res.text.match(/<script\b[^>]*>/g) || []) {
-          assert.match(tag, /\bnonce="/, `${path} only ships nonce-stamped landing scripts`);
-        }
-      } else {
-        assert.doesNotMatch(res.text, /<script/, `${path} loads no scripts`);
-      }
+  // Reinstalling Nova keeps it the active theme.
+  assert.match((await adminPost('/themes/store/nova/install', { activate: 1 })).location, /AMS Nova is now your active theme/);
+  assert.match((await anon('/')).text, /class="hero"/, 'Nova renders its hero after (re)activation');
+
+  // Every page kind renders from Nova's one shell, with no leaked tags.
+  const paths = ['/', '/blog', `/${new Date().getUTCFullYear()}/${String(new Date().getUTCMonth() + 1).padStart(2, '0')}/launch-day-more`, '/about', '/nowhere'];
+  for (const path of paths) {
+    const res = await anon(path);
+    assert.equal(res.status, path === '/nowhere' ? 404 : 200, path);
+    assert.match(res.text, /class="sidebar"/, `${path} has the sidebar navigation`);
+    assert.match(res.text, /<footer class="site-footer"/, `${path} has the footer`);
+    assert.doesNotMatch(res.text, /\{\{/, `${path} has no unrendered template tags`);
+    assert.doesNotMatch(res.text, /https?:\/\/(?!127\.0\.0\.1|example\.)/, `${path} loads nothing external`);
+    // Every inline script the theme ships (the dark/light toggle and the mobile
+    // drawer) carries the per-response CSP nonce.
+    for (const tag of res.text.match(/<script\b[^>]*>/g) || []) {
+      assert.match(tag, /\bnonce="/, `${path} only ships nonce-stamped scripts`);
     }
-  };
-  await check(/class="brand-mark" aria-hidden="true"><\/span>/);
-  assert.match((await anon('/')).text, /<section class="hero">[^]*Renamed Site/);
+  }
 
-  assert.match((await adminPost('/themes/store/ams-premium/install', { activate: 1 })).location, /AMS Premium is now your active theme/);
-  await check(/class="topbar"/);
-  assert.match((await anon('/')).text, /class="eyebrow">Now with a tagline/);
-  assert.match((await anon('/')).text, /<a href="\/" aria-current="page">Home<\/a>/, 'current tab is marked');
-
-  const after = await get(`${admin}/themes`);
-  // Six cards. An installed card renders one install form (Activate); an
-  // uninstalled card renders two (Install, Install and activate). Base, Pro and
-  // Premium are installed by now, so 3 + 3×2 = 9 — and the active one is Premium,
-  // whose install form is replaced by its Preview link.
-  assert.equal((after.text.match(/store\/[a-z0-9-]+\/install/g) || []).length, 8, 'installed themes only offer Activate');
   assert.match((await adminPost('/themes/store/nope/install', {})).text, /not in the store/);
-  // Installing Journal writes the screenshot the app ships with it, so its card
-  // shows the real thing from then on.
-  assert.match((await adminPost('/themes/store/ams-journal/install', {})).location, /AMS Journal v1\.0\.0 installed/);
-  const withShot = await get(`${admin}/themes`);
-  assert.match(withShot.text, /store-item__shot[^>]*url\([^)]*\/theme-assets\/ams-journal\/screenshot\.png/, 'the installed screenshot is served');
-  const shotUrl = withShot.text.match(/theme-assets\/ams-journal\/screenshot\.png[^'"]*/)[0];
-  const shot = await request('/theme-assets/ams-journal/screenshot.png');
-  assert.equal(shot.status, 200);
-  assert.ok(shotUrl.length > 0);
-  // The bytes really travel: an empty PNG would pass a status check and show a
-  // blank card, which is exactly what a build misconfigured for binary assets does.
-  assert.equal(shot.bytes[0], 0x89, 'the screenshot is a PNG, not an empty file');
-  assert.ok(shot.bytes.length > 1000, 'and it has pixels in it');
-  // And the theme itself renders: Journal's own markup, not a fallback.
-  assert.match((await adminPost('/themes/store/ams-journal/install', { activate: 1 })).location, /AMS Journal is now your active theme/);
-  const journal = await anon('/');
-  assert.match(journal.text, /class="masthead"/, 'Journal renders its masthead');
-  assert.match(journal.text, /masthead__kicker">Notes, essays/, 'its own theme setting reaches the page');
-  assert.match((await get(`${admin}/themes/preview/ams-journal`)).text, /id="theme-preview-frame"/, 'the live preview page renders');
-  assert.match((await adminPost('/themes/store/ams-portfolio/install', { activate: 1 })).location, /AMS Portfolio is now your active theme/);
-  const portfolio = await anon('/');
-  assert.match(portfolio.text, /class="hero__title">Design with intent/, 'Portfolio renders its hero setting');
-  assert.match(portfolio.text, /class="grid"/, 'and its grid');
-  assert.match(portfolio.text, /--cols:3/, 'the grid-columns setting reaches the CSS');
-  assert.match((await adminPost('/themes/store/ams-1/install', { activate: 1 })).location, /AMS 1 is now your active theme/);
-  assert.match((await anon('/')).text, /class="site-header"/);
-  log('store lists 3 themes; Pro and Premium render home, blog, post, page and 404 with tabs + footer; switched back to Base');
+  log('the store lists one theme, Nova; it reinstalls, activates, and renders every page from one shell');
 });
 
 test('12d. comments: public form, moderation, approval, replies, spam and delete', async () => {
@@ -1736,9 +1669,8 @@ test('17. the editor markup for images, links, blocks and breaks survives the sa
   const url = JSON.parse((await anon(`/api/posts/${slug}`)).text).url;
   // Render with a known theme: earlier tests leave a fixture theme active, and
   // this test is about the saved markup, not about which theme is current.
-  // The bundled theme's folder is `ams1` (its store slug is `ams-1`); `default`
-  // is the id of the older "AMS Base" package.
-  const page = await get(`${url}?preview=1&theme=ams-1`);
+  // The bundled theme is AMS Nova (store slug `nova`).
+  const page = await get(`${url}?preview=1&theme=nova`);
   assert.equal(page.status, 200, `${url} renders in the bundled theme`);
 
   // Alignment + width are the two things the editor's bar writes.
@@ -1757,12 +1689,10 @@ test('17. the editor markup for images, links, blocks and breaks survives the sa
   assert.match(page.text, /<hr class="page-break">/);
   assert.match(page.text, /<div class="html-block"><p>Custom block<\/p><\/div>/);
   assert.match(page.text, /youtube-nocookie.com\/embed\/dQw4w9WgXcQ/);
-  // The bundled themes style the break and the figure placement (the store
-  // themes that earlier tests activate are CSS-only and render the markup
-  // as-is, so the figure rules are checked in the stylesheet itself).
-  const defaultCss = (await anon('/theme-assets/ams-1/style.css')).text || '';
-  assert.match(defaultCss, /hr\.page-break\{border-top-style:dashed/);
-  assert.match(defaultCss, /content figure\.image-block\{margin:1\.5em auto/);
+  // The bundled theme styles the break and the figure placement.
+  const novaCss = (await anon('/theme-assets/nova/style.css')).text || '';
+  assert.match(novaCss, /hr\.page-break\s*\{\s*border-top-style:\s*dashed/);
+  assert.match(novaCss, /figure\.image-block\s*\{\s*margin:\s*1\.5em auto/);
 
   // An admin saves raw HTML by design; an author or editor goes through the
   // sanitizer, which keeps exactly the declarations the editor writes and
@@ -1868,9 +1798,9 @@ test('17b. page-specific posts: assign to one or more pages/sub-pages and hide f
   const hubPage = await anon('/guides-hub');
   assert.doesNotMatch(hubPage.text, /Exclusive Subpage Post/, 'parent page does not show posts assigned only to its children');
 
-  // Switch back to AMS 1 so /blog and /category/* have full archive templates.
-  const ams1Id = await themeId('AMS 1');
-  await adminPost(`/themes/${ams1Id}/activate`, {});
+  // Switch back to AMS Nova so /blog and /category/* have full archive templates.
+  const novaId = await themeId('AMS Nova');
+  await adminPost(`/themes/${novaId}/activate`, {});
 
   const blogIndex = await anon('/blog');
   assert.match(blogIndex.text, /General Blog Post/);
@@ -1895,9 +1825,9 @@ test('17b. page-specific posts: assign to one or more pages/sub-pages and hide f
   assert.equal(apiSub.total, 1);
   assert.equal(apiSub.posts[0].slug, 'exclusive-subpage-post');
 
-  // Direct post URL still works and links back to the assigned page in AMS 1.
+  // Direct post URL still works and links back to the assigned page in AMS Nova.
   const postView = JSON.parse((await anon('/api/posts/exclusive-subpage-post')).text);
-  const single = await get(`${postView.url}?preview=1&theme=ams-1`);
+  const single = await get(`${postView.url}?preview=1&theme=nova`);
   assert.equal(single.status, 200);
   assert.match(single.text, /Only on selected sub-pages\./);
   assert.match(single.text, /Back to (Android|Python) Subpage/);

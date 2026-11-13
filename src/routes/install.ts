@@ -7,7 +7,8 @@ import { markInstalled, saveConfig, validAdminSlug } from '../lib/config';
 import { cleanDomain, sameOrigin } from '../lib/security';
 import { displayTitle, siteNameFromHost } from '../lib/origin';
 import { html, raw, shell, type Raw } from '../lib/ui';
-import { defaultTheme } from '../themes/ams1';
+import { defaultTheme } from '../themes/nova';
+import { demoContentStatements } from '../lib/demo-content';
 
 /**
  * First-run wizard. The root app only routes here while the KV "installed"
@@ -161,6 +162,7 @@ install.post('/', async (c) => {
     setting.bind('schema_version', String(SCHEMA_VERSION)),
     setting.bind('installed_at', now),
     db.prepare("INSERT OR REPLACE INTO settings (site_id,key,value) SELECT 1,'home_page_id',CAST(id AS TEXT) FROM content WHERE site_id=1 AND type='page' AND slug='home'"),
+    ...demoContentStatements(db, now, 1),
   ]);
   await markInstalled(c.env);
 

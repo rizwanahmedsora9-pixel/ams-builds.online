@@ -1,0 +1,58 @@
+<section class="hero">
+  <div class="hero-inner">
+    <p class="hero-eyebrow">{{#if theme.hero_eyebrow}}{{theme.hero_eyebrow}}{{else}}Welcome{{/if}}</p>
+    <h1>{{#if theme.hero_title}}{{theme.hero_title}}{{else}}{{site.title}}{{/if}}</h1>
+    <p class="hero-text">{{#if theme.hero_text}}{{theme.hero_text}}{{else}}{{#if site.tagline}}{{site.tagline}}{{else}}A full-colour site with sidebar navigation, dark and light options and a clean reading experience.{{/if}}{{/if}}</p>
+    <div class="hero-cta">
+      <a class="btn" href="{{#if theme.hero_cta_url}}{{theme.hero_cta_url}}{{else}}/blog{{/if}}">{{#if theme.hero_cta_label}}{{theme.hero_cta_label}}{{else}}Read the blog{{/if}}</a>
+      <a class="btn ghost" href="{{#if theme.hero_second_url}}{{theme.hero_second_url}}{{else}}/{{/if}}">{{#if theme.hero_second_label}}{{theme.hero_second_label}}{{else}}Browse pages{{/if}}</a>
+    </div>
+  </div>
+</section>
+
+{{#if page}}
+<section class="section">
+  <div class="wrap">
+    <div class="content home-content">{{{page.content}}}</div>
+  </div>
+</section>
+{{/if}}
+
+{{#if posts}}
+<section class="section">
+  <div class="wrap">
+    <div class="section-head"><h2>Latest posts</h2><a class="more" href="/blog">View all &rarr;</a></div>
+    <div class="cards">
+      {{#each posts limit=6}}
+      <article class="card">
+        {{#if featured_image}}<a class="card-img" href="{{url}}" tabindex="-1"><img src="{{featured_image}}" alt="{{featured_alt}}" loading="lazy"></a>{{/if}}
+        <div class="card-body">
+          {{#if theme.show_categories}}{{#if categories}}<p class="meta card-cats">{{#each categories}}<a href="{{url}}">{{name}}</a>{{/each}}{{/if}}{{/if}}
+          <h3 class="card-title"><a href="{{url}}">{{title}}</a></h3>
+          <p class="meta"><time datetime="{{date_iso}}">{{date}}</time></p>
+          <p class="card-excerpt">{{excerpt}}</p>
+        </div>
+      </article>
+      {{/each}}
+    </div>
+  </div>
+</section>
+{{/if}}
+
+{{#if pages}}
+<section class="section">
+  <div class="wrap">
+    <div class="section-head"><h2>Explore the site</h2><a class="more" href="/pages">All pages &rarr;</a></div>
+    <div class="cards pages-cards">
+      {{#each pages limit=6}}{{#if url ne "/"}}
+      <article class="card page-card">
+        <div class="card-body">
+          <h3 class="card-title"><a href="{{url}}">{{title}}</a></h3>
+          <p class="meta">Page</p>
+        </div>
+      </article>
+      {{/if}}{{/each}}
+    </div>
+  </div>
+</section>
+{{/if}}

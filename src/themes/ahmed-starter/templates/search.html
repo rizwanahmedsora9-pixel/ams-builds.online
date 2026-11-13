@@ -1,7 +1,0 @@
-<section class="content-wide search-content">
-  <p class="eyebrow">Search the site</p>
-  <h1>Search results</h1>
-  <form class="search-form" action="/search" method="get"><label for="site-search">Search pages and posts</label><div><input id="site-search" type="search" name="q" value="{{search.query}}" maxlength="120"><button class="button" type="submit">Search</button></div></form>
-  {{#if search.query}}<p class="result-count">{{search.total}} result(s) for “{{search.query}}”</p>{{/if}}
-  {{#if posts}}<div class="post-grid">{{#each posts}}<article class="post-card"><p class="eyebrow">{{date}}</p><h2><a href="{{url}}">{{title}}</a></h2><p>{{excerpt}}</p></article>{{/each}}</div>{{else}}{{#if search.query}}<p class="empty">No matching pages or posts were found.</p>{{/if}}{{/if}}
-</section>

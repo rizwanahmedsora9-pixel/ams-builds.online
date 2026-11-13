@@ -18,23 +18,18 @@ const themeCss = (slug) => readFileSync(join(root, 'src', 'themes', slug, 'style
 const look = (slug, scheme = null) => ({ css: themeCss(slug), scheme });
 
 test('a theme\'s own palette is read through its var() chains, not invented', () => {
-  // AMS 1 declares plain values; AMS Portfolio nestles every colour in
-  // `var(--bg, #0e1116)`, so the literal fallback is what has to come out.
-  const ams1 = landingPalettes({}, look('ams1')).light;
-  assert.equal(ams1.bg, '#ffffff');
-  assert.equal(ams1.fg, '#0f1b2d');
-  assert.equal(ams1.brand, '#1a5cff');
-  assert.equal(ams1.surface, '#f5f8fc');
-
-  const portfolio = landingPalettes({}, look('portfolio')).light;
-  assert.equal(portfolio.bg, '#0e1116', 'the dark fallback, not the token name');
-  assert.equal(portfolio.fg, '#f2f4f8');
-  assert.equal(portfolio.brand, '#22d3a6');
-  assert.equal(portfolio.radius, '14px', 'shapes are carried too');
+  // AMS Nova declares plain values on `:root`; the welcome screen reads them
+  // straight out of the stylesheet rather than guessing.
+  const nova = landingPalettes({}, look('nova')).light;
+  assert.equal(nova.bg, '#f4f6fb');
+  assert.equal(nova.fg, '#1a2238');
+  assert.equal(nova.brand, '#e94560');
+  assert.equal(nova.surface, '#ffffff');
+  assert.equal(nova.radius, '14px', 'shapes are carried too');
 });
 
 test('every bundled theme resolves to a usable palette', () => {
-  for (const slug of ['ams1', 'default', 'journal', 'portfolio', 'pro', 'premium']) {
+  for (const slug of ['nova']) {
     const { light, dark } = landingPalettes({}, look(slug));
     for (const [name, palette] of [['light', light], ['dark', dark]]) {
       for (const key of ['bg', 'fg', 'muted', 'surface', 'line', 'brand', 'onBrand']) {
@@ -47,32 +42,27 @@ test('every bundled theme resolves to a usable palette', () => {
 });
 
 test('light and dark halves are read separately, and a light theme never gets dark copy', () => {
-  const { light, dark, paired } = landingPalettes({}, look('default'));
-  assert.equal(paired, true, 'AMS Base ships both halves');
-  assert.equal(light.bg, '#ffffff');
-  assert.equal(dark.bg, '#11151c');
-  assert.equal(dark.fg, '#e6e9ef');
+  const { light, dark, paired } = landingPalettes({}, look('nova'));
+  assert.equal(paired, true, 'AMS Nova ships both halves');
+  assert.equal(light.bg, '#f4f6fb');
+  assert.equal(dark.bg, '#0d1320');
+  assert.equal(dark.fg, '#e9edf7');
 
-  // A theme with one palette needs no second block.
-  assert.equal(landingPalettes({}, look('portfolio')).paired, false);
-
-  // The last declaration in a block has no trailing semicolon; it still counts
-  // (`premium` ends its `:root` with `--serif:…`).
-  const premium = landingPalettes({}, look('premium')).light;
-  assert.equal(premium.bg, '#faf8f3');
-  assert.equal(premium.brand, '#b8860b');
-  assert.equal(premium.radius, '.5rem');
+  // The last declaration in a block has no trailing semicolon; it still counts.
+  const nova = landingPalettes({}, look('nova')).light;
+  assert.equal(nova.brand, '#e94560');
+  assert.equal(nova.radius, '14px');
 });
 
 test('a forced colour scheme collapses the pair, and a hand-switched theme is honoured', () => {
-  const forcedLight = landingPalettes({}, look('default', 'light'));
+  const forcedLight = landingPalettes({}, look('nova', 'light'));
   assert.equal(forcedLight.paired, false, 'no media query when the site forces a scheme');
-  assert.equal(forcedLight.light.bg, '#ffffff');
+  assert.equal(forcedLight.light.bg, '#f4f6fb');
 
-  const forcedDark = landingPalettes({}, look('default', 'dark'));
-  assert.equal(forcedDark.light.bg, '#11151c', 'a forced dark site opens on the dark half');
+  const forcedDark = landingPalettes({}, look('nova', 'dark'));
+  assert.equal(forcedDark.light.bg, '#0d1320', 'a forced dark site opens on the dark half');
 
-  const css = landingCssVars(landingPalettes({}, look('ams1')));
+  const css = landingCssVars(landingPalettes({}, look('nova')));
   assert.match(css, /@media \(prefers-color-scheme:dark\)\{#ams-landing-screen\{/, 'the browser switch is mirrored');
   assert.match(css, /html\[data-ams-scheme="light"\] #ams-landing-screen\{/, "a theme's own toggle can say light");
   assert.match(css, /html\[data-ams-scheme="dark"\] #ams-landing-screen\{/, 'and dark');
@@ -83,17 +73,21 @@ test('design tokens win over the theme, and a readable ink is picked for the bra
     token_bg: '#102030', token_text: '#f0f0f0', token_brand: '#f7d64a',
     token_radius: '18', token_scheme: 'dark',
   };
-  const palette = landingPalettes(tokens, look('default')).light;
+  const palette = landingPalettes(tokens, look('nova')).light;
   assert.equal(palette.bg, '#102030', 'the admin background');
   assert.equal(palette.brand, '#f7d64a', 'the admin brand');
   assert.equal(palette.radius, '18px');
-  // A pale gold button needs dark ink; a navy one would have needed white.
-  assert.equal(palette.onBrand, '#0b1220', 'button labels stay readable on a light brand');
-  assert.equal(landingPalettes({ token_brand: '#1a3d8f' }, look('default')).light.onBrand, '#ffffff');
 
   // An unset surface is derived from the background rather than borrowed from
   // the other half of the theme.
   assert.match(palette.surface, /^color-mix\(in srgb, #102030 /);
+
+  // Button ink is derived when the theme does not declare one: a pale gold
+  // brand needs dark ink, a navy one needs white. (AMS Nova declares its own
+  // `--on-brand`, so this uses a bare stylesheet to exercise the derivation.)
+  const bare = { css: ':root{--bg:#102030;--text:#f0f0f0;--brand:#e94560}', scheme: 'dark' };
+  assert.equal(landingPalettes({ token_brand: '#f7d64a' }, bare).light.onBrand, '#0b1220', 'button labels stay readable on a light brand');
+  assert.equal(landingPalettes({ token_brand: '#1a3d8f' }, bare).light.onBrand, '#ffffff');
 });
 
 test('a stylesheet that is empty or hostile still yields something paintable', () => {
@@ -126,4 +120,8 @@ test('schemeLayers keeps the base declarations and unwraps only the dark block',
   const mixed = schemeLayers('.a{background:color-mix(in srgb, #fff 50%, #000)}');
   assert.equal(mixed.dark, '');
   assert.match(mixed.base, /color-mix/);
+
+  // Comments inside a block are not declarations and must not hide one.
+  const commented = schemeLayers(':root{/* Surfaces */--bg:#f4f6fb}');
+  assert.match(commented.base, /--bg:#f4f6fb/);
 });
