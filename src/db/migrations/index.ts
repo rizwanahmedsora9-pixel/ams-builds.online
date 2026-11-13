@@ -6,7 +6,7 @@ import { resetSchemaCache } from '../../lib/schema';
  * by the installer; each entry here upgrades an already-installed database.
  * Append new entries with the next version number - never edit old ones.
  */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 /**
  * A migration statement that must not take the whole batch down.
@@ -183,6 +183,7 @@ export const migrations: { version: number; name: string; statements: string[] }
   { version: 7, name: 'Audit log', statements: AUDIT },
   { version: 8, name: 'Hierarchical pages', statements: PAGE_HIERARCHY },
   { version: 9, name: 'Page-specific posts', statements: POST_PAGES },
+  { version: 10, name: 'Page icons', statements: [tolerant("ALTER TABLE content ADD COLUMN icon TEXT NOT NULL DEFAULT ''")] },
 ];
 
 /** Runs one migration statement, tolerating the errors marked in its comment. */

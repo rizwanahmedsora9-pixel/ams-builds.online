@@ -1481,3 +1481,38 @@ test('phase 5: an older install shows "Update available vX → vY" with its chan
   assert.match(detail, /Before store update/, 'the replaced version is in the history');
   await panel.adminPost('/themes/store/ams-1/install', { activate: 1 });
 });
+
+test('shell confines wide content and gives each column its own scroll area', async () => {
+  const css = (await panel.get(`${panel.admin}/assets/app.css`)).text;
+  assert.doesNotMatch(css, /\b100vh\b/);
+  assert.match(css, /\.shell\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)[^}]*height:\s*calc\(100dvh/s);
+  assert.match(css, /\.shell\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/s);
+  assert.match(css, /\.main\s*\{[^}]*min-width:\s*0[^}]*min-height:\s*0[^}]*overflow-y:\s*auto[^}]*overflow-x:\s*clip/s);
+  assert.match(css, /\.table-wrap\s*\{[^}]*max-width:\s*100%[^}]*overflow-x:\s*auto/s);
+});
+
+test('page icons persist in editor and tree; unsafe names fall back', async () => {
+  const saved = await panel.adminPost('/pages/save', { title: 'Icon test page', slug: 'icon-test-page', body: 'Test', status: 'published', icon: 'folder' });
+  assert.equal(saved.status, 303);
+  const list = (await panel.get(`${panel.admin}/pages`)).text;
+  assert.match(list, /href="#i-folder"[^]*?Icon test page/);
+  const id = list.match(/href="\/admin-panel\/pages\/(\d+)"[^>]*>Icon test page<\/a>/)?.[1];
+  assert.ok(id);
+  assert.match((await panel.get(`${panel.admin}/pages/${id}`)).text, /<option value="folder" selected>/);
+  await panel.adminPost('/pages/save', { id, title: 'Icon test page', slug: 'icon-test-page', body: 'Test', status: 'published', icon: 'evil' });
+  assert.doesNotMatch((await panel.get(`${panel.admin}/pages`)).text, /href="#i-evil"/);
+});
+
+test('social profile URL validation and footer toggle', async () => {
+  const base = { site_title: 'E2E Test Site', timezone: 'UTC', primary_domain: 'localhost', admin_slug: 'admin-panel', posts_per_page: '10', permalink_style: 'blog', csp: 'report' };
+  const bad = await panel.adminPost('/settings', { ...base, social_facebook: 'javascript:alert(1)', social_footer: '1' });
+  assert.match(bad.location, /valid HTTP or HTTPS URL/);
+  // Activate the bundled theme, which includes the shared footer partial.
+  await panel.adminPost('/themes/ams1/activate', {});
+  await panel.adminPost('/settings', { ...base, social_facebook: 'https://example.com/profile', social_footer: '1' });
+  const settingsPage = await panel.get(`${panel.admin}/settings`);
+  assert.match(settingsPage.text, /value="https:\/\/example.com\/profile"/);
+  assert.match((await panel.anon('/icon-test-page')).text, /href="https:\/\/example.com\/profile"[^>]*>Facebook<\/a>/);
+  await panel.adminPost('/settings', { ...base, social_facebook: 'https://example.com/profile' });
+  assert.doesNotMatch((await panel.anon('/icon-test-page')).text, /href="https:\/\/example.com\/profile"/);
+});

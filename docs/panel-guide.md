@@ -402,3 +402,17 @@ start.
 Site Health shows what this build measured against its limits: admin HTML, the three panel CSS files, the
 editor script and a public page, gzipped and without media. `npm test` runs the same measurement and fails
 when a bundle grows past its budget, so the number in the panel is the number CI enforced, not an estimate.
+
+## Page icons and social profiles
+
+In Pages, edit a page and choose a **Page icon**, then save. The Pages tree
+shows the selected icon; themes can access the saved name as `pages[].icon`
+(an empty name means the default). Icons do not change page URLs.
+
+Under **Settings → Social profiles**, enter complete HTTP or HTTPS profile
+URLs and enable **Show social links in the footer**. Save settings to publish
+them. Blank profiles are omitted. Bundled themes render the links in their
+footer; custom themes can use `site.social` (a list of `name`, `label`, and
+`url` objects) and `site.social_footer` to respect the footer toggle. Existing installed
+themes keep their customizations; reinstall or update a bundled theme to pick up
+the new footer partial.
