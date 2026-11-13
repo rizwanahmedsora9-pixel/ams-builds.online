@@ -1,0 +1,7 @@
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <div><strong>{{site.title}}</strong><p>{{site.tagline}}</p></div>
+    {{#if menu.footer}}<nav aria-label="Footer navigation">{{#each menu.footer}}<a href="{{url}}">{{label}}</a>{{/each}}</nav>{{/if}}
+    <small>© {{year}} {{site.title}} · Powered by Edge CMS</small>
+  </div>
+</footer>

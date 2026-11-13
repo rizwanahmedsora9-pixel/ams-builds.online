@@ -5,6 +5,7 @@ import { bumpCache, getSettings, setSettings, type Settings } from '../../lib/co
 import { MAX_THEME_ASSET, MAX_THEME_UPLOAD, ThemeError, readUpload, saveTheme } from '../../lib/themes';
 import {
   MAX_ASSETS_PER_THEME, assetMime, cleanAssetPath, isRefusedAsset, parseManifest, resolveSettings, settingDefaults,
+  validateThemeSettingValue,
   type ThemeManifest, type ThemeSetting, type UploadedAsset,
 } from '../../lib/theme-manifest';
 import {
@@ -21,6 +22,7 @@ import { inspectTemplate } from '../../lib/template';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 import { card, emptyState, notice } from '../../admin/components';
 import { storeThemes, type StoreTheme } from '../../themes';
+import { sampleThemeEntries } from '../../themes/sample';
 import { themeFailureFor } from '../../lib/render';
 import { clearThemeValueCache } from '../public';
 
@@ -254,7 +256,9 @@ ${card({
 
 <div class="card">
   <h2>Make your own</h2>
-  <p>Download a theme, edit the zip, upload it again. A theme is a <code>theme.json</code> plus its files:</p>
+  <p>Start with the official, upload-ready theme package. It contains editable templates, partials, responsive CSS, a JavaScript example, a screenshot, settings, menu locations, and developer instructions.</p>
+  <p><a class="btn" href="${base}/themes/sample.zip">Download sample theme ZIP</a> <a class="btn ghost" href="${base}/themes/validate">Validate a package</a></p>
+  <p>Legacy JSON packages remain supported. A theme is a <code>theme.json</code> plus its files:</p>
   <pre class="pre">{
   "name": "Journal",
   "version": "1.0.0",
@@ -272,6 +276,30 @@ ${card({
   <p class="hint">Only <b>base</b> is required (or a <b>parent</b> to inherit from). In a template: <code>{{post.title}}</code>, <code>{{{post.content}}}</code>, <code>{{#if post.comments_count gt 0}}</code>, <code>{{#each posts limit=3}}</code>, <code>{{> header}}</code>, <code>{{post.date | date "d MMM yyyy"}}</code>, <code>{{asset "logo.png"}}</code>, <code>{{{theme_css_url}}}</code>. Every new theme can be checked with <a href="${base}/themes/validate">Validate a theme</a> before it goes live.</p>
 </div>
 ${raw(`<script>document.querySelectorAll('[data-confirm]').forEach(function(f){f.addEventListener('submit',function(e){if(!confirm(f.getAttribute('data-confirm')))e.preventDefault()})});</script>`)}`, '/themes');
+});
+
+themes.get('/themes/sample.zip', async (c) => {
+  try {
+    const bytes = zipFiles(sampleThemeEntries());
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const inspected = await readUpload(buffer);
+    if (inspected.manifest.slug !== 'ahmed-starter-theme' || inspected.manifest.required_templates.length !== 6) {
+      throw new ThemeError('The official sample package failed its own manifest validation.');
+    }
+    await audit(c, 'exported', 'theme', 'Downloaded the official Ahmed Starter Theme package', inspected.manifest.slug);
+    return new Response(bytes, {
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': 'attachment; filename="ahmed-starter-theme.zip"',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  } catch (error) {
+    console.error('sample theme package generation failed:', error);
+    await audit(c, 'failed', 'theme', 'Official sample theme package generation failed');
+    return errorPage(c, 500, 'The sample theme ZIP could not be generated. No theme or site data was changed.');
+  }
 });
 
 /* ------------------------------------------------------------- activation */
@@ -578,7 +606,8 @@ function settingField(s: ThemeSetting, value: string): unknown {
     case 'color':
       return html`${label}<input type="color" id="${id}" name="${s.key}" value="${/^#[0-9a-f]{6}$/i.test(value) ? value : '#000000'}">`;
     case 'number':
-      return html`${label}<input type="number" id="${id}" name="${s.key}" value="${value}" step="any">`;
+    case 'range':
+      return html`${label}<input type="${s.type}" id="${id}" name="${s.key}" value="${value}"${s.min !== undefined ? raw(` min="${s.min}"`) : raw('')}${s.max !== undefined ? raw(` max="${s.max}"`) : raw('')}${s.step !== undefined ? raw(` step="${s.step}"`) : raw(' step="any"')}>`;
     case 'select':
       return html`${label}<select id="${id}" name="${s.key}">
         ${(s.options ?? []).map((o) => html`<option value="${o.value}"${o.value === value ? raw(' selected') : raw('')}>${o.label}</option>`)}
@@ -633,8 +662,7 @@ themes.post('/themes/:slug/settings/reset', async (c) => {
 async function saveSettingsValues(c: Ctx, manifest: ThemeManifest, form: FormData): Promise<number> {
   const rows = manifest.settings.map((s) => {
     const raw2 = form.get(s.key);
-    const value = s.type === 'toggle' ? (raw2 === '1' || raw2 === 'on' ? '1' : '') : String(raw2 ?? '').slice(0, 2000);
-    return { key: s.key, value };
+    return { key: s.key, value: validateThemeSettingValue(s, raw2) };
   });
   if (!rows.length) return 0;
   try {

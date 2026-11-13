@@ -11,7 +11,8 @@
  *   - binary assets               -> the file store, keyed `themes/{slug}/{path}`
  *     (src/lib/theme-assets.ts), served by `GET /theme-assets/{slug}/{path}`
  */
-import { slugify } from './security';
+import { safeUrl, slugify } from './security';
+import { APP_VERSION } from './version';
 
 export const MAX_THEME_UPLOAD = 6 * 1024 * 1024; // the zip itself
 export const MAX_THEME_ASSET = 512 * 1024; // one asset file
@@ -60,7 +61,7 @@ export function cleanAssetPath(input: string): string {
 
 /* ---------------------------------------------------------------- manifest */
 
-export type ThemeSettingType = 'text' | 'textarea' | 'toggle' | 'color' | 'select' | 'number' | 'image' | 'url';
+export type ThemeSettingType = 'text' | 'textarea' | 'toggle' | 'color' | 'select' | 'number' | 'range' | 'image' | 'url';
 
 export type ThemeSetting = {
   key: string;
@@ -69,6 +70,9 @@ export type ThemeSetting = {
   default: string | number | boolean;
   help?: string;
   options?: { value: string; label: string }[];
+  min?: number;
+  max?: number;
+  step?: number;
 };
 
 export type ThemeManifest = {
@@ -97,8 +101,17 @@ export type ThemeManifest = {
   widgets: ThemeWidgetArea[];
   changelog: { version: string; notes: string }[];
   assets: string[];
-  /** What the theme asked for; `version` 1 manifests are upgraded on load. */
-  manifestVersion: 2;
+  /** Versioned developer package metadata. Optional on legacy v1/v2 manifests. */
+  cms_compatibility: { min: string; max?: string };
+  required_templates: string[];
+  optional_templates: string[];
+  features: string[];
+  menu_locations: string[];
+  /** Canonical v3 name; `settings` remains as the renderer's compatible alias. */
+  settings_schema: ThemeSetting[];
+  asset_entrypoints: { css: string; js: string[] };
+  /** What the theme asked for; legacy v1/v2 manifests are upgraded on load. */
+  manifest_version: 2 | 3;
   /** Assets found in the archive itself (kept apart from `assets`, which is the manifest's list). */
   shipped?: string[];
 };
@@ -137,8 +150,8 @@ export const DEFAULT_WIDGET_AREAS: ThemeWidgetArea[] = [
 export const widgetKey = (area: string, slot: number, field: 'title' | 'body'): string =>
   `widget_${area.replace(/-/g, '_')}_${slot}_${field}`;
 
-const SETTING_TYPES: ThemeSettingType[] = ['text', 'textarea', 'toggle', 'color', 'select', 'number', 'image', 'url'];
-const COLOR = /^#[0-9a-f]{3,8}$/i;
+const SETTING_TYPES: ThemeSettingType[] = ['text', 'textarea', 'toggle', 'color', 'select', 'number', 'range', 'image', 'url'];
+const COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
 function str(v: unknown, max = 200): string {
   return typeof v === 'string' ? v.trim().slice(0, max) : '';
@@ -181,10 +194,23 @@ function parseSettings(input: unknown): ThemeSetting[] {
     if (!SETTING_TYPES.includes(type)) throw new ThemeError(`Setting "${key}" has an unknown type "${type}".`);
     const label = str(o.label, 80) || key.replace(/_/g, ' ');
     let def: string | number | boolean = '';
+    let min: number | undefined;
+    let max: number | undefined;
+    let step: number | undefined;
     if (type === 'toggle') def = o.default === true || o.default === '1' || o.default === 'true';
-    else if (type === 'number') def = Number.isFinite(Number(o.default)) ? Number(o.default) : 0;
-    else def = str(o.default, 400);
-    if (type === 'color' && def && !COLOR.test(String(def))) throw new ThemeError(`Setting "${key}" needs a hex colour.`);
+    else if (type === 'number' || type === 'range') {
+      min = o.min === undefined ? undefined : Number(o.min);
+      max = o.max === undefined ? undefined : Number(o.max);
+      step = o.step === undefined ? undefined : Number(o.step);
+      if ((min !== undefined && !Number.isFinite(min)) || (max !== undefined && !Number.isFinite(max))
+        || (step !== undefined && (!Number.isFinite(step) || step <= 0)) || (min !== undefined && max !== undefined && min > max)) {
+        throw new ThemeError(`Setting "${key}" has invalid numeric limits.`);
+      }
+      if (type === 'range' && (min === undefined || max === undefined)) throw new ThemeError(`Range setting "${key}" needs min and max values.`);
+      const n = Number(o.default);
+      def = Number.isFinite(n) ? Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n)) : (min ?? 0);
+    } else def = str(o.default, 400);
+    if (type === 'color' && def && !COLOR.test(String(def))) throw new ThemeError(`Setting "${key}" needs a valid hex colour.`);
     const options = Array.isArray(o.options)
       ? o.options.map((opt) => {
         const oo = (opt ?? {}) as Record<string, unknown>;
@@ -197,8 +223,50 @@ function parseSettings(input: unknown): ThemeSetting[] {
     if (type === 'select' && options.length && !options.some((x) => x.value === String(def))) {
       def = options[0].value;
     }
-    return { key, type, label, default: def, options, ...(str(o.help, 200) ? { help: str(o.help, 200) } : {}) };
+    return {
+      key, type, label, default: def, options,
+      ...(min !== undefined ? { min } : {}), ...(max !== undefined ? { max } : {}), ...(step !== undefined ? { step } : {}),
+      ...(str(o.help, 200) ? { help: str(o.help, 200) } : {}),
+    };
   });
+}
+
+/** Validates one submitted Customizer value against the installed manifest schema. */
+export function validateThemeSettingValue(setting: ThemeSetting, input: unknown): string {
+  const value = String(input ?? '').trim().slice(0, 2000);
+  switch (setting.type) {
+    case 'toggle':
+      return value === '1' || value === 'true' || value === 'on' ? '1' : '';
+    case 'color':
+      if (!COLOR.test(value)) throw new ThemeError(`“${setting.label}” must be a valid hex color.`);
+      return value;
+    case 'select':
+      if (!(setting.options ?? []).some((option) => option.value === value)) {
+        throw new ThemeError(`Choose an allowed value for “${setting.label}”.`);
+      }
+      return value;
+    case 'number':
+    case 'range': {
+      if (!value) throw new ThemeError(`“${setting.label}” needs a number.`);
+      const number = Number(value);
+      if (!Number.isFinite(number)) throw new ThemeError(`“${setting.label}” must be a finite number.`);
+      if (setting.min !== undefined && number < setting.min || setting.max !== undefined && number > setting.max) {
+        throw new ThemeError(`“${setting.label}” must be between ${setting.min ?? '−∞'} and ${setting.max ?? '∞'}.`);
+      }
+      if (setting.step !== undefined && setting.min !== undefined) {
+        const steps = (number - setting.min) / setting.step;
+        if (Math.abs(steps - Math.round(steps)) > 1e-7) throw new ThemeError(`“${setting.label}” must use increments of ${setting.step}.`);
+      }
+      return String(number);
+    }
+    case 'url':
+    case 'image':
+      if (!value) return '';
+      if (!safeUrl(value)) throw new ThemeError(`“${setting.label}” must be a safe URL or CMS media path.`);
+      return value;
+    default:
+      return value;
+  }
 }
 
 /**
@@ -213,9 +281,51 @@ export function parseManifest(input: unknown): { manifest: ThemeManifest; templa
   const slug = slugify(str(o.slug, 40) || name);
   if (!slug) throw new ThemeError('The theme name must contain letters or digits.');
   const version = str(o.version, 20) || '1.0.0';
-  // `preview` may be an array (v1) or an object carrying colours (v2).
+  const sourceManifestVersion = Number(o.manifest_version ?? o.manifestVersion ?? 1);
+  if (sourceManifestVersion >= 3) {
+    for (const field of ['slug', 'version', 'author', 'description', 'cms_compatibility', 'preview', 'screenshot',
+      'required_templates', 'optional_templates', 'features', 'menu_locations', 'asset_entrypoints', 'settings_schema',
+      'templates', 'partials', 'css', 'assets']) {
+      if (!(field in o)) throw new ThemeError(`Version 3 manifests must declare "${field}".`);
+    }
+    if (!str(o.author, 60) || !str(o.description, 400)) throw new ThemeError('Version 3 manifests need an author and description.');
+  }
+  const compatibilityRaw = o.cms_compatibility && typeof o.cms_compatibility === 'object'
+    ? o.cms_compatibility as Record<string, unknown>
+    : {};
+  const compatibilityMin = str(compatibilityRaw.min, 20);
+  const compatibilityMax = str(compatibilityRaw.max, 20);
+  if (sourceManifestVersion >= 3 && (!/^\d+\.\d+\.\d+$/.test(compatibilityMin)
+    || (compatibilityMax && !/^\d+\.\d+\.(?:\d+|x|\*)$/i.test(compatibilityMax)))) {
+    throw new ThemeError('Version 3 cms_compatibility must use min "major.minor.patch" and optional max "major.minor.patch" or "major.minor.x".');
+  }
+  const versionParts = (v: string): number[] => v.replace(/^[^0-9]*/, '').split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const versionCompare = (a: string, b: string): number => {
+    const aa = versionParts(a), bb = versionParts(b);
+    for (let i = 0; i < Math.max(aa.length, bb.length); i++) {
+      const d = (aa[i] ?? 0) - (bb[i] ?? 0);
+      if (d) return d;
+    }
+    return 0;
+  };
+  if (compatibilityMin && versionCompare(APP_VERSION, compatibilityMin) < 0) {
+    throw new ThemeError(`This theme needs Edge CMS ${compatibilityMin} or newer (this site is ${APP_VERSION}).`);
+  }
+  const maxPrefix = compatibilityMax?.replace(/[x*]$/i, '');
+  if (compatibilityMax && !/[x*]$/i.test(compatibilityMax) && versionCompare(APP_VERSION, compatibilityMax) > 0) {
+    throw new ThemeError(`This theme supports Edge CMS up to ${compatibilityMax} (this site is ${APP_VERSION}).`);
+  }
+  if (maxPrefix && /[x*]$/i.test(compatibilityMax)) {
+    const maxParts = compatibilityMax.split('.');
+    const currentParts = versionParts(APP_VERSION);
+    if (maxParts.slice(0, -1).some((part, i) => Number(part) !== currentParts[i])) {
+      throw new ThemeError(`This theme supports Edge CMS ${compatibilityMax} (this site is ${APP_VERSION}).`);
+    }
+  }
+  // `preview` may be an array (v1) or an object carrying colours (v2/v3).
   const previewRaw = Array.isArray(o.preview) ? o.preview : (o.preview && typeof o.preview === 'object' ? (o.preview as Record<string, unknown>).colors : []);
   const preview = (Array.isArray(previewRaw) ? previewRaw : []).map((c) => str(c, 20)).filter((c) => COLOR.test(c)).slice(0, 3);
+  if (sourceManifestVersion >= 3 && preview.length !== 3) throw new ThemeError('Version 3 manifests must include three valid preview colors.');
   const parentRaw = str(o.parent, 40);
   const parent = parentRaw ? slugify(parentRaw) : null;
   if (parent === slug) throw new ThemeError('A theme cannot be its own parent.');
@@ -223,6 +333,30 @@ export function parseManifest(input: unknown): { manifest: ThemeManifest; templa
   if (!EXTRA_TEMPLATE.test(layout)) throw new ThemeError(`"layout" must name a template, not "${layout}".`);
   const tags = (Array.isArray(o.tags) ? o.tags : []).map((t) => str(t, 24)).filter(Boolean).slice(0, 8);
   const supports = (Array.isArray(o.supports) ? o.supports : []).map((t) => str(t, 24)).filter(Boolean).slice(0, 12);
+  const stringList = (value: unknown, field: string, max = 16): string[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw new ThemeError(`"${field}" must be a list.`);
+    const values = value.map((x) => str(x, 40)).filter(Boolean);
+    if (values.length > max || values.length !== new Set(values).size) throw new ThemeError(`"${field}" has too many or duplicate entries.`);
+    return values;
+  };
+  const requiredTemplates = stringList(o.required_templates, 'required_templates', 32);
+  const optionalTemplates = stringList(o.optional_templates, 'optional_templates', 32);
+  const features = stringList(o.features, 'features', 32);
+  const menuLocations = stringList(o.menu_locations, 'menu_locations', 8);
+  const knownMenuLocations = new Set(['primary', 'secondary', 'footer', 'mobile']);
+  for (const location of menuLocations) {
+    if (!/^[a-z][a-z0-9-]{0,23}$/.test(location) || !knownMenuLocations.has(location)) {
+      throw new ThemeError(`Unsupported menu location "${location}".`);
+    }
+  }
+  const required = requiredTemplates.length ? requiredTemplates : ['base'];
+  for (const name of [...required, ...optionalTemplates]) {
+    if (!(TEMPLATE_NAMES as readonly string[]).includes(name) && !EXTRA_TEMPLATE.test(name)) {
+      throw new ThemeError(`Invalid template name "${name}" in the manifest.`);
+    }
+  }
+  if (required.some((name) => optionalTemplates.includes(name))) throw new ThemeError('A template cannot be both required and optional.');
   const changelog = Array.isArray(o.changelog)
     ? o.changelog.slice(0, 20).map((entry) => {
       const e = (entry ?? {}) as Record<string, unknown>;
@@ -235,6 +369,24 @@ export function parseManifest(input: unknown): { manifest: ThemeManifest; templa
     .slice(0, MAX_ASSETS_PER_THEME);
 
   const widgets = parseWidgetAreas(o.widgets);
+  const settings = parseSettings(o.settings_schema ?? o.settings);
+  const entrypointsRaw = o.asset_entrypoints && typeof o.asset_entrypoints === 'object'
+    ? o.asset_entrypoints as Record<string, unknown>
+    : {};
+  const entrypointCss = cleanAssetPath(str(entrypointsRaw.css, 120));
+  const entrypointJs = stringList(entrypointsRaw.js, 'asset_entrypoints.js', 8).map(cleanAssetPath).filter(Boolean);
+  if (sourceManifestVersion >= 3 && !entrypointCss) throw new ThemeError('Version 3 manifests need an asset_entrypoints.css path.');
+  if (entrypointCss && !/^static\//.test(entrypointCss) && sourceManifestVersion >= 3) {
+    throw new ThemeError('The v3 CSS entrypoint must be inside static/.');
+  }
+  const cssReference = typeof o.css === 'string' && /^[\w./-]+\.css$/i.test(o.css) ? cleanAssetPath(o.css) : '';
+  if (sourceManifestVersion >= 3 && cssReference && cssReference !== entrypointCss) {
+    throw new ThemeError('The "css" file and asset_entrypoints.css must name the same stylesheet.');
+  }
+  for (const path of entrypointJs) {
+    if (!assets.includes(path)) throw new ThemeError(`JavaScript entrypoint "${path}" must be listed in "assets".`);
+    if (!path.startsWith('static/') || !path.toLowerCase().endsWith('.js')) throw new ThemeError(`JavaScript entrypoint "${path}" must be a .js file inside static/.`);
+  }
 
   const templatesDecl = o.templates ?? {};
   if (typeof templatesDecl !== 'object' || Array.isArray(templatesDecl)) throw new ThemeError('The theme needs a "templates" object.');
@@ -244,6 +396,11 @@ export function parseManifest(input: unknown): { manifest: ThemeManifest; templa
     if (key === 'base' || (TEMPLATE_NAMES as readonly string[]).includes(key) || EXTRA_TEMPLATE.test(key)) templates[key] = value;
   }
   if (!templates.base && !parent) throw new ThemeError('The theme needs a "base" template (or a "parent" theme to inherit from).');
+  for (const name of required) {
+    if (!Object.prototype.hasOwnProperty.call(templates, name) && !parent) {
+      throw new ThemeError(`The required template "${name}" is missing.`);
+    }
+  }
   if (!parent) {
     const layoutName = str(o.layout, 30) || 'base';
     const layout = templates[layoutName] ?? templates.base ?? '';
@@ -276,8 +433,15 @@ export function parseManifest(input: unknown): { manifest: ThemeManifest; templa
     description: str(o.description, 400),
     parent, layout, tags, supports,
     screenshot: cleanAssetPath(str(o.screenshot, 120)),
-    preview, settings: parseSettings(o.settings), widgets, changelog, assets,
-    manifestVersion: 2,
+    preview, settings, settings_schema: settings, widgets, changelog, assets,
+    cms_compatibility: { min: compatibilityMin || '0.0.0', ...(compatibilityMax ? { max: compatibilityMax } : {}) },
+    required_templates: required, optional_templates: optionalTemplates, features,
+    menu_locations: menuLocations.length ? menuLocations : ['primary', 'footer'],
+    asset_entrypoints: {
+      css: entrypointCss || cleanAssetPath(typeof o.css === 'string' && /^[\w./-]+\.css$/i.test(o.css) ? o.css : ''),
+      js: entrypointJs,
+    },
+    manifest_version: sourceManifestVersion >= 3 ? 3 : 2,
   };
   return { manifest, templates, partials, css };
 }
@@ -300,7 +464,8 @@ export type ThemeUpload = {
 /** Resolves a path inside a zip, allowing it to be relative to the manifest's folder. */
 export function zipReader(files: Map<string, Uint8Array>, dir: string) {
   const at = (ref: string): Uint8Array | undefined => {
-    const clean = ref.replace(/^\.?\/+/, '');
+    const clean = ref.replace(/\\/g, '/');
+    if (!clean || clean.startsWith('/') || /^[a-z]:/i.test(clean) || clean.split('/').some((part) => !part || part === '.' || part === '..')) return undefined;
     return files.get(dir + clean);
   };
   const text = (ref: string): string | undefined => {
@@ -342,6 +507,31 @@ export async function readThemeUpload(buf: ArrayBuffer, unzip: (b: ArrayBuffer) 
   const dir = manifestPath.slice(0, -'theme.json'.length);
   const raw = parse(new TextDecoder().decode(files.get(manifestPath)!)) as Record<string, unknown>;
   const reader = zipReader(files, dir);
+  const sourceManifestVersion = Number(raw.manifest_version ?? raw.manifestVersion ?? 1);
+  if (sourceManifestVersion >= 3) {
+    const root = manifestPath.split('/')[0];
+    if (!root || manifestPath !== `${root}/theme.json` || [...files.keys()].some((path) => !path.startsWith(`${root}/`))) {
+      throw new ThemeError('A version 3 theme ZIP must contain exactly one theme root directory with all files inside it.');
+    }
+    if (String(raw.slug || '') !== root) throw new ThemeError('The ZIP root folder must exactly match the theme slug.');
+    const allowedFile = /\.(?:json|md|html?|css|js|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf)$/i;
+    for (const path of files.keys()) {
+      if (!allowedFile.test(path)) throw new ThemeError(`File "${path.slice(root.length + 1)}" has an unsupported package extension.`);
+    }
+  }
+  if (typeof raw.settings_schema === 'string') {
+    const ref = raw.settings_schema;
+    if (!/^[a-z0-9._/-]+\.json$/i.test(ref) || ref.split('/').some((part) => !part || part === '.' || part === '..')) {
+      throw new ThemeError('"settings_schema" must be a safe relative JSON path or a settings list.');
+    }
+    const text = reader.text(ref);
+    if (text === undefined) throw new ThemeError(`theme.json names settings schema "${ref}" but that file is not in the zip.`);
+    const config = parse(text);
+    raw.settings_schema = Array.isArray(config) ? config : (config && typeof config === 'object'
+      ? (config as Record<string, unknown>).settings_schema ?? (config as Record<string, unknown>).settings
+      : undefined);
+    if (!Array.isArray(raw.settings_schema)) throw new ThemeError(`The settings schema file "${ref}" must contain a settings list.`);
+  }
   const skipped: { path: string; reason: string }[] = [];
 
   // Templates: a name may point at a file, or hold the markup inline (v1 style).
@@ -383,6 +573,12 @@ export async function readThemeUpload(buf: ArrayBuffer, unzip: (b: ArrayBuffer) 
     if (name && partials[name] === undefined) partials[name] = new TextDecoder().decode(files.get(path)!);
   }
 
+  const declaredCssEntrypoint = raw.asset_entrypoints && typeof raw.asset_entrypoints === 'object'
+    ? (raw.asset_entrypoints as Record<string, unknown>).css
+    : undefined;
+  if (sourceManifestVersion >= 3 && raw.css !== declaredCssEntrypoint) {
+    throw new ThemeError('The "css" file and asset_entrypoints.css must name the same stylesheet.');
+  }
   let css: unknown = raw.css;
   if (typeof css === 'string' && /^[\w./-]+\.css$/i.test(css)) {
     css = reader.text(css);
@@ -400,7 +596,14 @@ export async function readThemeUpload(buf: ArrayBuffer, unzip: (b: ArrayBuffer) 
   const assetsDecl = raw.assets;
   if (assetsDecl && typeof assetsDecl === 'object') {
     const values = Array.isArray(assetsDecl) ? assetsDecl : Object.values(assetsDecl as Record<string, unknown>);
-    for (const ref of values) if (typeof ref === 'string') wanted.add(ref.replace(/^\.?\/+/, ''));
+    for (const ref of values) {
+      if (typeof ref !== 'string') continue;
+      const clean = cleanAssetPath(ref);
+      if (sourceManifestVersion >= 3 && (!clean || clean !== ref || !files.has(dir + ref))) {
+        throw new ThemeError(`Asset "${ref}" is unsafe or missing from the package.`);
+      }
+      wanted.add(ref.replace(/^\.?\/+/, ''));
+    }
   }
   const assets: UploadedAsset[] = [];
   let total = 0;
@@ -417,15 +620,18 @@ export async function readThemeUpload(buf: ArrayBuffer, unzip: (b: ArrayBuffer) 
       continue;
     }
     if (isRefusedAsset(path)) {
+      if (sourceManifestVersion >= 3) throw new ThemeError(`${path.slice(path.lastIndexOf('.') + 1).toUpperCase()} files are not allowed in a theme.`);
       skipped.push({ path: rel, reason: `${path.slice(path.lastIndexOf('.') + 1).toUpperCase()} files are not allowed in a theme` });
       continue;
     }
     const mime = assetMime(path);
     if (!mime) {
+      if (sourceManifestVersion >= 3) throw new ThemeError(`Asset "${rel}" has an unsupported file type.`);
       skipped.push({ path: rel, reason: 'file type not allowed' });
       continue;
     }
     if (data.byteLength > MAX_THEME_ASSET) {
+      if (sourceManifestVersion >= 3) throw new ThemeError(`Asset "${rel}" exceeds the ${Math.round(MAX_THEME_ASSET / 1024)} KB per-file limit.`);
       skipped.push({ path: rel, reason: `larger than ${Math.round(MAX_THEME_ASSET / 1024)} KB` });
       continue;
     }

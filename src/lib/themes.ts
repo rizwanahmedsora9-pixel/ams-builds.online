@@ -135,7 +135,12 @@ async function dropStaleSettings(env: Env, manifest: ThemeManifest): Promise<str
 
 /** Reads an upload (JSON or zip) with the limits this app enforces. */
 export function readUpload(buf: ArrayBuffer): Promise<ThemeUpload> {
-  return readThemeUpload(buf, (b) => unzip(b, { maxEntries: 120, maxTotalBytes: 12 * 1024 * 1024 }));
+  return readThemeUpload(buf, (b) => unzip(b, {
+    maxEntries: 120,
+    maxTotalBytes: 12 * 1024 * 1024,
+    maxCompressedBytes: MAX_THEME_UPLOAD,
+    maxCompressionRatio: 200,
+  }));
 }
 
 /** Everything the theme manager needs to describe an installed theme. */

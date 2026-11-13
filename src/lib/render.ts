@@ -300,7 +300,9 @@ export async function renderTheme(
   // A per-item template (content.template) is resolved by the caller into
   // `opts.template`; when the current theme has no such template the default
   // one for the kind is used, so switching theme never blanks a page.
-  const source = theme.templates[opts.template] ?? theme.templates.page ?? theme.templates.home ?? '';
+  const source = theme.templates[opts.template]
+    ?? (opts.template === 'search' ? theme.templates.archive : undefined)
+    ?? theme.templates.page ?? theme.templates.home ?? '';
   const nonce = nonceFor();
   const pageData = opts.data.page as { title?: string } | null | undefined;
   const hierarchyMarkup = pageExtrasMarkup(opts.pageHierarchy, opts.pagePosts, source, pageData?.title, nonce);

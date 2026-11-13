@@ -1,0 +1,9 @@
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="/" aria-label="{{site.title}} home">
+      {{#if site.logo}}<img class="brand__logo" src="{{site.logo}}" alt="{{site.title}}">{{else}}<span class="brand__mark" aria-hidden="true">A</span>{{/if}}
+      <span><strong>{{site.title}}</strong>{{#if site.tagline}}<small>{{site.tagline}}</small>{{/if}}</span>
+    </a>
+    {{> navigation}}
+  </div>
+</header>

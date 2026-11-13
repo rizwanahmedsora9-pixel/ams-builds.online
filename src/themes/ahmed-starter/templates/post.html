@@ -1,0 +1,8 @@
+<article class="content-narrow article-content">
+  <p class="eyebrow">{{post.date}}{{#if post.author}} · {{post.author}}{{/if}}</p>
+  <h1>{{post.title}}</h1>
+  {{#if post.featured_image}}<img class="article-image" src="{{post.featured_image}}" alt="{{post.featured_alt}}">{{/if}}
+  <div class="prose">{{{post.content}}}</div>
+  <div class="post-taxonomy">{{#each post.categories}}<a href="{{url}}">{{name}}</a>{{/each}}{{#each post.tags}}<a href="{{url}}">#{{name}}</a>{{/each}}</div>
+  {{{comments_html}}}
+</article>

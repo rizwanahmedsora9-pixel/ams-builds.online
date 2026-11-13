@@ -1,0 +1,14 @@
+<section class="hero">
+  <div class="hero__copy">
+    <p class="eyebrow">{{site.title}}</p>
+    <h1>{{#if theme.hero_title}}{{theme.hero_title}}{{else}}{{site.tagline}}{{/if}}</h1>
+    {{#if page}}<div class="hero__intro">{{{page.content}}}</div>{{/if}}
+    {{#unless page}}<p class="hero__intro">Your pages, posts, menus and media stay in the CMS. The theme controls their presentation.</p>{{/unless}}
+    <a class="button" href="/blog">Explore the blog</a>
+  </div>
+</section>
+{{#if page}}<section class="home-section"><h2>Pages</h2><ul class="page-list">{{#each pages}}<li><a href="{{url}}">{{title}}</a></li>{{/each}}</ul></section>{{/if}}
+{{#if page_posts}}<section class="home-section"><h2>Featured on this page</h2><div class="post-grid">{{#each page_posts}}<article class="post-card"><p class="eyebrow">{{date}}</p><h3><a href="{{url}}">{{title}}</a></h3><p>{{excerpt}}</p></article>{{/each}}</div></section>{{/if}}
+<section class="home-section"><div class="section-heading"><div><p class="eyebrow">From the blog</p><h2>Latest posts</h2></div><a href="/blog">All posts</a></div>
+  {{#if posts}}<div class="post-grid">{{#each posts}}<article class="post-card">{{#if featured_image}}<a href="{{url}}"><img class="post-card__image" src="{{featured_image}}" alt="{{featured_alt}}" loading="lazy"></a>{{/if}}<p class="eyebrow">{{date}}</p><h3><a href="{{url}}">{{title}}</a></h3><p>{{excerpt}}</p></article>{{/each}}</div>{{else}}<p class="empty">No published posts yet. Add your first post in the CMS.</p>{{/if}}
+</section>

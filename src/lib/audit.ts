@@ -22,7 +22,7 @@ export const AUDIT_RETENTION_DAYS = 90;
 /** The actions a filter can name. Anything not here is still stored. */
 export const AUDIT_ACTIONS = [
   'created', 'updated', 'deleted', 'published', 'activated', 'installed',
-  'login', 'settings', 'moderated', 'restored', 'exported', 'imported',
+  'login', 'settings', 'moderated', 'restored', 'exported', 'imported', 'failed',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -371,7 +371,7 @@ ${palette(c, prefs)}`;
   return c.html(doc);
 }
 
-export const errorPage = (c: Ctx, status: 400 | 403 | 404, message: string): Response =>
+export const errorPage = (c: Ctx, status: 400 | 403 | 404 | 500, message: string): Response =>
   c.html(shell('Error', html`<div class="error-page">
   <h1>${String(status)}</h1>
   <p>${message}</p>

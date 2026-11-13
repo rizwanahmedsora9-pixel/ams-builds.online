@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Ahmed Starter Theme",
+  "slug": "ahmed-starter-theme",
+  "version": "1.0.0",
+  "author": "Ahmed",
+  "description": "A responsive, editable starter theme that renders real Edge CMS content.",
+  "cms_compatibility": { "min": "0.9.0", "max": "0.9.x" },
+  "preview": ["#f5f7fb", "#142033", "#2457d6"],
+  "screenshot": "screenshot.png",
+  "required_templates": ["base", "home", "page", "post", "archive", "404"],
+  "optional_templates": ["search"],
+  "features": ["menus", "page-hierarchy", "responsive-navigation", "theme-settings"],
+  "menu_locations": ["primary", "footer"],
+  "templates": {
+    "base": "templates/base.html",
+    "home": "templates/home.html",
+    "page": "templates/page.html",
+    "post": "templates/post.html",
+    "archive": "templates/archive.html",
+    "search": "templates/search.html",
+    "404": "templates/404.html"
+  },
+  "partials": {
+    "header": "partials/header.html",
+    "navigation": "partials/navigation.html",
+    "footer": "partials/footer.html"
+  },
+  "css": "static/css/style.css",
+  "asset_entrypoints": { "css": "static/css/style.css", "js": ["static/js/theme.js"] },
+  "assets": ["static/js/theme.js", "screenshot.png"],
+  "settings_schema": "config/settings.json",
+  "changelog": [{ "version": "1.0.0", "notes": "Initial official developer starter." }]
+}

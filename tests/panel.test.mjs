@@ -1448,8 +1448,8 @@ test('phase 5: a preview runs the real site, and a local edit is never silently 
   assert.equal(framed.status, 200);
   assert.match(framed.text, /hero__title/, 'the framed page is the real theme');
   assert.match(framed.headers.get('cache-control') ?? '', /no-store/);
-  assert.equal((await panel.anon('/?preview=1&theme=ams-portfolio')).status, 200);
-  assert.doesNotMatch((await panel.anon('/?preview=1&theme=ams-portfolio')).text, /hero__title/, 'previews are for signed-in people');
+  assert.equal((await panel.anon('/?preview=1&theme=ams-portfolio')).status, 404);
+  assert.doesNotMatch((await panel.anon('/?preview=1&theme=ams-portfolio')).text, /hero__title/, 'theme previews are restricted to authorized admins');
 
   // The store still ships this theme under this name, and my copy differs, so the
   // next install asks what to do with the edit instead of overwriting it.

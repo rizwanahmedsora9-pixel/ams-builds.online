@@ -3,7 +3,9 @@ import type { Env } from '../types';
 /** Places a theme can show a menu. Themes read them as {{#each menu.primary}} / {{#each menu.footer}}. */
 export const MENU_LOCATIONS: [string, string][] = [
   ['primary', 'Main menu (header)'],
+  ['secondary', 'Secondary menu'],
   ['footer', 'Footer menu'],
+  ['mobile', 'Mobile menu'],
 ];
 
 /** The menu shown in the header; created on demand so "show in menu" always has a target. */

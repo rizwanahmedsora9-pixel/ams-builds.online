@@ -116,6 +116,26 @@ export async function findContent(
   return env.DB.prepare(`${SELECT} WHERE ${cond.join(' AND ')} LIMIT 1`).bind(...args).first<ContentRow>();
 }
 
+export async function searchContent(
+  env: Env, opts: { query: string; page: number; perPage: number },
+): Promise<{ rows: ContentRow[]; total: number }> {
+  const query = opts.query.trim().slice(0, 120);
+  if (!query) return { rows: [], total: 0 };
+  const escaped = query.replace(/[\\%_]/g, '\\$&');
+  const pattern = `%${escaped}%`;
+  const now = new Date().toISOString();
+  const where = ` WHERE c.site_id=1 AND c.type IN ('page','post')
+    AND (c.status='published' OR (c.status='scheduled' AND c.published_at<=?))
+    AND (c.title LIKE ? ESCAPE '\\' OR c.excerpt LIKE ? ESCAPE '\\' OR c.body LIKE ? ESCAPE '\\')`;
+  const args = [now, pattern, pattern, pattern];
+  const [list, count] = await env.DB.batch<any>([
+    env.DB.prepare(`${SELECT}${where} ORDER BY COALESCE(c.published_at,c.created_at) DESC, c.id DESC LIMIT ? OFFSET ?`)
+      .bind(...args, opts.perPage, (opts.page - 1) * opts.perPage),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM content c${where}`).bind(...args),
+  ]);
+  return { rows: list.results as ContentRow[], total: Number(count.results[0]?.n || 0) };
+}
+
 export async function listPosts(
   env: Env, opts: { page: number; perPage: number; termId?: number; pageId?: number },
 ): Promise<{ rows: ContentRow[]; total: number }> {
