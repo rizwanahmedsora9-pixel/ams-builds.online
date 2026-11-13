@@ -230,6 +230,23 @@ export const APP_JS = `<script>
     document.querySelectorAll('details.usermenu[open]').forEach(function (menu) { menu.removeAttribute('open'); });
   });
 
+  // Keep the mobile drawer toggle accessible while retaining the CSS-only fallback.
+  var navBox = document.getElementById('nav-t');
+  var burger = document.querySelector('.burger');
+  var nav = document.getElementById('admin-rail');
+  if (navBox && burger && nav) {
+    navBox.addEventListener('change', function () { burger.setAttribute('aria-expanded', String(navBox.checked)); });
+    burger.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); burger.click(); }
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && navBox.checked) { navBox.checked = false; navBox.dispatchEvent(new Event('change')); burger.focus(); }
+    });
+    nav.addEventListener('click', function (event) {
+      if (event.target.closest('a')) { navBox.checked = false; navBox.dispatchEvent(new Event('change')); }
+    });
+  }
+
   // The sidebar remembers its collapsed state in a cookie so the server can
   // render the right width on the next request (no layout jump on load).
   var railBox = document.getElementById('side-c');

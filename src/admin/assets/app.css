@@ -148,19 +148,25 @@ kbd {
 .usermenu__schemes a[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .usermenu__panel form { margin: 0; }
 
-.shell { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: calc(100dvh - var(--topbar-h)); min-height: 0; min-width: 0; overflow-x: clip; }
+.shell { display: grid; grid-template-columns: minmax(0, 1fr); min-height: calc(100dvh - var(--topbar-h)); min-width: 0; align-items: start; }
 
 /* Rail ------------------------------------------------------------------- */
 .rail {
-  display: none; /* mobile: a drawer, opened by the burger */
+  position: fixed; z-index: 41; inset: 0 auto 0 0;
+  width: min(var(--rail-w), calc(100vw - 3rem)); height: 100dvh;
+  visibility: hidden; transform: translateX(-100%);
+  transition: transform var(--dur) var(--ease), visibility var(--dur);
   background: var(--rail-bg); color: var(--rail-fg);
   border-bottom: 1px solid var(--rail-line);
-  padding: var(--space-2); min-height: 0; max-height: 40dvh; overflow-y: auto;
+  padding: var(--space-3) var(--space-2); min-height: 0; max-height: none; overflow-y: auto;
   overflow-x: hidden; /* a collapsed rail is 3.75rem wide: never let a label spill sideways */
 }
 #nav-t, #side-c { position: absolute; opacity: 0; pointer-events: none; width: 0; height: 0; }
-#nav-t:checked ~ .shell { grid-template-rows: auto minmax(0, 1fr); }
-#nav-t:checked ~ .shell .rail { display: block; }
+#nav-t:checked ~ .shell .rail { visibility: visible; transform: translateX(0); }
+.nav-backdrop { display: none; }
+@media (max-width: 767px) {
+  #nav-t:checked ~ .nav-backdrop { display: block; position: fixed; inset: 0; z-index: 40; background: var(--scrim); cursor: pointer; }
+}
 .burger {
   display: inline-flex; align-items: center; justify-content: center;
   width: var(--control-h); height: var(--control-h); margin-left: calc(-1 * var(--space-2));
@@ -212,17 +218,17 @@ kbd {
 .rail__collapse .ico { transition: transform var(--dur) var(--ease); }
 
 /* Main ------------------------------------------------------------------- */
-.main { padding: var(--content-pad) var(--content-pad) var(--space-12); min-width: 0; min-height: 0; overflow-y: auto; overflow-x: clip; }
+.main { padding: var(--content-pad) var(--content-pad) var(--space-12); min-width: 0; }
 .main__inner { min-width: 0; max-width: var(--content-max); margin: 0 auto; }
 .main--wide .main__inner { min-width: 0; max-width: none; }
 
-@media (min-width: 900px) {
+@media (min-width: 768px) {
   .burger { display: none; }
-  #nav-t:checked ~ .shell { grid-template-rows: minmax(0, 1fr); }
-  .shell { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .shell { grid-template-columns: auto minmax(0, 1fr); }
   .rail {
-    display: block; min-height: 0;
-    width: var(--rail-w); height: 100%; max-height: none;
+    position: sticky; top: var(--topbar-h); z-index: 1; inset-inline-start: auto; bottom: auto;
+    visibility: visible; transform: none; min-height: 0;
+    width: var(--rail-w); height: calc(100dvh - var(--topbar-h)); max-height: none;
     overflow-y: auto; overflow-x: hidden; padding: var(--space-3) var(--space-2);
     border-bottom: 0; border-right: 1px solid var(--rail-line);
     scrollbar-gutter: stable;
@@ -302,7 +308,11 @@ kbd {
   .topbar__search-label, .topbar__kbd, .topbar__link-label { display: none; }
   .topbar__search { padding: 0 var(--space-2); border-radius: var(--radius-sm); }
 }
-@media (max-width: 420px) { .topbar__link { display: none; } }
+@media (max-width: 420px) {
+  .topbar { gap: var(--space-2); padding-inline: var(--space-3); }
+  .topbar__actions { gap: var(--space-1); }
+  .usermenu__name { display: none; }
+}
 
 .palette {
   /* A column: the search field on top, the results in the middle (the only
@@ -365,7 +375,7 @@ kbd {
 }
 .rail-toggle:hover { border-color: var(--line); background: var(--surface-2); color: var(--fg); }
 .rail-toggle .ico { transition: transform var(--dur) var(--ease); }
-@media (min-width: 900px) {
+@media (min-width: 768px) {
   /* Pointing left means "collapse"; the collapsed rail flips it to "expand". */
   .rail-toggle { display: inline-flex; }
   .rail-toggle .ico { transform: rotate(180deg); }
@@ -385,7 +395,7 @@ kbd {
 .card {
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius-lg); padding: var(--space-4);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-4); box-shadow: var(--shadow-sm); min-width: 0;
 }
 .card > h2:first-child, .card > h3:first-child { margin-top: 0; }
 .card--flush { padding: 0; overflow: hidden; }
@@ -411,7 +421,7 @@ kbd {
   overflow-x: auto; font-size: var(--text-sm); font-family: var(--mono-font);
 }
 .grid2 { display: grid; gap: var(--space-4); }
-@media (min-width: 700px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 700px) { .grid2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .grid3 { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
 
 /* ------------------------------------------------------------------ buttons */
