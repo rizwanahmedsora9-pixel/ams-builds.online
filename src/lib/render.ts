@@ -2,7 +2,7 @@ import type { Config, Env } from '../types';
 import type { Settings } from './config';
 import { commentToken, commentsEnabled, approvedComments, renderCommentsHtml, type CommentRow } from './comments';
 import { esc, safeUrl } from './security';
-import { listPages } from './content';
+import { listPages, type ContentView } from './content';
 import { type PublicPageHierarchy } from './page-hierarchy';
 import { defaultTheme } from '../themes/ams1';
 import type { ThemeBundle } from './theme-manifest';
@@ -46,27 +46,57 @@ const PAGE_HIERARCHY_CSS = `
 .page-children ul{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;list-style:none;margin:0;padding:0}
 .page-children a{display:flex;min-height:3.25rem;align-items:center;justify-content:space-between;gap:.75rem;padding:.75rem 1rem;border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:.75rem;color:inherit;text-decoration:none}
 .page-children a:hover,.page-children a:focus-visible{border-color:currentColor;text-decoration:underline;text-underline-offset:.15em}
+.page-posts{margin:2rem 0 0}
+.page-posts h2{margin:0 0 1rem;font-size:1.35em}
+.page-posts__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1rem;list-style:none;margin:0;padding:0}
+.page-posts__card{display:flex;flex-direction:column;border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:1rem;overflow:hidden}
+.page-posts__img{display:block}
+.page-posts__img img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover}
+.page-posts__body{display:flex;flex-direction:column;gap:.45rem;padding:clamp(1rem,2.5vw,1.35rem)}
+.page-posts__body h3{margin:0;font-size:1.12em;line-height:1.35}
+.page-posts__body h3 a{color:inherit;text-decoration:none}
+.page-posts__body h3 a:hover,.page-posts__body h3 a:focus-visible{text-decoration:underline;text-underline-offset:.15em}
+.page-posts__excerpt{margin:0;font-size:.94em;opacity:.85}
+.page-posts__meta{margin:0;font-size:.82em;opacity:.68}
 `;
 
-/** Folder-like page links, rendered by the CMS so every theme gets the hierarchy. */
-function pageHierarchyMarkup(hierarchy: PublicPageHierarchy | undefined, nonce: string): { before: string; after: string; styles: string } {
+/** Folder-like page links and page-assigned posts, rendered by the CMS so every theme gets them. */
+function pageExtrasMarkup(
+  hierarchy: PublicPageHierarchy | undefined,
+  pagePosts: ContentView[] | undefined,
+  templateSource: string,
+  pageTitle: string | undefined,
+  nonce: string,
+): { before: string; after: string; styles: string } {
   const current = hierarchy?.current;
   const ancestors = hierarchy?.ancestors ?? [];
   const children = hierarchy?.children ?? [];
-  if (!current || (!ancestors.length && !children.length)) return { before: '', after: '', styles: '' };
+  const drawsPostsItself = /\bpage_posts\b|\b#each\s+posts\b/.test(templateSource);
+  const posts = !drawsPostsItself && pagePosts?.length ? pagePosts : [];
+  const hasHierarchy = !!current && (ancestors.length > 0 || children.length > 0);
+  if (!hasHierarchy && !posts.length) return { before: '', after: '', styles: '' };
   const safeHref = (url: string) => esc(safeUrl(url) || '/');
   let before = '';
-  if (ancestors.length) {
+  if (current && ancestors.length) {
     const trail = ancestors.some((item) => item.url === '/')
       ? ancestors
       : [{ id: 0, title: 'Home', slug: '', url: '/' }, ...ancestors];
     before = `<nav class="page-breadcrumbs" aria-label="Breadcrumb"><ol>${trail.map((item) => `<li><a href="${safeHref(item.url)}">${esc(item.title)}</a></li>`).join('')}<li aria-current="page">${esc(current.title)}</li></ol></nav>`;
   }
-  const after = children.length
-    ? `<nav class="page-children" aria-labelledby="page-children-heading"><h2 id="page-children-heading">Explore ${esc(current.title)}</h2><ul>${children.map((item) => `<li><a href="${safeHref(item.url)}"><span>${esc(item.title)}</span><span aria-hidden="true">&rarr;</span></a></li>`).join('')}</ul></nav>`
-    : '';
+  const afterParts: string[] = [];
+  if (current && children.length) {
+    afterParts.push(`<nav class="page-children" aria-labelledby="page-children-heading"><h2 id="page-children-heading">Explore ${esc(current.title)}</h2><ul>${children.map((item) => `<li><a href="${safeHref(item.url)}"><span>${esc(item.title)}</span><span aria-hidden="true">&rarr;</span></a></li>`).join('')}</ul></nav>`);
+  }
+  if (posts.length) {
+    const heading = pageTitle ? `Posts in ${esc(pageTitle)}` : 'Posts on this page';
+    const cards = posts.map((post) => {
+      const img = post.featured_image ? safeUrl(post.featured_image) : '';
+      return `<li class="page-posts__card">${img ? `<a class="page-posts__img" href="${safeHref(post.url)}" tabindex="-1"><img src="${esc(img)}" alt="${esc(post.featured_alt || '')}" loading="lazy"></a>` : ''}<div class="page-posts__body"><h3><a href="${safeHref(post.url)}">${esc(post.title)}</a></h3>${post.excerpt ? `<p class="page-posts__excerpt">${esc(post.excerpt)}</p>` : ''}<p class="page-posts__meta"><time datetime="${esc(post.date_iso)}">${esc(post.date)}</time></p></div></li>`;
+    }).join('');
+    afterParts.push(`<section class="page-posts wrap" aria-labelledby="page-posts-heading"><h2 id="page-posts-heading">${heading}</h2><ul class="page-posts__grid">${cards}</ul></section>`);
+  }
   const styles = `<style nonce="${esc(nonce)}">${PAGE_HIERARCHY_CSS}</style>`;
-  return { before, after, styles };
+  return { before, after: afterParts.join('\n'), styles };
 }
 
 export type PageMeta = {
@@ -213,6 +243,8 @@ export async function renderTheme(
     tokenOverrides?: Record<string, string>;
     /** Parent/child navigation for a public CMS Page. */
     pageHierarchy?: PublicPageHierarchy;
+    /** Posts targeted exclusively to this CMS Page. */
+    pagePosts?: ContentView[];
   },
 ): Promise<string> {
   const { settings, url } = opts;
@@ -254,7 +286,8 @@ export async function renderTheme(
   // one for the kind is used, so switching theme never blanks a page.
   const source = theme.templates[opts.template] ?? theme.templates.page ?? theme.templates.home ?? '';
   const nonce = nonceFor();
-  const hierarchyMarkup = pageHierarchyMarkup(opts.pageHierarchy, nonce);
+  const pageData = opts.data.page as { title?: string } | null | undefined;
+  const hierarchyMarkup = pageExtrasMarkup(opts.pageHierarchy, opts.pagePosts, source, pageData?.title, nonce);
   const headExtra = [hooks.head.join('\n'), hierarchyMarkup.styles].filter(Boolean).join('\n');
   // Design tokens: only the variables this theme actually reads are emitted, so
   // changing a brand colour cannot break a theme that hard-codes its palette.

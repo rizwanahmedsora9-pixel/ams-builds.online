@@ -3,7 +3,8 @@ import { getCookie } from 'hono/cookie';
 import type { AppEnv, Ctx, Env } from '../types';
 import { SESSION_COOKIE, sessionUser } from '../lib/auth';
 import { bumpCache, cfgFor, getConfig, getSettings, type Settings } from '../lib/config';
-import { findContent, listPosts, mediaUrl, permalinkStyle, postUrl, toViews, type ContentView } from '../lib/content';
+import { findContent, listPosts, mediaUrl, permalinkStyle, postAssignedPages, postUrl, toViews, type ContentView } from '../lib/content';
+import { hasTable } from '../lib/schema';
 import { commentsEnabled, commentsModerated, validCommentToken } from '../lib/comments';
 import { getFile } from '../lib/files';
 import { pluginOn } from '../lib/plugins';
@@ -79,7 +80,7 @@ site.get('/theme-assets/:slug/:path{.+}', async (c) => {
 /* ------------------------------------------------------------------ pages */
 type Resolved =
   | { redirect: string }
-  | { status: 200 | 404; template: string; meta: PageMeta; data: Record<string, unknown>; pageHierarchy?: PublicPageHierarchy };
+  | { status: 200 | 404; template: string; meta: PageMeta; data: Record<string, unknown>; pageHierarchy?: PublicPageHierarchy; pagePosts?: ContentView[] };
 
 const SLUG = '[a-z0-9]+(?:-[a-z0-9]+)*';
 
@@ -106,14 +107,16 @@ async function resolve(c: Ctx, settings: Settings, path: string, preview: boolea
     const row = homeId ? await findContent(env, { type: 'page', id: homeId }, preview) : null;
     const [page] = row ? await toViews(env, [row], settings) : [];
     const { rows } = await listPosts(env, { page: 1, perPage: 5 });
+    const homePagePosts = row ? await toViews(env, (await listPosts(env, { page: 1, perPage: 100, pageId: row.id })).rows, settings) : [];
     return {
       status: 200, template: row ? templateFor(row, 'home') : 'home',
       meta: {
         title: page?.seo_title || (settings.tagline ? `${siteTitle} – ${settings.tagline}` : siteTitle),
         description: page?.seo_description || settings.tagline || undefined, canonical: '/',
       },
-      data: { page: page ?? null, posts: await toViews(env, rows, settings), is_home: true },
+      data: { page: page ?? null, posts: await toViews(env, rows, settings), page_posts: homePagePosts, is_home: true },
       pageHierarchy: row ? await publicPageHierarchy(env, row.id, settings.home_page_id) : undefined,
+      pagePosts: homePagePosts.length ? homePagePosts : undefined,
     };
   }
 
@@ -152,21 +155,29 @@ async function resolve(c: Ctx, settings: Settings, path: string, preview: boolea
     if (row) {
       if (row.id === homeId) return { redirect: '/' };
       const [page] = await toViews(env, [row], settings);
+      const { rows: assignedRows } = await listPosts(env, { page: 1, perPage: 100, pageId: row.id });
+      const pagePosts = await toViews(env, assignedRows, settings);
       return {
-        status: 200, template: templateFor(row, 'page'), meta: metaFor(page, settings, 'website'), data: { page },
+        status: 200, template: templateFor(row, 'page'), meta: metaFor(page, settings, 'website'),
+        data: { page, posts: pagePosts, page_posts: pagePosts },
         pageHierarchy: await publicPageHierarchy(env, row.id, settings.home_page_id),
+        pagePosts: pagePosts.length ? pagePosts : undefined,
       };
     }
   }
 
-  const postPattern = style === 'plain' ? `^/(${SLUG})$` : style === 'dated' ? `^/\\d{4}/\\d{2}/(${SLUG})$` : `^/blog/(${SLUG})$`;
+  const postPattern = style === 'plain' ? `^/(${SLUG})$` : style === 'dated' ? `^/\\d{4}/\\d\\d/(${SLUG})$` : `^/blog/(${SLUG})$`;
   if ((m = path.match(new RegExp(postPattern)))) {
     const row = await findContent(env, { type: 'post', slug: m[1] }, preview);
     if (row) {
       const canonical = postUrl(row, style);
       if (canonical !== path) return { redirect: canonical };
       const [post] = await toViews(env, [row], settings);
-      return { status: 200, template: templateFor(row, 'post'), meta: metaFor(post, settings, 'article'), data: { post } };
+      const assignedPages = await postAssignedPages(env, row.id, settings.home_page_id);
+      return {
+        status: 200, template: templateFor(row, 'post'), meta: metaFor(post, settings, 'article'),
+        data: { post: { ...post, pages: assignedPages }, post_pages: assignedPages },
+      };
     }
   }
   return notFound(siteTitle);
@@ -289,9 +300,20 @@ site.get('/robots.txt', async (c) => {
 site.get('/feed.xml', async (c) => {
   const settings = await getSettings(c.env);
   if (!pluginOn(settings, 'rss')) return c.notFound();
-  const { results } = await c.env.DB.prepare(
-    "SELECT slug, title, excerpt, body, published_at, created_at FROM content WHERE site_id=1 AND type='post' AND status='published' ORDER BY published_at DESC LIMIT 20",
-  ).all<{ slug: string; title: string; excerpt: string; body: string; published_at: string | null; created_at: string }>();
+  const hasPostPages = await hasTable(c.env, 'content_pages');
+  const queryFeed = (withPostPages: boolean) => {
+    const pageFilter = withPostPages ? ' AND NOT EXISTS (SELECT 1 FROM content_pages cp WHERE cp.content_id=content.id)' : '';
+    return c.env.DB.prepare(
+      `SELECT slug, title, excerpt, body, published_at, created_at FROM content WHERE site_id=1 AND type='post' AND status='published'${pageFilter} ORDER BY published_at DESC LIMIT 20`,
+    ).all<{ slug: string; title: string; excerpt: string; body: string; published_at: string | null; created_at: string }>();
+  };
+  let results;
+  try {
+    ({ results } = await queryFeed(hasPostPages));
+  } catch (err) {
+    if (!String(err).toLowerCase().includes('content_pages')) throw err;
+    ({ results } = await queryFeed(false));
+  }
   const origin = new URL(c.req.url).origin;
   const style = permalinkStyle(settings);
   const items = results.map((p) => {
@@ -392,6 +414,7 @@ site.get('*', async (c) => {
       : previewTheme ? await themeValues(c.env, previewTheme.slug) : themeSettings,
     tokenOverrides: unsaved?.tokens,
     pageHierarchy: result.pageHierarchy,
+    pagePosts: result.pagePosts,
     data: {
       ...result.data,
       comment_notice: url.searchParams.get('comment') || undefined,

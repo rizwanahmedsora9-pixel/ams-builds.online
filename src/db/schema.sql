@@ -110,6 +110,14 @@ CREATE TABLE IF NOT EXISTS content_terms (
 );
 CREATE INDEX IF NOT EXISTS idx_content_terms_term ON content_terms (term_id);
 
+-- Posts assigned to specific CMS Pages / sub-pages (empty = main blog & home).
+CREATE TABLE IF NOT EXISTS content_pages (
+  content_id INTEGER NOT NULL,
+  page_id INTEGER NOT NULL,
+  PRIMARY KEY (content_id, page_id)
+);
+CREATE INDEX IF NOT EXISTS idx_content_pages_page ON content_pages (page_id);
+
 CREATE TABLE IF NOT EXISTS menus (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   site_id INTEGER NOT NULL DEFAULT 1,

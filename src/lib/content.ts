@@ -1,5 +1,6 @@
 import type { ContentRow, Env } from '../types';
 import type { Settings } from './config';
+import { hasTable } from './schema';
 import { stripTags } from './security';
 import { formatDate } from './time';
 
@@ -116,17 +117,64 @@ export async function findContent(
 }
 
 export async function listPosts(
-  env: Env, opts: { page: number; perPage: number; termId?: number },
+  env: Env, opts: { page: number; perPage: number; termId?: number; pageId?: number },
 ): Promise<{ rows: ContentRow[]; total: number }> {
+  const hasPostPages = await hasTable(env, 'content_pages');
+  if (opts.pageId !== undefined && !hasPostPages) return { rows: [], total: 0 };
   const now = new Date().toISOString();
-  const join = opts.termId ? ' JOIN content_terms ct ON ct.content_id=c.id AND ct.term_id=?' : '';
-  const where = ` WHERE c.site_id=1 AND c.type='post' AND ${VISIBLE}`;
-  const args: unknown[] = opts.termId ? [opts.termId, now] : [now];
-  const [list, count] = await env.DB.batch<any>([
-    env.DB.prepare(`${SELECT}${join}${where} ORDER BY c.published_at DESC, c.id DESC LIMIT ? OFFSET ?`).bind(...args, opts.perPage, (opts.page - 1) * opts.perPage),
-    env.DB.prepare(`SELECT COUNT(*) AS n FROM content c${join}${where}`).bind(...args),
-  ]);
-  return { rows: list.results as ContentRow[], total: Number(count.results[0]?.n || 0) };
+  const run = async (withPostPages: boolean): Promise<{ rows: ContentRow[]; total: number }> => {
+    const joins: string[] = [];
+    const args: unknown[] = [];
+    if (opts.termId) {
+      joins.push(' JOIN content_terms ct ON ct.content_id=c.id AND ct.term_id=?');
+      args.push(opts.termId);
+    }
+    if (opts.pageId !== undefined) {
+      joins.push(' JOIN content_pages cp ON cp.content_id=c.id AND cp.page_id=?');
+      args.push(opts.pageId);
+    }
+    const pageFilter = opts.pageId === undefined && withPostPages
+      ? ' AND NOT EXISTS (SELECT 1 FROM content_pages cp WHERE cp.content_id=c.id)'
+      : '';
+    const where = ` WHERE c.site_id=1 AND c.type='post' AND ${VISIBLE}${pageFilter}`;
+    args.push(now);
+    const join = joins.join('');
+    const [list, count] = await env.DB.batch<any>([
+      env.DB.prepare(`${SELECT}${join}${where} ORDER BY c.published_at DESC, c.id DESC LIMIT ? OFFSET ?`).bind(...args, opts.perPage, (opts.page - 1) * opts.perPage),
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM content c${join}${where}`).bind(...args),
+    ]);
+    return { rows: list.results as ContentRow[], total: Number(count.results[0]?.n || 0) };
+  };
+  try {
+    return await run(hasPostPages);
+  } catch (error) {
+    if (!String(error).toLowerCase().includes('content_pages')) throw error;
+    if (opts.pageId !== undefined) return { rows: [], total: 0 };
+    return run(false);
+  }
+}
+
+/** Pages assigned to a post (for breadcrumbs / back-links on a page-only post). */
+export async function postAssignedPages(
+  env: Env, postId: number, homePageId: string | undefined,
+): Promise<{ id: number; title: string; slug: string; url: string }[]> {
+  if (!(await hasTable(env, 'content_pages'))) return [];
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT p.id, p.title, p.slug FROM content_pages cp
+       JOIN content p ON p.id=cp.page_id
+       WHERE cp.content_id=? AND p.site_id=1 AND p.type='page' AND p.status='published'
+       ORDER BY COALESCE(p.menu_order,0) ASC, p.title COLLATE NOCASE ASC, p.id ASC`,
+    ).bind(postId).all<{ id: number; title: string; slug: string }>();
+    return results.map((p) => ({
+      id: p.id,
+      title: p.title,
+      slug: p.slug,
+      url: homePageId === String(p.id) ? '/' : '/' + p.slug,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /** Promotes scheduled posts whose time has come. Returns how many changed. */

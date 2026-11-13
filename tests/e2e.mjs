@@ -1659,6 +1659,155 @@ test('17. the editor markup for images, links, blocks and breaks survives the sa
   log('image placement, links, page breaks, HTML and video blocks save and render as placed');
 });
 
+test('17b. page-specific posts: assign to one or more pages/sub-pages and hide from main blog', async () => {
+  const parentPageId = idFrom((await adminPost('/pages/save', {
+    title: 'Guides Hub', slug: 'guides-hub', body: '<p>Hub intro.</p>', status: 'published',
+  })).location);
+  const subPageId = idFrom((await adminPost('/pages/save', {
+    title: 'Android Subpage', slug: 'android-subpage', body: '<p>Android guides.</p>', status: 'published',
+    parent_id: String(parentPageId),
+  })).location);
+  const secondPageId = idFrom((await adminPost('/pages/save', {
+    title: 'Python Subpage', slug: 'python-subpage', body: '<p>Python guides.</p>', status: 'published',
+    parent_id: String(parentPageId),
+  })).location);
+
+  // Post editor exposes the page/sub-page checkboxes in tree order.
+  const newPostEditor = await get(`${admin}/posts/new`);
+  assert.match(newPostEditor.text, /Show on page\(s\) only/);
+  const pickerMarkup = newPostEditor.text.match(/id="post-pages-picker"[\s\S]*?<\/div>/)?.[0] || '';
+  assert.match(pickerMarkup, new RegExp(`value="${parentPageId}"[^>]*>\\s*Guides Hub`));
+  assert.match(pickerMarkup, new RegExp(`value="${subPageId}"[^>]*>\\s*— Android Subpage`));
+
+  // Create a post targeted to two sub-pages + a category.
+  const targetedRes = await adminPost('/posts/save', {
+    title: 'Exclusive Subpage Post',
+    slug: 'exclusive-subpage-post',
+    body: '<p>Only on selected sub-pages.</p>',
+    excerpt: 'Subpage-only summary.',
+    status: 'published',
+    new_cats: 'TargetedCat',
+    page_ids_present: '1',
+    page_ids: [String(subPageId), String(secondPageId)],
+  });
+  assert.equal(targetedRes.status, 303);
+  const targetedPostId = idFrom(targetedRes.location);
+
+  // Create a normal blog post for comparison.
+  const regularRes = await adminPost('/posts/save', {
+    title: 'General Blog Post',
+    slug: 'general-blog-post',
+    body: '<p>Visible on the main blog.</p>',
+    status: 'published',
+    new_cats: 'TargetedCat',
+    page_ids_present: '1',
+  });
+  const regularPostId = idFrom(regularRes.location);
+
+  // Editor remembers checked target pages, and Posts list shows the badge + filter.
+  const savedEditor = await get(`${admin}/posts/${targetedPostId}`);
+  assert.match(savedEditor.text, new RegExp(`name="page_ids" value="${subPageId}" checked`));
+  assert.match(savedEditor.text, new RegExp(`name="page_ids" value="${secondPageId}" checked`));
+  const postsList = await get(`${admin}/posts`);
+  assert.match(postsList.text, /Page: Android Subpage, Python Subpage|Page: Python Subpage, Android Subpage/);
+  const filteredSub = await get(`${admin}/posts?page=${subPageId}`);
+  assert.match(filteredSub.text, /Exclusive Subpage Post/);
+  assert.doesNotMatch(filteredSub.text, /General Blog Post/);
+  const filteredBlog = await get(`${admin}/posts?page=blog`);
+  assert.match(filteredBlog.text, /General Blog Post/);
+  assert.doesNotMatch(filteredBlog.text, /Exclusive Subpage Post/);
+
+  // Public visibility: shown on both selected sub-pages, NOT on unassigned parent, /blog, category, home, RSS or /api/posts.
+  const androidPage = await get('/android-subpage?preview=1&theme=ams-1');
+  assert.equal(androidPage.status, 200);
+  assert.match(androidPage.text, /class="page-posts wrap"/);
+  assert.match(androidPage.text, /Exclusive Subpage Post/);
+  assert.match(androidPage.text, /Subpage-only summary\./);
+
+  const pythonPage = await anon('/python-subpage');
+  assert.equal(pythonPage.status, 200);
+  assert.match(pythonPage.text, /Exclusive Subpage Post/);
+
+  const hubPage = await anon('/guides-hub');
+  assert.doesNotMatch(hubPage.text, /Exclusive Subpage Post/, 'parent page does not show posts assigned only to its children');
+
+  // Switch back to AMS 1 so /blog and /category/* have full archive templates.
+  const ams1Id = await themeId('AMS 1');
+  await adminPost(`/themes/${ams1Id}/activate`, {});
+
+  const blogIndex = await anon('/blog');
+  assert.match(blogIndex.text, /General Blog Post/);
+  assert.doesNotMatch(blogIndex.text, /Exclusive Subpage Post/, 'targeted post stays off /blog');
+
+  const catArchive = await anon('/category/targetedcat');
+  assert.equal(catArchive.status, 200);
+  assert.match(catArchive.text, /General Blog Post/);
+  assert.doesNotMatch(catArchive.text, /Exclusive Subpage Post/, 'targeted post stays off category archive');
+
+  const homePage = await anon('/');
+  assert.doesNotMatch(homePage.text, /Exclusive Subpage Post/, 'targeted post stays off home latest posts');
+
+  const rssFeed = await anon('/feed.xml');
+  if (rssFeed.status === 200) {
+    assert.doesNotMatch(rssFeed.text, /Exclusive Subpage Post/, 'targeted post stays off RSS feed');
+  }
+
+  const apiMain = JSON.parse((await anon('/api/posts')).text);
+  assert.ok(!apiMain.posts.some((p) => p.slug === 'exclusive-subpage-post'), 'targeted post stays off default /api/posts');
+  const apiSub = JSON.parse((await anon('/api/posts?page_slug=android-subpage')).text);
+  assert.equal(apiSub.total, 1);
+  assert.equal(apiSub.posts[0].slug, 'exclusive-subpage-post');
+
+  // Direct post URL still works and links back to the assigned page in AMS 1.
+  const postView = JSON.parse((await anon('/api/posts/exclusive-subpage-post')).text);
+  const single = await get(`${postView.url}?preview=1&theme=ams-1`);
+  assert.equal(single.status, 200);
+  assert.match(single.text, /Only on selected sub-pages\./);
+  assert.match(single.text, /Back to (Android|Python) Subpage/);
+
+  // Unchecking all pages in Quick edit returns the post to the main blog.
+  await adminPost(`/posts/${targetedPostId}/quick`, {
+    title: 'Exclusive Subpage Post', slug: 'exclusive-subpage-post', status: 'published', page_ids_present: '1',
+  });
+  assert.match((await anon('/blog')).text, /Exclusive Subpage Post/, 'unchecking all pages puts the post back on /blog');
+  assert.doesNotMatch((await anon('/python-subpage')).text, /Exclusive Subpage Post/);
+
+  // Export and Import preserve post-to-page links across ID remapping.
+  await adminPost(`/posts/${targetedPostId}/quick`, {
+    title: 'Exclusive Subpage Post', slug: 'exclusive-subpage-post', status: 'published',
+    page_ids_present: '1', page_ids: [String(subPageId)],
+  });
+  const exported = JSON.parse((await get(`${admin}/tools/export/download`)).text);
+  assert.ok(Array.isArray(exported.content_pages), 'export includes content_pages');
+  assert.ok(exported.content_pages.some((cp) => Number(cp.content_id) === targetedPostId && Number(cp.page_id) === subPageId));
+  // Clear locally, remap IDs in backup, then re-import.
+  await adminPost(`/posts/${targetedPostId}/quick`, {
+    title: 'Exclusive Subpage Post', slug: 'exclusive-subpage-post', status: 'published', page_ids_present: '1',
+  });
+  const expPost = exported.content.find((r) => r.slug === 'exclusive-subpage-post');
+  const expSub = exported.content.find((r) => r.slug === 'android-subpage');
+  expPost.id = 8880001;
+  expSub.id = 8880002;
+  exported.content_pages = exported.content_pages.map((cp) => ({
+    content_id: Number(cp.content_id) === targetedPostId ? 8880001 : cp.content_id,
+    page_id: Number(cp.page_id) === subPageId ? 8880002 : cp.page_id,
+  }));
+  const importForm = new FormData();
+  importForm.set('_csrf', await csrf());
+  importForm.set('file', new File([JSON.stringify(exported)], 'export.json', { type: 'application/json' }));
+  assert.match((await request(`${admin}/tools/import`, { method: 'POST', body: importForm })).location, /ok=Imported/);
+  assert.match((await anon('/android-subpage')).text, /Exclusive Subpage Post/, 'import restores remapped post-page link');
+  assert.doesNotMatch((await anon('/blog')).text, /Exclusive Subpage Post/, 'restored targeted post stays off /blog');
+
+  // Clean up test fixtures.
+  await adminPost(`/posts/${targetedPostId}/delete`, {});
+  await adminPost(`/posts/${regularPostId}/delete`, {});
+  await adminPost(`/pages/${subPageId}/delete`, {});
+  await adminPost(`/pages/${secondPageId}/delete`, {});
+  await adminPost(`/pages/${parentPageId}/delete`, {});
+  log('post page/sub-page picker, exclusive rendering, blog/archive/RSS/API exclusion and quick-edit toggle all work');
+});
+
 test('14. logout ends the session and repeated bad logins are rate limited', async () => {
   const out = await adminPost('/logout', {});
   assert.match(out.location, /logged out/);

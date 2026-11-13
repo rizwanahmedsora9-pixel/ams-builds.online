@@ -3,6 +3,7 @@ import type { Env } from '../types';
 import { getSettings } from '../lib/config';
 import { getFile } from '../lib/files';
 import { findContent, listPosts, toViews } from '../lib/content';
+import { hasTable } from '../lib/schema';
 
 /** Read-only public JSON API (published content only). */
 const api = new Hono<{ Bindings: Env }>();
@@ -29,7 +30,19 @@ api.get('/posts', async (c) => {
   const page = Math.max(1, Number(c.req.query('page')) || 1);
   const perPage = Math.min(50, Math.max(1, Number(c.req.query('per_page')) || 10));
   const settings = await getSettings(c.env);
-  const { rows, total } = await listPosts(c.env, { page, perPage });
+  const pageSlug = (c.req.query('page_slug') || '').trim();
+  const rawPageId = Number(c.req.query('page_id')) || 0;
+  let pageId: number | undefined;
+  if (rawPageId > 0 && Number.isSafeInteger(rawPageId)) {
+    pageId = rawPageId;
+  } else if (pageSlug) {
+    const target = await findContent(c.env, { type: 'page', slug: pageSlug });
+    if (!target || !(await hasTable(c.env, 'content_pages'))) {
+      return c.json({ page, per_page: perPage, total: 0, posts: [] });
+    }
+    pageId = target.id;
+  }
+  const { rows, total } = await listPosts(c.env, { page, perPage, pageId });
   return c.json({ page, per_page: perPage, total, posts: await toViews(c.env, rows, settings) });
 });
 

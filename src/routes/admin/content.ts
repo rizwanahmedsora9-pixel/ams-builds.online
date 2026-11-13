@@ -15,7 +15,7 @@ import {
   claimLock, countRevisions, deleteRevisions, getRevision, latestAutosave, listRevisions,
   pruneLocks, pruneRevisions, readLock, recordRevision, releaseLock, sameContent, type RevisionRow,
 } from '../../admin/revisions';
-import { hasColumn, hasPhase2Schema } from '../../lib/schema';
+import { hasColumn, hasPhase2Schema, hasTable } from '../../lib/schema';
 import {
   comparePageOrder, MAX_PAGE_DEPTH, orderedPageTree, pageDepth, pageDescendants,
   pageSubtreeHeight, type PageHierarchyRow,
@@ -50,6 +50,7 @@ type PostListState = {
   q: string;
   month: string;
   category: string;
+  page: string;
   sort: PostSort;
   dir: 'asc' | 'desc';
   p: number;
@@ -66,6 +67,7 @@ type PostListRow = {
   updated_at: string;
   categories: string | null;
   tags: string | null;
+  assigned_pages: string | null;
   comment_count: number;
   pinned: number;
   thumb_key: string | null;
@@ -79,11 +81,14 @@ function postListState(c: Ctx): PostListState {
   const month = c.req.query('month') || '';
   const rawCategory = c.req.query('category') || '';
   const categoryId = Number(rawCategory);
+  const rawTargetPage = c.req.query('page') || '';
+  const targetPageId = Number(rawTargetPage);
   return {
     status: ['all', 'published', 'draft', 'scheduled'].includes(rawStatus) ? rawStatus as PostStatusFilter : 'all',
     q: (c.req.query('q') || '').trim().slice(0, 120),
     month: /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : '',
     category: /^\d+$/.test(rawCategory) && Number.isSafeInteger(categoryId) && categoryId > 0 ? rawCategory : '',
+    page: rawTargetPage === 'blog' || (/^\d+$/.test(rawTargetPage) && Number.isSafeInteger(targetPageId) && targetPageId > 0) ? rawTargetPage : '',
     sort: ['title', 'author', 'comments', 'date', 'order'].includes(rawSort) ? rawSort as PostSort : 'date',
     dir: rawDir === 'asc' ? 'asc' : 'desc',
     p: Math.min(100_000, Math.max(1, Math.trunc(rawPage) || 1)),
@@ -97,6 +102,7 @@ function postListHref(state: PostListState, change: Partial<PostListState> = {})
   if (next.q) params.set('q', next.q);
   if (next.month) params.set('month', next.month);
   if (next.category) params.set('category', next.category);
+  if (next.page) params.set('page', next.page);
   if (next.sort !== 'date') params.set('sort', next.sort);
   if (next.dir !== 'desc') params.set('dir', next.dir);
   if (next.p > 1) params.set('p', String(next.p));
@@ -164,7 +170,7 @@ async function postsList(c: Ctx): Promise<Response> {
   const ownerSql = authorOnly ? ' AND author_id=?' : '';
   const per = 30;
 
-  const [statusRows, categories, months] = await Promise.all([
+  const [statusRows, categories, months, hasPostPages, hasParentCol] = await Promise.all([
     c.env.DB.prepare(`SELECT status, COUNT(*) AS n FROM content WHERE site_id=1 AND type='post'${ownerSql} GROUP BY status`)
       .bind(...ownerArgs).all<{ status: string; n: number }>(),
     c.env.DB.prepare("SELECT id, name FROM terms WHERE site_id=1 AND taxonomy='category' ORDER BY name COLLATE NOCASE")
@@ -172,7 +178,15 @@ async function postsList(c: Ctx): Promise<Response> {
     c.env.DB.prepare(`SELECT DISTINCT substr(COALESCE(published_at,created_at),1,7) AS month
       FROM content WHERE site_id=1 AND type='post'${ownerSql} ORDER BY month DESC LIMIT 24`)
       .bind(...ownerArgs).all<{ month: string }>(),
+    hasTable(c.env, 'content_pages'),
+    hasColumn(c.env, 'content', 'parent_id'),
   ]);
+  const allTargetPages = hasPostPages
+    ? orderedPageTree((await c.env.DB.prepare(
+      `SELECT id, title, slug, ${hasParentCol ? 'parent_id' : 'NULL AS parent_id'}, status, COALESCE(menu_order,0) AS menu_order
+       FROM content WHERE site_id=1 AND type='page' ORDER BY COALESCE(menu_order,0), title COLLATE NOCASE LIMIT 500`,
+    ).all<PageHierarchyRow>().catch(() => ({ results: [] as PageHierarchyRow[] }))).results)
+    : [];
 
   const counts: Record<PostStatusFilter, number> = { all: 0, published: 0, draft: 0, scheduled: 0 };
   for (const row of statusRows.results) {
@@ -193,6 +207,14 @@ async function postsList(c: Ctx): Promise<Response> {
     where.push("EXISTS (SELECT 1 FROM content_terms filter_ct JOIN terms filter_t ON filter_t.id=filter_ct.term_id WHERE filter_ct.content_id=c.id AND filter_t.site_id=1 AND filter_t.taxonomy='category' AND filter_t.id=?)");
     args.push(Number(state.category));
   }
+  if (state.page && hasPostPages) {
+    if (state.page === 'blog') {
+      where.push('NOT EXISTS (SELECT 1 FROM content_pages filter_cp WHERE filter_cp.content_id=c.id)');
+    } else {
+      where.push('EXISTS (SELECT 1 FROM content_pages filter_cp WHERE filter_cp.content_id=c.id AND filter_cp.page_id=?)');
+      args.push(Number(state.page));
+    }
+  }
   const whereSql = where.join(' AND ');
   const sortSql: Record<PostSort, string> = {
     title: 'c.title COLLATE NOCASE',
@@ -202,25 +224,33 @@ async function postsList(c: Ctx): Promise<Response> {
     order: 'c.menu_order',
   };
   const direction = state.dir === 'asc' ? 'ASC' : 'DESC';
-  const queryRows = (withComments: boolean) => c.env.DB.prepare(
-    `SELECT c.id, c.title, c.slug, c.status, c.author_id, c.published_at, c.created_at, c.updated_at,
-            u.username AS author, c.pinned, m.r2_key AS thumb_key,
-            (SELECT group_concat(t.name, ', ') FROM content_terms ct JOIN terms t ON t.id=ct.term_id
-             WHERE ct.content_id=c.id AND t.site_id=1 AND t.taxonomy='category') AS categories,
-            (SELECT group_concat(t.name, ', ') FROM content_terms ct JOIN terms t ON t.id=ct.term_id
-             WHERE ct.content_id=c.id AND t.site_id=1 AND t.taxonomy='tag') AS tags,
-            ${withComments ? "(SELECT COUNT(*) FROM comments cm WHERE cm.site_id=1 AND cm.content_id=c.id AND cm.status IN ('approved','pending'))" : '0'} AS comment_count
-     FROM content c LEFT JOIN users u ON u.id=c.author_id LEFT JOIN media m ON m.id=c.featured_media_id
-     WHERE ${whereSql} ORDER BY c.pinned DESC, ${sortSql[state.sort]} ${direction}, c.id DESC LIMIT ? OFFSET ?`,
-  ).bind(...args, per + 1, (state.p - 1) * per).all<PostListRow>();
+  const queryRows = (withComments: boolean, withPostPages: boolean) => {
+    const assignedPagesSql = withPostPages
+      ? `(SELECT group_concat(p.title, ', ') FROM content_pages cp JOIN content p ON p.id=cp.page_id
+          WHERE cp.content_id=c.id AND p.site_id=1 AND p.type='page')`
+      : 'NULL';
+    return c.env.DB.prepare(
+      `SELECT c.id, c.title, c.slug, c.status, c.author_id, c.published_at, c.created_at, c.updated_at,
+              u.username AS author, c.pinned, m.r2_key AS thumb_key,
+              (SELECT group_concat(t.name, ', ') FROM content_terms ct JOIN terms t ON t.id=ct.term_id
+               WHERE ct.content_id=c.id AND t.site_id=1 AND t.taxonomy='category') AS categories,
+              (SELECT group_concat(t.name, ', ') FROM content_terms ct JOIN terms t ON t.id=ct.term_id
+               WHERE ct.content_id=c.id AND t.site_id=1 AND t.taxonomy='tag') AS tags,
+              ${assignedPagesSql} AS assigned_pages,
+              ${withComments ? "(SELECT COUNT(*) FROM comments cm WHERE cm.site_id=1 AND cm.content_id=c.id AND cm.status IN ('approved','pending'))" : '0'} AS comment_count
+       FROM content c LEFT JOIN users u ON u.id=c.author_id LEFT JOIN media m ON m.id=c.featured_media_id
+       WHERE ${whereSql} ORDER BY c.pinned DESC, ${sortSql[state.sort]} ${direction}, c.id DESC LIMIT ? OFFSET ?`,
+    ).bind(...args, per + 1, (state.p - 1) * per).all<PostListRow>();
+  };
 
   let listResult;
   try {
-    listResult = await queryRows(true);
+    listResult = await queryRows(true, hasPostPages);
   } catch (error) {
-    // Older installations may be between schema migrations; the table count is cosmetic.
-    if (!String(error).toLowerCase().includes('comments')) throw error;
-    listResult = await queryRows(false);
+    // Older installations may be between schema migrations; fall back cleanly.
+    const msg = String(error).toLowerCase();
+    if (!msg.includes('comments') && !msg.includes('content_pages')) throw error;
+    listResult = await queryRows(!msg.includes('comments'), hasPostPages && !msg.includes('content_pages'));
   }
   const totalRow = await c.env.DB.prepare(
     `SELECT COUNT(*) AS n FROM content c LEFT JOIN users u ON u.id=c.author_id WHERE ${whereSql}`,
@@ -274,6 +304,7 @@ async function postsList(c: Ctx): Promise<Response> {
         status: state.status !== 'all' ? state.status : '',
         month: state.month,
         category: state.category,
+        page: state.page,
         sort: state.sort !== 'date' ? state.sort : '',
         dir: state.dir !== 'desc' ? state.dir : '',
       },
@@ -296,6 +327,12 @@ async function postsList(c: Ctx): Promise<Response> {
           ${state.category && !selectedCategory ? html`<option value="${state.category}" selected>Selected category</option>` : ''}
           ${categoryOptions.map((term) => html`<option value="${term.id}"${state.category === String(term.id) ? raw(' selected') : ''}>${term.name}</option>`)}
         </select>
+        ${hasPostPages && allTargetPages.length ? html`<label class="sr-only" for="post-page">Filter by page</label>
+        <select id="post-page" name="page">
+          <option value="">All placements</option>
+          <option value="blog"${state.page === 'blog' ? raw(' selected') : ''}>Blog &amp; Home</option>
+          ${allTargetPages.map(({ page, depth }) => html`<option value="${page.id}"${state.page === String(page.id) ? raw(' selected') : ''}>${'— '.repeat(depth)}${page.title}</option>`)}
+        </select>` : ''}
         <button class="btn ghost small" type="submit">Filter</button>
       </form>`,
   })}
@@ -323,7 +360,7 @@ async function postsList(c: Ctx): Promise<Response> {
               ${row.thumb_key ? html`<img class="row-thumb" src="${mediaUrl(row.thumb_key)}" alt="" loading="lazy" width="48" height="48">` : html`<span class="row-thumb row-thumb--empty" aria-hidden="true">${icon('file', { cls: 'ico--sm' })}</span>`}
               <div class="row-lead__body">
                 <a class="row-title" href="${base}/posts/${row.id}">${row.pinned ? html`<span class="pin" title="Pinned">${icon('pin', { cls: 'ico--sm' })}<span class="sr-only">Pinned: </span>` : ''}${row.title || '(untitled)'}</a>
-                <span class="row-meta">${row.status !== 'published' ? html`<span class="badge ${row.status}">${row.status}</span>` : ''}<span class="row-slug">/${row.slug}</span></span>
+                <span class="row-meta">${row.status !== 'published' ? html`<span class="badge ${row.status}">${row.status}</span>` : ''}${row.assigned_pages ? html`<span class="badge badge--outline">Page: ${row.assigned_pages}</span>` : ''}<span class="row-slug">/${row.slug}</span></span>
                 ${rowActions(c, 'posts', row, preview, installedThemes)}
               </div>
             </div>`,
@@ -337,7 +374,7 @@ async function postsList(c: Ctx): Promise<Response> {
     })
     : emptyRow(7, {
       title: 'No posts match',
-      body: state.q || state.month || state.category || state.status !== 'all'
+      body: state.q || state.month || state.category || state.page || state.status !== 'all'
         ? 'Try a different search or clear the filters.'
         : 'Your first post is one click away.',
       action: html`<a class="btn" href="${base}/posts/new">Write a post</a>`,
@@ -671,8 +708,10 @@ content.post('/pages/bulk', async (c) => {
     if (await hasColumn(c.env, 'content', 'parent_id')) {
       await db.batch(rows.map((row) => db.prepare("UPDATE content SET parent_id=NULL WHERE site_id=1 AND type='page' AND parent_id=?").bind(row.id)));
     }
+    const postPagesReady = await hasTable(c.env, 'content_pages');
     await db.batch(rows.flatMap((row) => [
       db.prepare('DELETE FROM content_terms WHERE content_id=?').bind(row.id),
+      ...(postPagesReady ? [db.prepare('DELETE FROM content_pages WHERE page_id=?').bind(row.id)] : []),
       db.prepare('DELETE FROM comments WHERE content_id=?').bind(row.id),
       db.prepare("DELETE FROM content WHERE id=? AND site_id=1 AND type='page'").bind(row.id),
       db.prepare("DELETE FROM settings WHERE site_id=1 AND key='home_page_id' AND value=?").bind(String(row.id)),
@@ -725,8 +764,10 @@ content.post('/posts/bulk', async (c) => {
   const idList = validIds.map(() => '?').join(',');
   const now = new Date().toISOString();
   if (action === 'delete') {
+    const postPagesReady = await hasTable(c.env, 'content_pages');
     const statements = validIds.flatMap((id) => [
       db.prepare('DELETE FROM content_terms WHERE content_id=?').bind(id),
+      ...(postPagesReady ? [db.prepare('DELETE FROM content_pages WHERE content_id=?').bind(id)] : []),
       db.prepare('DELETE FROM comments WHERE content_id=?').bind(id),
       db.prepare("DELETE FROM content WHERE id=? AND site_id=1 AND type='post'").bind(id),
     ]);
@@ -883,18 +924,46 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
   let postFields = html``;
 
   if (type === 'post') {
-    const [terms, mine, images] = await Promise.all([
+    const [terms, mine, images, hasPostPages, hasParentCol] = await Promise.all([
       c.env.DB.prepare('SELECT id, taxonomy, name FROM terms WHERE site_id=1 ORDER BY name').all<{ id: number; taxonomy: string; name: string }>(),
       row ? c.env.DB.prepare('SELECT term_id FROM content_terms WHERE content_id=?').bind(row.id).all<{ term_id: number }>() : null,
       c.env.DB.prepare("SELECT id, filename, r2_key, alt FROM media WHERE site_id=1 AND mime LIKE 'image/%' ORDER BY id DESC LIMIT 200").all<{ id: number; filename: string; r2_key: string; alt: string }>(),
+      hasTable(c.env, 'content_pages'),
+      hasColumn(c.env, 'content', 'parent_id'),
     ]);
+    let postPagesReady = hasPostPages;
+    const [allPages, myPages] = postPagesReady
+      ? await Promise.all([
+        c.env.DB.prepare(
+          `SELECT id, title, slug, ${hasParentCol ? 'parent_id' : 'NULL AS parent_id'}, status, COALESCE(menu_order,0) AS menu_order
+           FROM content WHERE site_id=1 AND type='page' ORDER BY COALESCE(menu_order,0), title COLLATE NOCASE LIMIT 500`,
+        ).all<PageHierarchyRow>().catch(() => ({ results: [] as PageHierarchyRow[] })),
+        row ? c.env.DB.prepare('SELECT page_id FROM content_pages WHERE content_id=?').bind(row.id).all<{ page_id: number }>().catch(() => { postPagesReady = false; return null; }) : null,
+      ])
+      : [{ results: [] as PageHierarchyRow[] }, null];
     const selected = new Set((mine?.results || []).map((t) => t.term_id));
+    const selectedPages = new Set((myPages?.results || []).map((p) => p.page_id));
+    const targetPageTree = orderedPageTree(allPages.results);
     const cats = terms.results.filter((t) => t.taxonomy === 'category');
     const tags = terms.results.filter((t) => t.taxonomy === 'tag' && selected.has(t.id)).map((t) => t.name).join(', ');
     const featured = images.results.find((i) => i.id === row?.featured_media_id);
+    const postPagesField = !postPagesReady
+      ? html`<label>Show on page(s) only</label>
+        <p class="hint">Page-specific posts are available after the database update. <a href="${base}/updates">Run updates</a>.</p>`
+      : targetPageTree.length
+        ? html`<label>Show on page(s) only</label>
+          <input type="hidden" name="page_ids_present" value="1">
+          <div class="checks" id="post-pages-picker">
+            ${targetPageTree.map(({ page, depth }) => html`<label class="check"><input type="checkbox" name="page_ids" value="${page.id}"${selectedPages.has(page.id) ? raw(' checked') : ''}> ${'— '.repeat(depth)}${page.title}${page.status === 'draft' ? ' (draft)' : ''}</label>`)}
+          </div>
+          <p class="hint">Tick one or more pages or sub-pages to display this post exclusively on those pages (hidden from the main blog, category/tag archives, RSS and Home latest posts). Leave all unchecked for a regular blog post.</p>`
+        : html`<label>Show on page(s) only</label>
+          <input type="hidden" name="page_ids_present" value="1">
+          <p class="hint">No pages exist yet. Leave unchecked for the main blog, or <a href="${base}/pages/new">create a page</a> first.</p>`;
     postFields = html`
 <div class="card">
   <h2>Post options</h2>
+  ${postPagesField}
   <label for="excerpt">Excerpt</label>
   <textarea id="excerpt" name="excerpt" maxlength="500">${row?.excerpt ?? ''}</textarea>
   <p class="hint">Optional. Shown on listing pages; generated from the content when empty.</p>
@@ -1210,6 +1279,20 @@ content.get('/:kind{(?:pages|posts)}/:id{[0-9]+}/quick', async (c) => {
       `SELECT t.id, t.taxonomy, t.name FROM content_terms ct JOIN terms t ON t.id=ct.term_id WHERE ct.content_id=? ORDER BY t.name`,
     ).bind(id).all<{ id: number; taxonomy: string; name: string }>()).results
     : [];
+  let qePostPagesReady = kind === 'posts' && await hasTable(c.env, 'content_pages');
+  const hasParentCol = qePostPagesReady && await hasColumn(c.env, 'content', 'parent_id');
+  const [qeAllPages, qeMyPages] = qePostPagesReady
+    ? await Promise.all([
+      c.env.DB.prepare(
+        `SELECT id, title, slug, ${hasParentCol ? 'parent_id' : 'NULL AS parent_id'}, status, COALESCE(menu_order,0) AS menu_order
+         FROM content WHERE site_id=1 AND type='page' ORDER BY COALESCE(menu_order,0), title COLLATE NOCASE LIMIT 500`,
+      ).all<PageHierarchyRow>().catch(() => ({ results: [] as PageHierarchyRow[] })),
+      c.env.DB.prepare('SELECT page_id FROM content_pages WHERE content_id=?').bind(id).all<{ page_id: number }>()
+        .catch(() => { qePostPagesReady = false; return { results: [] as { page_id: number }[] }; }),
+    ])
+    : [{ results: [] as PageHierarchyRow[] }, { results: [] as { page_id: number }[] }];
+  const qeSelectedPages = new Set(qeMyPages.results.map((p) => p.page_id));
+  const qePageTree = orderedPageTree(qeAllPages.results);
   return layout(c, `Quick edit: ${row.title}`, html`
 ${pageHead({ title: 'Quick edit', sub: row.title, actions: html`<a class="btn ghost" href="${base}/${kind}/${id}">Open full editor</a>` })}
 <form method="post" action="${base}/${kind}/${id}/quick" class="card">
@@ -1224,6 +1307,9 @@ ${pageHead({ title: 'Quick edit', sub: row.title, actions: html`<a class="btn gh
   </select>
   ${kind === 'posts' ? html`<label for="qe-when">Publish date (${tz})</label>
   <input type="datetime-local" id="qe-when" name="publish_at" value="${row.published_at ? utcToLocal(row.published_at, tz) : ''}">
+  ${qePostPagesReady && qePageTree.length ? html`<label>Show on page(s) only</label>
+  <input type="hidden" name="page_ids_present" value="1">
+  <div class="checks">${qePageTree.map(({ page, depth }) => html`<label class="check"><input type="checkbox" name="page_ids" value="${page.id}"${qeSelectedPages.has(page.id) ? raw(' checked') : ''}> ${'— '.repeat(depth)}${page.title}${page.status === 'draft' ? ' (draft)' : ''}</label>`)}</div>` : ''}
   ${rowTerms.length ? html`<label>Categories</label>
   <div class="checks">${rowTerms.filter((t) => t.taxonomy === 'category').map((t) => html`<label class="check"><input type="checkbox" name="cat" value="${t.id}" checked> ${t.name}</label>`)}</div>` : ''}
   <label for="qe-tags">Tags</label>
@@ -1273,11 +1359,26 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/quick', async (c) => {
     const tagIds = (await Promise.all(tagNames.map((name) => c.env.DB.prepare(
       "SELECT id FROM terms WHERE site_id=1 AND taxonomy='tag' AND slug=?",
     ).bind(slugify(name)).first<{ id: number }>()))).filter(Boolean) as { id: number }[];
+    let savePages = (f.has('page_ids_present') || f.has('page_ids')) && await hasTable(c.env, 'content_pages');
+    if (savePages) {
+      try {
+        await c.env.DB.prepare('SELECT 1 FROM content_pages LIMIT 1').first();
+      } catch {
+        savePages = false;
+      }
+    }
+    const pageIds = savePages
+      ? [...new Set(f.getAll('page_ids').map((v) => Number(v)).filter((n) => Number.isSafeInteger(n) && n > 0))]
+      : [];
     await c.env.DB.batch([
       c.env.DB.prepare("DELETE FROM content_terms WHERE content_id=? AND term_id IN (SELECT id FROM terms WHERE taxonomy='category')").bind(id),
       c.env.DB.prepare("DELETE FROM content_terms WHERE content_id=? AND term_id IN (SELECT id FROM terms WHERE taxonomy='tag')").bind(id),
       ...catIds.map((tid) => c.env.DB.prepare("INSERT OR IGNORE INTO content_terms (content_id,term_id) SELECT ?,id FROM terms WHERE id=? AND site_id=1 AND taxonomy='category'").bind(id, tid)),
       ...tagIds.map((t) => c.env.DB.prepare("INSERT OR IGNORE INTO content_terms (content_id,term_id) VALUES (?,?)").bind(id, t.id)),
+      ...(savePages ? [
+        c.env.DB.prepare('DELETE FROM content_pages WHERE content_id=?').bind(id),
+        ...pageIds.map((pid) => c.env.DB.prepare("INSERT OR IGNORE INTO content_pages (content_id,page_id) SELECT ?,id FROM content WHERE id=? AND site_id=1 AND type='page'").bind(id, pid)),
+      ] : []),
     ]);
   }
   await pruneRevisions(c.env, id);
@@ -1304,6 +1405,9 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/duplicate', async (c) => {
   ).bind(row.type, `${row.title} (copy)`, slug, row.body, row.excerpt, row.seo_title, row.seo_description, row.featured_media_id, c.var.user.id, now, row.template ?? '', now).run();
   const copyId = Number(res.meta.last_row_id);
   await c.env.DB.prepare('INSERT OR IGNORE INTO content_terms (content_id,term_id) SELECT ?,term_id FROM content_terms WHERE content_id=?').bind(copyId, id).run();
+  if (kind === 'posts' && await hasTable(c.env, 'content_pages')) {
+    await c.env.DB.prepare('INSERT OR IGNORE INTO content_pages (content_id,page_id) SELECT ?,page_id FROM content_pages WHERE content_id=?').bind(copyId, id).run();
+  }
   if (kind === 'pages' && await hasColumn(c.env, 'content', 'parent_id') && row.parent_id != null) {
     await c.env.DB.prepare("UPDATE content SET parent_id=? WHERE id=? AND type='page' AND site_id=1").bind(row.parent_id, copyId).run();
   }
@@ -1573,6 +1677,17 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
       ...names(str('tags')).map((name) => ({ taxonomy: 'tag', name, slug: slugify(name) })),
     ].filter((t) => t.slug);
     const catIds = f.getAll('cat').map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0);
+    let savePages = (f.has('page_ids_present') || f.has('page_ids')) && await hasTable(c.env, 'content_pages');
+    if (savePages) {
+      try {
+        await db.prepare('SELECT 1 FROM content_pages LIMIT 1').first();
+      } catch {
+        savePages = false;
+      }
+    }
+    const pageIds = savePages
+      ? [...new Set(f.getAll('page_ids').map((v) => Number(v)).filter((n) => Number.isSafeInteger(n) && n > 0))]
+      : [];
     const stmts = [
       db.prepare('DELETE FROM content_terms WHERE content_id=?').bind(savedId),
       ...wanted.map((t) => db.prepare('INSERT OR IGNORE INTO terms (site_id,taxonomy,name,slug) VALUES (1,?,?,?)').bind(t.taxonomy, t.name, t.slug)),
@@ -1580,6 +1695,10 @@ content.post('/:kind{(?:pages|posts)}/save', async (c) => {
       ...catIds.map((tid) => db.prepare("INSERT OR IGNORE INTO content_terms (content_id,term_id) SELECT ?, id FROM terms WHERE id=? AND site_id=1 AND taxonomy='category'").bind(savedId, tid)),
       // drop tags nobody uses any more
       db.prepare("DELETE FROM terms WHERE taxonomy='tag' AND id NOT IN (SELECT term_id FROM content_terms)"),
+      ...(savePages ? [
+        db.prepare('DELETE FROM content_pages WHERE content_id=?').bind(savedId),
+        ...pageIds.map((pid) => db.prepare("INSERT OR IGNORE INTO content_pages (content_id,page_id) SELECT ?, id FROM content WHERE id=? AND site_id=1 AND type='page'").bind(savedId, pid)),
+      ] : []),
     ];
     await db.batch(stmts);
   }
@@ -1611,8 +1730,14 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/delete', async (c) => {
   if (kind === 'pages' && await hasColumn(c.env, 'content', 'parent_id')) {
     await c.env.DB.prepare("UPDATE content SET parent_id=NULL WHERE site_id=1 AND type='page' AND parent_id=?").bind(id).run();
   }
+  const postPagesReady = await hasTable(c.env, 'content_pages');
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM content_terms WHERE content_id=?').bind(id),
+    ...(postPagesReady ? [
+      kind === 'pages'
+        ? c.env.DB.prepare('DELETE FROM content_pages WHERE page_id=?').bind(id)
+        : c.env.DB.prepare('DELETE FROM content_pages WHERE content_id=?').bind(id),
+    ] : []),
     c.env.DB.prepare('DELETE FROM content_lock WHERE content_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM comments WHERE content_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM content WHERE id=?').bind(id),
