@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ahmed Pro Theme",
   "slug": "ahmed-pro-theme",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Ahmed",
   "description": "A professional, fully responsive theme with dark mode, dropdown menus, page hierarchy styling, social icons and a rich footer.",
   "cms_compatibility": {
@@ -63,6 +63,10 @@
   ],
   "settings_schema": "config/settings.json",
   "changelog": [
+    {
+      "version": "1.0.1",
+      "notes": "Footer: the bottom bar no longer prints a CMS credit — just your copyright line and, if you set one, your footer note."
+    },
     {
       "version": "1.0.0",
       "notes": "Initial release: dark mode, dropdown menus, social icons, top bar, rich footer, share buttons."

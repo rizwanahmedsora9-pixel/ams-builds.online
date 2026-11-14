@@ -1490,7 +1490,7 @@ test('phase 5: a preview runs the real site, and a local edit is never silently 
 
 test('phase 5: an older install shows "Update available vX → vY" with its changelog', async () => {
   // The server is a real instance, so an older install is simulated the way an
-  // upgrade finds one: the row says v0.9.0 while the store package is v1.0.0.
+  // upgrade finds one: the row says v0.9.0 while the store package is v1.0.1.
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(`${panel.dataDir}/cms.sqlite`);
   db.prepare("UPDATE themes SET version='0.9.0' WHERE slug='ahmed-pro-theme'").run();
@@ -1498,9 +1498,9 @@ test('phase 5: an older install shows "Update available vX → vY" with its chan
   db.close();
 
   const store = (await panel.get(`${panel.admin}/themes`)).text;
-  assert.match(store, /Update available v0\.9\.0 → v1\.0\.0/);
+  assert.match(store, /Update available v0\.9\.0 → v1\.0\.1/);
   assert.match(store, /Initial release: dark mode, dropdown menus/, 'the changelog is shown');
-  assert.match(store, /Update 0\.9\.0 → 1\.0\.0/, 'the button says both versions');
+  assert.match(store, /Update 0\.9\.0 → 1\.0\.1/, 'the button says both versions');
   assert.match(store, /data-update="ahmed-pro-theme"/);
 
   // Taking the update writes a snapshot and lands the newer files.
