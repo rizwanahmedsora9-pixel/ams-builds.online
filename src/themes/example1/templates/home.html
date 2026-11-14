@@ -1,0 +1,27 @@
+<section class="hero">
+  <div class="hero__bg" aria-hidden="true"></div>
+  <div class="hero__copy">
+    <p class="eyebrow">{{site.title}}</p>
+    <h1>{{#if theme.hero_title}}{{theme.hero_title}}{{else}}{{site.tagline}}{{/if}}</h1>
+    {{#if theme.hero_subtitle}}<p class="hero__lead">{{theme.hero_subtitle}}</p>{{/if}}
+    {{#if page}}<div class="hero__intro prose">{{{page.content}}}</div>{{/if}}
+    {{#unless page}}<p class="hero__intro">Your pages, posts, menus and media stay in the CMS. The theme controls their presentation.</p>{{/unless}}
+    <div class="hero__actions">
+      <a class="button" href="{{#if theme.hero_cta_url}}{{theme.hero_cta_url}}{{else}}/blog{{/if}}"><span>{{#if theme.hero_cta_label}}{{theme.hero_cta_label}}{{else}}Explore the blog{{/if}}</span><svg class="icon icon--dir" aria-hidden="true"><use href="#i-arrow"></use></svg></a>
+      {{#if theme.hero_cta2_label}}<a class="button button--ghost" href="{{theme.hero_cta2_url}}">{{theme.hero_cta2_label}}</a>{{/if}}
+    </div>
+  </div>
+</section>
+
+{{#if pages}}<section class="home-section" id="pages">
+  <div class="section-heading"><div><p class="eyebrow">Explore</p><h2>Pages</h2></div></div>
+  <ul class="page-grid">{{#each pages}}<li><a class="page-tile" href="{{url}}"><span class="page-tile__icon"><svg class="icon" aria-hidden="true"><use href="#i-file"></use></svg></span><span class="page-tile__title">{{title}}</span><svg class="icon icon--dir page-tile__arrow" aria-hidden="true"><use href="#i-arrow"></use></svg></a></li>{{/each}}</ul>
+</section>{{/if}}
+
+{{#if page_posts}}<section class="home-section"><div class="section-heading"><div><p class="eyebrow">Highlights</p><h2>Featured on this page</h2></div></div>
+  <div class="post-grid">{{#each page_posts}}<article class="post-card"><p class="meta"><svg class="icon" aria-hidden="true"><use href="#i-calendar"></use></svg><span>{{date}}</span></p><h3><a href="{{url}}">{{title}}</a></h3><p class="post-card__excerpt">{{excerpt}}</p><a class="read-more" href="{{url}}">Read more <svg class="icon icon--dir" aria-hidden="true"><use href="#i-arrow"></use></svg></a></article>{{/each}}</div>
+</section>{{/if}}
+
+<section class="home-section"><div class="section-heading"><div><p class="eyebrow">From the blog</p><h2>Latest posts</h2></div><a class="section-link" href="/blog">All posts <svg class="icon icon--dir" aria-hidden="true"><use href="#i-arrow"></use></svg></a></div>
+  {{#if posts}}<div class="post-grid post-grid--featured">{{#each posts}}<article class="post-card">{{#if featured_image}}<a class="post-card__media" href="{{url}}" tabindex="-1" aria-hidden="true"><img class="post-card__image" src="{{featured_image}}" alt="{{featured_alt}}" loading="lazy"></a>{{/if}}<div class="post-card__body"><p class="meta"><svg class="icon" aria-hidden="true"><use href="#i-calendar"></use></svg><span>{{date}}</span></p><h3><a href="{{url}}">{{title}}</a></h3><p class="post-card__excerpt">{{excerpt}}</p><a class="read-more" href="{{url}}">Read more <svg class="icon icon--dir" aria-hidden="true"><use href="#i-arrow"></use></svg></a></div></article>{{/each}}</div>{{else}}<p class="empty">No published posts yet. Add your first post in the CMS.</p>{{/if}}
+</section>

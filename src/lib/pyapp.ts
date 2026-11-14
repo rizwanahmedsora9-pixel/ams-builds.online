@@ -46,7 +46,7 @@ export const PYAPP_RUNNER_CSP = [
 const inlineJs = (value: string): string => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
 const WORKER_JS = `
-var pending=null,pendingFile=null,booted=0,running=0,base='',index='',boot='';
+var pending=null,pendingFile=null,pendingGui=null,booted=0,running=0,base='',index='',boot='';
 function send(kind,value){
   // Python hands a produced file over as JSON; the runner wants an object.
   if(kind==='file'&&typeof value==='string'){try{value=JSON.parse(value)}catch(e){return}}
@@ -63,6 +63,7 @@ self.onmessage=function(e){
   // Files stay JSON on both hops: a JS array of objects would reach Python as
   // proxies, not dicts.
   if(m.t==='files'&&pendingFile){var p=pendingFile;pendingFile=null;p(m.files&&m.files.length?JSON.stringify(m.files):'');return}
+  if(m.t==='gui-result'&&pendingGui){var g=pendingGui;pendingGui=null;g(JSON.stringify(m.result||{}));return}
   if(m.t!=='run'||!booted||running)return;
   running=1;
   (async function(){
@@ -102,6 +103,8 @@ self.onmessage=function(e){
           try{parsed=JSON.parse(spec)||parsed}catch(e){}
           postMessage({t:'pick',s:parsed});
         });
+      },function(spec){
+        return new Promise(function(resolve){pendingGui=resolve;postMessage({t:'gui',s:spec})});
       });
       postMessage({t:'end',s:String(status)});
     }catch(err){
@@ -113,6 +116,12 @@ self.onmessage=function(e){
 `;
 
 const RUNNER_CSS = `
+
+.ams-gui{font:14px/1.4 system-ui,sans-serif;background:#172236;border:1px solid #334861;border-radius:14px;padding:14px;margin:.5rem 0;color:#f1f5f9;white-space:normal}
+.ams-gui h3{margin:0 0 10px;font-size:18px}.ams-gui__display{background:#0c1625;padding:12px;border-radius:8px;text-align:right;font:22px ui-monospace,monospace;overflow-wrap:anywhere;margin-bottom:10px}
+.ams-gui__grid{display:grid;grid-template-columns:repeat(var(--cols,4),minmax(0,1fr));gap:7px}
+.ams-gui__grid button{min-width:0;min-height:42px;border:0;border-radius:8px;background:#31445e;color:white;font:600 16px system-ui;cursor:pointer}.ams-gui__grid button:hover{background:#466385}.ams-gui__grid button[data-primary="1"]{background:#346bed}
+.ams-gui label{display:block;margin:8px 0}.ams-gui input:not([type=checkbox]),.ams-gui select{display:block;box-sizing:border-box;width:100%;padding:8px;border:1px solid #60758f;border-radius:6px;background:#0c1625;color:white;font:inherit}.ams-gui input[type=checkbox]{margin-right:8px}.ams-gui p{margin:8px 0}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{display:flex;flex-direction:column;background:#0d1117;color:#e6edf3;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
@@ -250,6 +259,30 @@ const RUNNER_JS = `
     out.appendChild(row);
     screen.scrollTop=screen.scrollHeight;
   }
+  function gui(raw){
+    var spec;try{spec=JSON.parse(raw)}catch(e){spec={}}
+    if(!spec||typeof spec!=='object')spec={};
+    var panel=document.createElement('div');panel.className='ams-gui';
+    var title=document.createElement('h3');title.textContent=String(spec.title||'App').slice(0,120);panel.appendChild(title);
+    if(spec.display!==undefined){var display=document.createElement('div');display.className='ams-gui__display';display.textContent=String(spec.display).slice(0,1000);panel.appendChild(display)}
+    var fields={},items=Array.isArray(spec.fields)?spec.fields.slice(0,30):[];
+    items.forEach(function(item){
+      if(!item||typeof item!=='object')return;
+      var key=String(item.name||'').slice(0,80);if(!/^[A-Za-z][A-Za-z0-9_-]*$/.test(key)||Object.prototype.hasOwnProperty.call(fields,key))return;
+      var label=document.createElement('label');label.appendChild(document.createTextNode(String(item.label||key).slice(0,120)));
+      var input;if(item.type==='select'){
+        input=document.createElement('select');(Array.isArray(item.options)?item.options.slice(0,50):[]).forEach(function(option){var o=document.createElement('option');o.value=String(option).slice(0,200);o.textContent=o.value;input.appendChild(o)});input.value=String(item.value||'');
+      }else{input=document.createElement('input');input.type=item.type==='checkbox'?'checkbox':'text';if(input.type==='checkbox')input.checked=!!item.value;else{input.value=String(item.value||'').slice(0,1000);input.maxLength=1000}}
+      label.appendChild(input);panel.appendChild(label);fields[key]=input;
+    });
+    if(spec.message){var message=document.createElement('p');message.textContent=String(spec.message).slice(0,1000);panel.appendChild(message)}
+    var grid=document.createElement('div');grid.className='ams-gui__grid';grid.style.setProperty('--cols',String(Math.max(1,Math.min(6,Number(spec.columns)||4))));
+    (Array.isArray(spec.buttons)?spec.buttons.slice(0,60):[]).forEach(function(item){
+      if(!item||typeof item!=='object')return;var b=document.createElement('button');b.type='button';b.textContent=String(item.label||item.id||'Button').slice(0,80);if(item.primary)b.dataset.primary='1';
+      b.addEventListener('click',function(){var values={};Object.keys(fields).forEach(function(k){var input=fields[k];values[k]=input.type==='checkbox'?input.checked:input.value});panel.remove();if(worker)worker.postMessage({t:'gui-result',result:{action:String(item.id||item.label||'').slice(0,80),values:values}});state('run','Running')});grid.appendChild(b);
+    });
+    panel.appendChild(grid);out.appendChild(panel);state('wait','Waiting for a button');screen.scrollTop=screen.scrollHeight;
+  }
   function ask(){
     state('wait','Waiting for your input');
     field=document.createElement('input');
@@ -306,6 +339,7 @@ const RUNNER_JS = `
       else if(m.t==='img')image(m.s);
       else if(m.t==='file')download(m.s);
       else if(m.t==='pick')pick(m.s);
+      else if(m.t==='gui')gui(m.s);
       else if(m.t==='status')state('load',m.s);
       else if(m.t==='start'){
         started=1;

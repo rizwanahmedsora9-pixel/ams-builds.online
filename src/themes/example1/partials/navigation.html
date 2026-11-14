@@ -1,0 +1,9 @@
+<nav class="site-nav" id="primary-navigation" aria-label="Primary navigation">
+  {{#each menu.primary}}<div class="nav-item{{#if children}} has-children{{/if}}"><a class="nav-link" href="{{url}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>{{#if children}}<button class="subnav-toggle" type="button" aria-expanded="false" aria-label="Toggle submenu"><svg class="icon" aria-hidden="true"><use href="#i-chevron"></use></svg></button><div class="subnav">{{#each children}}<a href="{{url}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>{{/each}}</div>{{/if}}</div>{{/each}}
+  {{#unless menu.primary}}<div class="nav-item"><a class="nav-link" href="/">Home</a></div><div class="nav-item"><a class="nav-link" href="/blog">Blog</a></div>{{/unless}}
+</nav>
+<div class="header-actions">
+  {{#if theme.show_search}}<a class="icon-btn" href="/search" aria-label="Search"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></a>{{/if}}
+  {{#if theme.show_theme_toggle}}<button class="icon-btn theme-toggle" type="button" aria-label="Switch light/dark mode"><svg class="icon icon--sun" aria-hidden="true"><use href="#i-sun"></use></svg><svg class="icon icon--moon" aria-hidden="true"><use href="#i-moon"></use></svg></button>{{/if}}
+  <button class="icon-btn nav-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation" aria-label="Toggle navigation"><svg class="icon icon--open" aria-hidden="true"><use href="#i-menu"></use></svg><svg class="icon icon--close" aria-hidden="true"><use href="#i-close"></use></svg></button>
+</div>

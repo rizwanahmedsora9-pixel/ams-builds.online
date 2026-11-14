@@ -15,6 +15,7 @@ browser, so nothing has to be installed on the server.
 | `06-image-to-pdf.py` | `ams_pick_file()` in, Pillow, PDF out | Pillow (PIL) |
 | `07-csv-report.py` | a CSV in, a pandas summary and a CSV back out | pandas, numpy |
 | `08-quiz.py` | a class that asks questions and keeps a score | Python only |
+| `11-gui-calculator.py` | clickable calculator with `ams_gui()` | Python only |
 
 Things to know before writing your own:
 
@@ -29,3 +30,16 @@ Things to know before writing your own:
 - The first run downloads the interpreter from `cdn.jsdelivr.net`; if that host
   is blocked, the terminal says so. Nothing is downloaded until a visitor
   scrolls to the app (or presses Run, when Auto-start is off).
+
+## Browser GUI
+
+`ams_gui(spec)` shows a form and waits until the visitor clicks a button. It
+returns `{"action": button_id, "values": {field_name: value}}`. Call it again
+with updated data to redraw the interface. `spec` supports `title`, `display`,
+`message`, `columns` (1–6), `buttons` (`id`, `label`, optional `primary`) and
+`fields` (`name`, `label`, `type` of `text`, `checkbox`, or `select`; `value`;
+select also takes an `options` list of strings). File selection is available by
+calling `ams_pick_file()` after a GUI button click; `ams_download()` provides
+a download. Up to 30 fields and 60 buttons are accepted. All visitor-provided
+values should be validated in Python. This is a browser form API, not a desktop
+window or a compatibility layer for tkinter, and cannot access the host page.

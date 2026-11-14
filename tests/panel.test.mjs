@@ -10,7 +10,7 @@ import vm from 'node:vm';
 import { createHarness } from './helpers.mjs';
 
 const panel = createHarness();
-// The one theme the app ships: the installer activates it and the store lists it.
+// The default theme is activated by the installer; the store also offers Example 1.
 const BUNDLED = { slug: 'ahmed-pro-theme', name: 'Ahmed Pro Theme' };
 
 before(async () => {
@@ -1119,10 +1119,11 @@ const zipNames = async (bytes) => {
   return names.sort();
 };
 
-test('phase 5: the store shows the single bundled theme with a screenshot and a live preview', async () => {
+test('phase 5: the store shows bundled and example themes with artwork and a live preview', async () => {
   const page = await panel.get(`${panel.admin}/themes`);
   assert.ok(page.text.includes(`<h3>${BUNDLED.name} <small`), 'the bundled theme is a store card');
-  assert.equal((page.text.match(/class="store-item__shot"/g) || []).length, 1, 'the one card has art');
+  assert.ok(page.text.includes('<h3>Example 1 <small'), 'the example theme is a store card');
+  assert.equal((page.text.match(/class="store-item__shot"/g) || []).length, 2, 'both theme cards have art');
   assert.match(page.text, /class="store-item__shot" style="background-image:url\(\/theme-assets\/ahmed-pro-theme\/screenshot\.png/, 'the art is the screenshot the package ships');
   assert.match(page.text, /· by Ahmed</, 'a theme shows its author');
   assert.match(page.text, /themes\/preview\/ahmed-pro-theme/, 'the card links to the live preview');

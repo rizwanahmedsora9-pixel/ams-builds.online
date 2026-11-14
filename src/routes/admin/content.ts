@@ -7,7 +7,7 @@ import { sanitizeHtml, slugify } from '../../lib/security';
 import { localToUtc, utcToLocal } from '../../lib/time';
 import { isInPrimaryMenu, removeUrlFromMenus, syncPageMenu } from '../../lib/menus';
 import {
-  bulkBar, card, emptyRow, listToolbar, notice, pageHead, pagination, table, tabs, LIST_JS,
+  breadcrumbs, bulkBar, card, emptyRow, listToolbar, notice, pageHead, pagination, table, tabs, LIST_JS,
 } from '../../admin/components';
 import { icon, PAGE_ICONS, pageIcons } from '../../admin/icons';
 import { PICKER_JS, mediaPicker } from '../../admin/media-picker';
@@ -1086,6 +1086,23 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
     ).all<PageHierarchyRow>()).results
     : [];
   const hierarchyById = new Map(hierarchyPages.map((page) => [page.id, page]));
+  const editorPageTrail: { label: string; href?: string }[] = [];
+  if (type === 'page' && row) {
+    const ancestors: PageHierarchyRow[] = [];
+    const seen = new Set<number>([row.id]);
+    let parent = row.parent_id;
+    while (parent != null && !seen.has(parent) && ancestors.length < MAX_PAGE_DEPTH) {
+      seen.add(parent);
+      const ancestor = hierarchyById.get(parent);
+      if (!ancestor) break;
+      ancestors.unshift(ancestor);
+      parent = ancestor.parent_id;
+    }
+    editorPageTrail.push({ label: 'Pages', href: `${base}/pages` });
+    for (const ancestor of ancestors) editorPageTrail.push({ label: ancestor.title, href: `${base}/pages/${ancestor.id}` });
+    editorPageTrail.push({ label: row.title });
+  }
+
   const excludedParents = row ? pageDescendants(row.id, hierarchyPages) : new Set<number>();
   const movedSubtreeHeight = row ? pageSubtreeHeight(row.id, hierarchyPages) : 0;
   const parentOptions = orderedPageTree(hierarchyPages).filter(({ page }) =>
@@ -1116,6 +1133,7 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
   const initialSkin = preferred || 'modern';
   return layout(c, title, html`
 ${raw(EDITOR_CSS)}
+${editorPageTrail.length ? breadcrumbs(editorPageTrail) : ''}
 <div class="row between editor-top" style="margin-bottom:1rem">
   <h1 style="margin:0">${title}</h1>
   <span class="row">
@@ -1180,6 +1198,12 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
           <button type="button" data-wrap="<blockquote>|</blockquote>" data-command="formatBlock" data-value="blockquote" title="Quote" aria-label="Quote" aria-pressed="false">${tb('<path d="M5 17c2.5-1 3.5-3 3.5-5.5V7H4v5h3"/><path d="M14 17c2.5-1 3.5-3 3.5-5.5V7H13v5h3"/>')}</button>
           <button type="button" data-wrap="<pre><code>|</code></pre>" title="Code block" aria-label="Code block">${tb('<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>')}</button>
           <button type="button" data-wrap="<hr>|" data-command="insertHorizontalRule" title="Divider line" aria-label="Divider">${tb('<path d="M4 12h16"/><path d="M8 7h8M8 17h8" opacity=".45"/>')}</button>
+        </div>
+        <div class="tb-group" role="group" aria-label="Text alignment">
+          <button type="button" data-exec="justifyLeft" title="Align text left" aria-label="Align text left">${tb('<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>')}</button>
+          <button type="button" data-exec="justifyCenter" title="Center text" aria-label="Center text">${tb('<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>')}</button>
+          <button type="button" data-exec="justifyRight" title="Align text right" aria-label="Align text right">${tb('<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>')}</button>
+          <button type="button" data-exec="justifyFull" title="Justify text" aria-label="Justify text">${tb('<path d="M4 6h16M4 10h16M4 14h16M4 18h16"/>')}</button>
         </div>
         <div class="tb-group tb-group--insert" role="group" aria-label="Insert">
           <button type="button" class="tb-wide" data-link-open title="Add or edit a link (Ctrl+Shift+K)" aria-pressed="false">${tb('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1"/>')}<span class="tb-label">Link</span></button>
@@ -1340,7 +1364,7 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
 </dialog>
 <dialog id="python-dialog" aria-labelledby="python-dialog-title">
   <h2 id="python-dialog-title">Add Python app</h2>
-  <p class="hint">Choose a single-file <code>.py</code> program. It runs in each visitor's browser, in a sandbox that cannot touch your site, so no server is needed. Programs that <code>print()</code> and ask with <code>input()</code> work as written, and <code>ams_pick_file()</code> / <code>ams_download()</code> move a file (an image in, a PDF out).</p>
+  <p class="hint">Choose a single-file <code>.py</code> program. It runs in each visitor's browser, in a sandbox that cannot touch your site, so no server is needed. Programs can use <code>print()</code> and <code>input()</code>, or <code>ams_gui()</code> for browser buttons and forms. <code>ams_pick_file()</code> / <code>ams_download()</code> move a file. Try the GUI calculator sample.</p>
   <div class="py-file">
     <button type="button" class="btn ghost" id="python-file-button">${icon('upload', { cls: 'ico--sm' })} Choose .py file</button>
     <input type="file" id="python-file" accept=".py,.pyw,text/x-python,text/plain" hidden>

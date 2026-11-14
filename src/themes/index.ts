@@ -2,12 +2,11 @@
  * The built-in theme store: themes shipped inside the app, installable from
  * Admin -> Themes with one click.
  *
- * There is exactly one bundled theme — the default theme (./default.ts) — and
- * it is the theme the installer writes and the theme a site falls back to. Its
- * store card is built from the very bundle that ships, not from a second copy
- * of the files, so the store, the installer and the fallback all agree.
+ * The default theme is installed and used as the fallback. Example 1 is an
+ * optional, independently installable theme for learning and customization.
  */
 import { defaultTheme, defaultThemeFiles, type PackageFile } from './default';
+import { exampleTheme, exampleThemeFiles } from './example1';
 import type { ThemeBundle } from '../lib/theme-manifest';
 
 export type StoreTheme = ThemeBundle & {
@@ -26,4 +25,9 @@ export const storeThemes: StoreTheme[] = [{
   description: defaultTheme.manifest.description,
   preview: defaultTheme.manifest.preview,
   packageFiles: defaultThemeFiles,
+}, {
+  ...exampleTheme,
+  description: exampleTheme.manifest.description,
+  preview: exampleTheme.manifest.preview,
+  packageFiles: exampleThemeFiles,
 }];

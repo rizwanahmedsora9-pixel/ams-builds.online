@@ -17,7 +17,7 @@ export const PY_BOOTSTRAP = String.raw`import ast, base64, builtins, inspect, js
 _BUILTINS = set(dir(builtins))
 # Callee names that must be awaited where they are called; the pass below then
 # turns every function that reaches one of them into a coroutine.
-_SEED = {'input', 'ams_pick_file'}
+_SEED = {'input', 'ams_pick_file', 'ams_gui'}
 _NO_ASYNC_DECOS = {'property', 'cached_property', 'setter', 'getter', 'contextmanager'}
 
 # Files cross postMessage as base64, so both directions are bounded.
@@ -288,7 +288,7 @@ def ams_transform(source, filename='app.py'):
     return tree
 
 
-async def ams_run(source, filename, send, read_line, read_file):
+async def ams_run(source, filename, send, read_line, read_file, read_gui=None):
     """Run one program: send(kind, value) prints, read_line() awaits a line,
     read_file() awaits a file the visitor picked."""
     sys.stdout = _Out(send, 'out')
@@ -333,6 +333,16 @@ async def ams_run(source, filename, send, read_line, read_file):
             paths.append(path)
         return paths if multiple else paths[0]
 
+    async def __ams_gui__(spec):
+        """Show a bounded browser form and wait for a button click."""
+        if read_gui is None:
+            raise RuntimeError('GUI controls are unavailable in this runner.')
+        data = json.dumps(spec, ensure_ascii=False)
+        if len(data) > 50000:
+            raise ValueError('GUI specification is too large.')
+        reply = await read_gui(data)
+        return json.loads(reply) if reply else {'action': '', 'values': {}}
+
     def __ams_download__(path, name=None):
         """Hand a file the program made to the visitor as a download link."""
         target = str(path)
@@ -352,7 +362,7 @@ async def ams_run(source, filename, send, read_line, read_file):
         '__name__': '__main__', '__file__': filename, '__builtins__': builtins,
         '__ams_input__': __ams_input__, '__ams_call__': __ams_call__,
         '__ams_superinit__': __ams_superinit__,
-        'ams_pick_file': __ams_pick_file__, 'ams_download': __ams_download__,
+        'ams_pick_file': __ams_pick_file__, 'ams_download': __ams_download__, 'ams_gui': __ams_gui__,
     }
     if 'matplotlib' in source:
         try:

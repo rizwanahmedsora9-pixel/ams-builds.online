@@ -91,10 +91,10 @@ function buildNavTree(
 }
 
 const PAGE_HIERARCHY_CSS = `
-.page-breadcrumbs{margin:0 0 1.25rem;font-size:.92em}
+.page-breadcrumbs{margin:0 0 1.25rem;font:600 .75em/1.5 system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase}
 .page-breadcrumbs ol{display:flex;flex-wrap:wrap;gap:.4rem;list-style:none;margin:0;padding:0}
-.page-breadcrumbs li+li:before{content:"/";margin-right:.4rem;opacity:.65}
-.page-breadcrumbs a{color:inherit;text-underline-offset:.15em}
+.page-breadcrumbs li+li:before{content:"›";margin-right:.4rem;opacity:.5;font-size:1.25em}
+.page-breadcrumbs a{color:inherit;text-decoration:none}.page-breadcrumbs a:hover,.page-breadcrumbs a:focus-visible{text-decoration:underline;text-underline-offset:.15em}.page-breadcrumbs [aria-current=page]{opacity:.8}
 .page-children{margin:2.5rem 0 0}
 .page-children h2{margin:0 0 1rem;font-size:1.3em}
 .page-children ul{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;list-style:none;margin:0;padding:0}

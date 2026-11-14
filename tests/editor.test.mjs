@@ -536,6 +536,8 @@ test('inserting an image keeps existing text and headings outside the figure', a
   const figure = visual.querySelector('figure.image-block');
   assert.ok(figure);
   assert.equal(figure.parentNode, visual, 'image is a top-level block');
+  assert.equal(figure.getAttribute('contenteditable'), 'false', 'typing cannot enter the narrow image figure');
+  assert.doesNotMatch(window.amsEditor.serialize(), /contenteditable=/, 'editor-only attribute is not saved');
   assert.equal(figure.textContent, '', 'existing text was not absorbed by the image');
   assert.equal(visual.querySelector('h2').textContent, 'Heading');
   assert.equal(visual.querySelector('h3').textContent, 'Next heading');
