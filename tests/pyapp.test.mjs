@@ -723,6 +723,7 @@ test('every sample app in samples/python really runs', async () => {
       const bytes = Buffer.from(r.produced.data, 'base64');
       assert.equal(r.produced.mime, 'image/jpeg');
       assert.deepEqual([...bytes.subarray(0, 2)], [0xff, 0xd8], 'the output is a real JPEG');
+      assert.ok(bytes.length <= 100 * 1024, `the sample fits its 100 KB target (${bytes.length} bytes)`);
     }
     if (file.includes('qr-code-maker')) {
       const svg = Buffer.from(r.produced.data, 'base64').toString('utf8');

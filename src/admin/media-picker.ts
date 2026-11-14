@@ -5,9 +5,9 @@
  * two tabs: images already uploaded, and an upload panel that takes files from
  * the device (click or drag and drop).
  *
- * Uploads are compressed in the browser to tight WebP before they are sent
- * (see src/admin/media-compress.ts), so adding a photo from inside the editor
- * never ships a 6 MB camera file to visitors. Alt text is set in the same pass.
+ * Uploads are compressed in the browser to a size-targeted WebP before they are
+ * sent (see src/admin/media-compress.ts): 100 KB per image by default, even when
+ * the source is a 10 MB camera file. Alt text is set in the same pass.
  *
  * The dialog is server-rendered into the page; the client script fills the grid
  * from `GET /{admin}/media/picker?type=image&q=…` and hands the chosen URL back
@@ -61,21 +61,21 @@ export function mediaPicker(opts: {
       <label class="media-picker__drop" for="media-picker-file" data-picker-drop>
         <span class="media-picker__drop-icon">${icon('upload')}</span>
         <b>Drop images here, or click to browse</b>
-        <span class="hint">JPG, PNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, SVG and more. Raster images are resized and re-encoded as tight WebP; a format this browser cannot read is flagged before anything is sent.</span>
+        <span class="hint">JPG, PNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, SVG and more. Static images are resized and re-encoded as WebP until they fit the size target below; a format this browser cannot read is flagged before anything is sent.</span>
         <input type="file" id="media-picker-file" name="files" accept="${accept}" multiple>
       </label>
       <div class="media-picker__queue" data-picker-queue aria-live="polite"></div>
       <div class="media-picker__options">
-        <label for="media-picker-quality">Image quality</label>
-        <select id="media-picker-quality" data-picker-quality>
-          <option value="0.55">Maximum compression — lower quality WebP</option>
-          <option value="0.7" selected>Tight — WebP (recommended)</option>
-          <option value="0.8">Balanced</option>
-          <option value="0.9">High</option>
+        <label for="media-picker-target">Maximum size per image</label>
+        <select id="media-picker-target" data-picker-target>
+          <option value="100" selected>100 KB — maximum compression (recommended)</option>
+          <option value="50">50 KB — extra small, lower detail</option>
+          <option value="200">200 KB — small</option>
+          <option value="500">500 KB — larger</option>
           <option value="0">Keep originals, no conversion</option>
         </select>
       </div>
-      <p class="hint media-picker__compress-note">Compression happens in your browser before upload, so the file the site serves is the small one. GIF animation and SVG stay as they are. Up to 20 images at a time.</p>
+      <p class="hint media-picker__compress-note">Compression happens in your browser before upload. Quality and dimensions are reduced until each static image fits the target — a 10 MB photo still uploads at about 100 KB. GIF/APNG animation, animated WebP and SVG stay as they are. Up to 20 images at a time.</p>
       <p class="row media-picker__upload-actions">
         <button class="btn" type="submit" data-picker-upload-btn disabled>Upload</button>
         <span class="hint" data-picker-upload-status role="status" aria-live="polite"></span>
@@ -110,7 +110,7 @@ export const PICKER_JS = `${MEDIA_COMPRESS_JS}<script>
     var altInput = dialog.querySelector('#media-picker-alt');
     var uploadForm = dialog.querySelector('[data-picker-upload]');
     var fileInput = dialog.querySelector('#media-picker-file');
-    var quality = dialog.querySelector('[data-picker-quality]');
+    var target = dialog.querySelector('[data-picker-target]');
     var queue = dialog.querySelector('[data-picker-queue]');
     var uploadBtn = dialog.querySelector('[data-picker-upload-btn]');
     var uploadStatus = dialog.querySelector('[data-picker-upload-status]');
@@ -225,9 +225,9 @@ export const PICKER_JS = `${MEDIA_COMPRESS_JS}<script>
     });
 
     /* ---------------------------------------------------------- upload */
-    function qualityValue() {
-      var value = quality ? parseFloat(quality.value) : 0.7;
-      return isNaN(value) ? 0.7 : value;
+    function targetValue() {
+      var value = target ? parseFloat(target.value) : 100;
+      return isNaN(value) ? 100 : value;
     }
     function queueRows(rows) {
       previewUrls.forEach(function (url) { URL.revokeObjectURL(url); });
@@ -283,12 +283,12 @@ export const PICKER_JS = `${MEDIA_COMPRESS_JS}<script>
         return;
       }
       switchTab('upload');
-      var value = qualityValue();
-      var options = value > 0 ? { quality: value } : { convert: false };
+      var value = targetValue();
+      var options = value > 0 ? { targetKB: value } : { convert: false };
       busy = true;
       uploadBtn.disabled = true;
-      uploadStatus.textContent = (value > 0 ? 'Optimising ' : 'Preparing ') + sourceFiles.length +
-        (sourceFiles.length === 1 ? ' image' : ' images') + (value > 0 ? ' to WebP…' : '…');
+      uploadStatus.textContent = (value > 0 ? 'Compressing ' : 'Preparing ') + sourceFiles.length +
+        (sourceFiles.length === 1 ? ' image' : ' images') + (value > 0 ? ' to ≤' + value + ' KB each…' : '…');
       queueRows(sourceFiles.map(function (file) {
         return { name: file.name, result: { file: file, original: file, failed: false, changed: false, note: 'working…' } };
       }));
@@ -322,7 +322,7 @@ export const PICKER_JS = `${MEDIA_COMPRESS_JS}<script>
     if (fileInput) fileInput.addEventListener('change', function () {
       prepareFiles(fileInput.files);
     });
-    if (quality) quality.addEventListener('change', function () {
+    if (target) target.addEventListener('change', function () {
       if (sourceFiles.length) prepareFiles(sourceFiles);
     });
     if (uploadForm) uploadForm.addEventListener('submit', function (event) {

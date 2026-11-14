@@ -126,14 +126,15 @@ media.get('/media', async (c) => {
         ${csrfField(c)}
         <label for="files" style="margin-top:0">Choose files to upload</label>
         <input type="file" id="files" name="files" multiple required accept="${accept}">
-        <label for="media-quality">Image quality</label>
-        <select id="media-quality" name="quality" data-quality>
-          <option value="0.7" selected>Tight — smallest WebP (recommended)</option>
-          <option value="0.8">Balanced</option>
-          <option value="0.9">High</option>
+        <label for="media-target">Maximum size per image</label>
+        <select id="media-target" name="targetKB" data-target>
+          <option value="100" selected>100 KB — maximum compression (recommended)</option>
+          <option value="50">50 KB — extra small, lower detail</option>
+          <option value="200">200 KB — small</option>
+          <option value="500">500 KB — larger</option>
           <option value="0">Keep originals, no conversion</option>
         </select>
-        <p class="hint">JPG, PNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, SVG and more, plus PDF, audio, video and fonts. Raster images are compressed to WebP in your browser before upload. Up to ${fmtSize(MAX_BYTES)} per file.</p>
+        <p class="hint">JPG, PNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, SVG and more, plus PDF, audio, video and fonts. Static images are compressed to WebP in your browser until they fit the size target — a 10 MB photo still uploads at about 100 KB. GIF/APNG animation, animated WebP and SVG stay as they are. Up to ${fmtSize(MAX_BYTES)} per source file.</p>
         <p class="hint" data-compress-status role="status" aria-live="polite"></p>
         <button class="btn" type="submit">Upload</button>
       </form>
@@ -223,30 +224,55 @@ media.get('/media', async (c) => {
   document.querySelectorAll('[data-confirm]').forEach(function(f){f.addEventListener('submit',function(e){if(!confirm('Delete this file permanently?'))e.preventDefault()})});
   var form=document.getElementById('media-bulk-form');if(form)form.addEventListener('submit',function(e){if(!confirm('Delete the selected media files permanently? This cannot be undone.'))e.preventDefault()});
   // Compress images in the browser before the normal form submit reaches the
-  // server, so the stored file (and every visitor's download) is the small WebP.
+  // server, so the stored file (and every visitor's download) fits the target.
+  // The submit button stays disabled while a pass is running, and changing the
+  // target re-runs the pass on the originally selected files, not on the WebP
+  // files a previous pass already swapped in.
   var upForm=document.querySelector('.media-upload-form');
   if(upForm&&window.amsCompressImages){
     var upInput=upForm.querySelector('input[type=file]');
-    var upQuality=upForm.querySelector('[data-quality]');
+    var upTarget=upForm.querySelector('[data-target]');
     var upNote=upForm.querySelector('[data-compress-status]');
-    if(upInput)upInput.addEventListener('change',function(){
-      var originals=[].slice.call(upInput.files||[]);
-      if(!originals.length){if(upNote)upNote.textContent='';return}
-      var value=upQuality?parseFloat(upQuality.value):0.7;
-      if(isNaN(value))value=0.7;
-      if(upNote)upNote.textContent=value>0?'Optimising '+originals.length+' image'+(originals.length===1?'':'s')+' to WebP…':'Preparing files…';
-      window.amsCompressImages(originals,value>0?{quality:value}:{convert:false}).then(function(results){
+    var upBtn=upForm.querySelector('button[type=submit]');
+    var originals=[],version=0,busy=false;
+    function upBusy(value){busy=value;if(upBtn)upBtn.disabled=value;}
+    function prepare(){
+      var run=++version;
+      if(!originals.length){upBusy(false);if(upNote)upNote.textContent='';return}
+      var value=upTarget?parseFloat(upTarget.value):100;
+      if(isNaN(value))value=100;
+      upBusy(true);
+      if(upNote)upNote.textContent=value>0?'Compressing '+originals.length+' file'+(originals.length===1?'':'s')+' to ≤'+value+' KB per image…':'Preparing files…';
+      window.amsCompressImages(originals,value>0?{targetKB:value}:{convert:false}).then(function(results){
+        if(run!==version)return;
         var dt=null;try{dt=new DataTransfer()}catch(err){}
-        var saved=0,failed=0;
+        var saved=0,failed=0,ready=0,changed=false;
         results.forEach(function(r){
-          saved+=Math.max(0,(r.original.size||0)-(r.file.size||0));
-          if(r.failed)failed++;
+          if(r.failed){failed++;return}
+          ready++;saved+=Math.max(0,(r.original.size||0)-(r.file.size||0));
+          if(r.changed)changed=true;
           if(dt)dt.items.add(r.file);
         });
-        if(dt){try{upInput.files=dt.files}catch(err){}}
-        if(upNote)upNote.textContent=(saved&&window.amsFmtSize?window.amsFmtSize(saved)+' saved. ':'')+(failed?failed+' could not be converted in this browser and will upload as-is.':'Ready to upload.');
-      },function(){if(upNote)upNote.textContent='Ready to upload.'});
-    });
+        var swapped=false;
+        if(dt){try{upInput.files=dt.files;swapped=true}catch(err){}}
+        if(!swapped&&changed){
+          upBusy(true);
+          if(upNote)upNote.textContent='This browser cannot swap in the compressed files. Use the editor Media picker, or choose Keep originals.';
+          return;
+        }
+        upBusy(ready===0);
+        if(upNote)upNote.textContent=(saved&&window.amsFmtSize?window.amsFmtSize(saved)+' saved. ':'')+
+          (failed?failed+' could not be read or compressed and were skipped. Choose Keep originals to upload them unchanged. ':'')+
+          (ready?'Ready to upload.':'No usable files. Choose other files or keep originals.');
+      },function(){
+        if(run!==version)return;
+        upBusy(false);
+        if(upNote)upNote.textContent='Could not compress these files. Choose them again or keep originals.';
+      });
+    }
+    if(upInput)upInput.addEventListener('change',function(){originals=[].slice.call(upInput.files||[]);prepare()});
+    if(upTarget)upTarget.addEventListener('change',function(){if(originals.length)prepare()});
+    upForm.addEventListener('submit',function(e){if(busy){e.preventDefault();if(upNote)upNote.textContent='Wait for compression to finish, then upload.'}});
   }
 })();
 </script>`)}

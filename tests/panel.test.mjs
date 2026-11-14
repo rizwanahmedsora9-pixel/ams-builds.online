@@ -444,7 +444,8 @@ test('the picker has a library and an upload tab, takes batches and every common
   assert.match(page.text, /\.heic/, 'the file picker offers unusual image formats');
   assert.match(page.text, /window\.amsCompressImages/, 'images are compressed in the browser before upload');
   assert.match(page.text, /action="\/admin-panel\/media\/picker\/upload"/, 'the tab posts to the JSON upload endpoint');
-  assert.match(page.text, /id="media-picker-quality"/, 'quality is selectable');
+  assert.match(page.text, /id="media-picker-target"/, 'the per-image size target is selectable');
+  assert.match(page.text, /value="100" selected/, '100 KB is the default target');
   assert.match(page.text, /name="_csrf"/, 'the picker form carries the CSRF token');
 
   const library = await panel.get(`${panel.admin}/media`);

@@ -371,7 +371,7 @@ export const EDITOR_JS = `<script>
     var say2=note;
     say2(files.length===1?'Uploading your image…':'Uploading '+files.length+' images…');
     var preparing=window.amsCompressImages
-      ?window.amsCompressImages(files,{quality:0.7})
+      ?window.amsCompressImages(files,{targetKB:100})
       :Promise.resolve(files.map(function(file){return {file:file,failed:false}}));
     preparing.then(function(prepared){
       var usable=prepared.filter(function(row){return !row.failed&&row.file});
