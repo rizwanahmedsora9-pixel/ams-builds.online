@@ -25,6 +25,7 @@ import { audit } from '../../lib/audit';
 import { lockBanner, restoreBanner, revisionDiff, revisionList } from '../../admin/editor-views';
 import { csrfField, errorPage, go, html, layout, raw, type Raw } from '../../lib/ui';
 import { EDITOR_JS } from '../../admin/editor-js';
+import { PYTHON_SAMPLES } from '../../admin/py-samples';
 import { EDITOR_UTILS_JS } from '../../admin/editor-utils';
 
 /** Pages and posts share one table and one editor; posts add terms, featured image and scheduling. */
@@ -918,6 +919,8 @@ export const EDITOR_CSS = `<style>
 #python-dialog{width:min(40rem,94vw)}
 .py-file{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;margin:.6rem 0 .2rem}
 .py-file span{min-width:0;overflow-wrap:anywhere}
+.py-sample{display:inline-flex;align-items:center;gap:.4rem;min-width:0}
+.py-sample select{min-height:2.2rem;max-width:16rem;padding:0 .5rem;border:1px solid var(--line-strong);border-radius:.4rem;background:var(--surface);color:var(--fg);font:inherit;font-size:.85rem}
 .py-code{min-height:9rem;max-height:32vh;font-size:.8rem;line-height:1.5;white-space:pre;overflow:auto;tab-size:4}
 .py-warnings{margin:.5rem 0 0;padding:.5rem .7rem .5rem 1.7rem;border:1px solid var(--warn);border-radius:.4rem;background:var(--warn-soft);font-size:.82rem}
 .py-warnings[hidden]{display:none}
@@ -1341,6 +1344,9 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
   <div class="py-file">
     <button type="button" class="btn ghost" id="python-file-button">${icon('upload', { cls: 'ico--sm' })} Choose .py file</button>
     <input type="file" id="python-file" accept=".py,.pyw,text/x-python,text/plain" hidden>
+    <label class="py-sample" for="python-sample"><span class="muted">or</span>
+      <select id="python-sample" aria-label="Start from a sample program"></select>
+    </label>
     <span class="muted" id="python-file-name">No file chosen</span>
   </div>
   <label for="python-code">Code <span class="muted">(paste or edit here)</span></label>
@@ -1399,10 +1405,14 @@ ${row ? card({
 }) : ''}
 ${row ? html`<form method="post" action="${base}/${kind}/${row.id}/delete" id="delete">${csrfField(c)}<button class="btn danger" type="submit">Delete ${type}</button></form>` : ''}
 ${raw(PICKER_JS)}
+<script type="application/json" id="python-samples">${raw(safeJson(PYTHON_SAMPLES))}</script>
 ${raw(EDITOR_UTILS_JS)}
 ${raw(EDITOR_JS)}
 ${hierarchyAvailable ? raw(PAGE_PARENT_JS) : ''}`, '/' + kind);
 }
+
+/** JSON that is safe inside a <script type="application/json"> element. */
+const safeJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
 /* ------------------------------------------------------------- quick edit */
 /**

@@ -11,6 +11,7 @@
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -202,6 +203,39 @@ test('the dialog places a Python app as one top-level, selected block; edits and
   dom.window.close();
 });
 
+test('the dialog offers the shipped samples, and one fills the code box ready to insert', async () => {
+  const { dom, window, doc, visual } = await openEditor('');
+  doc.getElementById('add-python').click();
+  const select = doc.getElementById('python-sample');
+  const options = [...select.options].map((option) => option.value).filter(Boolean);
+  assert.deepEqual(options, readdirSync(join(ROOT, 'samples', 'python')).filter((f) => f.endsWith('.py')).sort().map((f) => f.replace(/^\d+-/, '')),
+    'every sample in the folder is offered, under its plain name');
+  select.value = 'hello.py';
+  select.dispatchEvent(new window.Event('change'));
+  const code = doc.getElementById('python-code').value;
+  assert.match(code, /print\("Hello from Python"/, 'the program lands in the code box');
+  assert.match(doc.getElementById('python-file-name').textContent, /^hello\.py · \d+ lines$/);
+  assert.equal(select.value, '', 'the list goes back to its prompt, so it can be used again');
+  doc.getElementById('insert-python').click();
+  const fig = visual.querySelector('figure.python-app');
+  assert.ok(fig, 'and inserts as one block');
+  assert.equal(fig.getAttribute('title'), 'hello.py');
+  assert.equal(fig.querySelector('pre').textContent, code);
+  dom.window.close();
+});
+
+test('src/admin/py-samples.ts is the samples folder, baked', () => {
+  const dir = join(ROOT, 'samples', 'python');
+  const expected = readdirSync(dir).filter((f) => f.endsWith('.py')).sort().map((file) => ({
+    name: file.replace(/^\d+-/, ''),
+    code: readFileSync(join(dir, file), 'utf8').replace(/\r\n?/g, '\n'),
+  }));
+  const baked = readFileSync(join(ROOT, 'src', 'admin', 'py-samples.ts'), 'utf8');
+  const rows = [...baked.matchAll(/"name": "([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(rows, expected.map((row) => row.name), 'same files, same order');
+  for (const row of expected) assert.ok(baked.includes(JSON.stringify(row.code)), `${row.name} is identical`);
+});
+
 test('a saved app reopens as a block, and the HTML tab round-trips it unchanged', async () => {
   const U = bootUtils();
   const fig = U.pythonFigure({ code: SAMPLE, name: 'greet.py', width: 60, height: 300 });
@@ -289,9 +323,37 @@ test('the runner is a static, sandboxed document with its own policy', async () 
   // The inline script is valid JavaScript (a bad escape would kill every app).
   const inline = res.text.match(/<script>([\s\S]*?)<\/script>/)[1];
   assert.doesNotThrow(() => new vm.Script(inline));
+  // The worker must be classic: a module worker from a blob: URL never starts in
+  // an opaque-origin frame (sandboxed without allow-same-origin) in Chrome.
+  assert.match(res.text, /new Worker\(url\)/, 'a classic worker, not { type: "module" }');
+  assert.doesNotMatch(res.text, /\{type:'module'\}/, 'no module worker');
+  assert.match(res.text, /importScripts\(base\+'pyodide\.js'\)/);
 });
 
 /* ------------------------------------------------------- 4. real Python */
+
+/**
+ * What importScripts(base + 'pyodide.js') does in a browser: leaves a
+ * loadPyodide() on the worker's global scope, with no module syntax involved.
+ *
+ * The npm copy of pyodide.js is a CommonJS module and, in Node, takes an
+ * `import()` path that cannot run inside a function built with new Function(). In
+ * a browser that branch is never taken (there is no `process`), so the script is
+ * a plain classic script. Here the same interpreter API is imported from
+ * pyodide.mjs and handed to the worker the same way: as a global function.
+ */
+function pyodideScriptLoader(local, target = globalThis) {
+  const dir = fileURLToPath(local);
+  let ready = null;
+  return async (url) => {
+    if (!ready) {
+      const file = url.startsWith(local) ? join(dir, url.slice(local.length)) : fileURLToPath(url);
+      const esm = join(dirname(file), 'pyodide.mjs');
+      ready = import(pathToFileURL(esm).href).then((mod) => { target.loadPyodide = mod.loadPyodide; });
+    }
+    await ready;
+  };
+}
 
 /** Drives the shipped worker script against the real interpreter. */
 function runProgram(code, answers = [], files = []) {
@@ -300,7 +362,8 @@ function runProgram(code, answers = [], files = []) {
   assert.match(base, /^https:\/\/cdn\.jsdelivr\.net\/pyodide\/v[\d.]+\/full\/$/);
   const local = pathToFileURL(dirname(require.resolve('pyodide/package.json'))).href + '/';
   return new Promise((resolve, reject) => {
-    const self = {};
+    // Like a worker's global scope: the script it loads defines loadPyodide there.
+    const self = Object.create(globalThis);
     const queue = [...answers];
     const pendingFiles = [...files];
     let out = '';
@@ -323,8 +386,12 @@ function runProgram(code, answers = [], files = []) {
         setTimeout(() => self.onmessage({ data: { t: 'line', s: line } }), 0);
       } else if (m.t === 'end' || m.t === 'fail') { clearTimeout(timer); resolve({ out, events, status: m.t === 'fail' ? `fail:${m.s}` : m.s, produced }); }
     };
-    new Function('self', 'postMessage', worker)(self, postMessage);
-    self.onmessage({ data: { t: 'run', code, name: 'app.py', base: local, index: fileURLToPath(local), boot } });
+    // A classic worker: one global function, importScripts, no modules. The
+    // local files stand in for the CDN so the real code path is exercised.
+    const importScripts = pyodideScriptLoader(local);
+    new Function('self', 'postMessage', 'importScripts', worker)(self, postMessage, importScripts);
+    self.onmessage({ data: { t: 'config', base: local, index: fileURLToPath(local), boot } });
+    self.onmessage({ data: { t: 'run', code, name: 'app.py' } });
   });
 }
 
@@ -435,15 +502,17 @@ test('the runner page: output lands in the terminal, the answer box feeds input(
     beforeParse(window) {
       window.URL.createObjectURL = () => 'blob:worker';
       window.URL.revokeObjectURL = () => {};
-      // A Worker that runs the shipped worker script in this process.
+      // A classic Worker that runs the shipped worker script in this process.
       window.Worker = class {
         constructor() {
           workers++;
           this.dead = false;
-          this.inner = {};
-          new Function('self', 'postMessage', workerSource)(this.inner, (m) => { if (!this.dead && this.onmessage) this.onmessage({ data: m }); });
+          this.inner = Object.create(window);
+          const importScripts = pyodideScriptLoader(local, this.inner);
+          new Function('self', 'postMessage', 'importScripts', workerSource)(this.inner, (m) => { if (!this.dead && this.onmessage) this.onmessage({ data: m }); }, importScripts);
         }
-        postMessage(m) { this.inner.onmessage({ data: m.t === 'run' ? { ...m, base: local, index: fileURLToPath(local) } : m }); }
+        // The CDN stands in for the local copy; index must be a file path here.
+        postMessage(m) { this.inner.onmessage({ data: { ...m, base: local, index: fileURLToPath(local) } }); }
         terminate() { this.dead = true; }
       };
     },
@@ -540,10 +609,12 @@ test('the runner: the picker feeds the program, the result becomes a download, C
       window.Worker = class {
         constructor() {
           this.dead = false;
-          this.inner = {};
-          new Function('self', 'postMessage', workerSource)(this.inner, (m) => { if (!this.dead && this.onmessage) this.onmessage({ data: m }); });
+          this.inner = Object.create(window);
+          const importScripts = pyodideScriptLoader(local, this.inner);
+          new Function('self', 'postMessage', 'importScripts', workerSource)(this.inner, (m) => { if (!this.dead && this.onmessage) this.onmessage({ data: m }); }, importScripts);
         }
-        postMessage(m) { this.inner.onmessage({ data: m.t === 'run' ? { ...m, base: local, index: fileURLToPath(local) } : m }); }
+        // The CDN stands in for the local copy; index must be a file path here.
+        postMessage(m) { this.inner.onmessage({ data: { ...m, base: local, index: fileURLToPath(local) } }); }
         terminate() { this.dead = true; }
       };
     },
@@ -591,4 +662,37 @@ else:
   await until(() => /program finished/.test(doc.getElementById('out').textContent), 'the cancelled program to finish');
   assert.match(doc.getElementById('out').textContent, /→ no file chosen\s+cancelled/);
   window.close();
+});
+
+/* ------------------------------------------------------- 6. the samples */
+
+test('every sample app in samples/python really runs', async () => {
+  const dir = join(ROOT, 'samples', 'python');
+  const files = readdirSync(dir).filter((name) => name.endsWith('.py')).sort();
+  assert.ok(files.length >= 8, 'the samples are there');
+  const csv = 'name,total\nA,3\nB,5\nC,7\n';
+  const png = { name: 'one.png', mime: 'image/png', data: Buffer.from('png bytes').toString('base64') };
+
+  for (const file of files) {
+    const code = readFileSync(join(dir, file), 'utf8');
+    // Enough answers for every question each sample asks, and a file for the
+    // two that take one.
+    const answers = ['Zed', '12 * 3', 'q', 'first line', '', '42', 'Islamabad', 'Python', 'note'];
+    const filesFor = file.includes('image-to-pdf') ? [[png]] : file.includes('csv-report') ? [[{ name: 'data.csv', mime: 'text/csv', data: Buffer.from(csv).toString('base64') }]] : [];
+    const r = await runProgram(code, answers, filesFor);
+    // matplotlib, Pillow and pandas are wheels that cannot be fetched here
+    // (the CDN is blocked); the terminal says which one could not be loaded.
+    const offline = /No module named '(matplotlib|PIL|pandas)'|Failed to load/.test(r.out);
+    if (offline) {
+      assert.match(file, /0[4-7]-/, `${file} needs a bundled package: ${r.out}`);
+      continue;
+    }
+    assert.equal(r.status, 'done', `${file}: ${r.out}`);
+    assert.doesNotMatch(r.out, /Traceback/, `${file} ran cleanly: ${r.out}`);
+    assert.ok(r.out.trim().length > 0, `${file} printed something`);
+    if (file.includes('notes-to-pdf') || file.includes('csv-report')) {
+      assert.ok(r.produced, `${file} handed a file back`);
+    }
+    if (file.includes('matplotlib')) assert.ok(r.events.length > 0);
+  }
 });

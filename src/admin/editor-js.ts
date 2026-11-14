@@ -1,3 +1,5 @@
+import { PYTHON_SAMPLES } from './py-samples';
+
 export const EDITOR_JS = `<script>
 (function(){
   var form=document.getElementById('edit');
@@ -1182,6 +1184,8 @@ export const EDITOR_JS = `<script>
   // block that is selected straight away so its anchors are ready to drag.
   var pyDialog=document.getElementById('python-dialog'),pyEditing=null;
   var PY_MAX=300000;
+  // The sample programs the tools ship (samples/python); see PY_SAMPLES above.
+  var PY_SAMPLES=JSON.parse(document.getElementById('python-samples')?.textContent||'[]');
   function pyEl(id){return document.getElementById('python-'+id)}
   function pyWarn(){
     var list=pyEl('warnings');
@@ -1240,6 +1244,24 @@ export const EDITOR_JS = `<script>
       reader.readAsText(file);
     });
     pyEl('code').addEventListener('input',pyWarn);
+    // A worked example answers "what is supposed to work here?" without the
+    // writer hunting for a file: pick one, it lands in the code box, editable.
+    var sampleSelect=pyEl('sample');
+    if(sampleSelect){
+      sampleSelect.innerHTML='<option value="">Start from a sample…</option>'+PY_SAMPLES.map(function(sample){
+        return '<option value="'+esc(sample.name)+'">'+esc(sample.title)+'</option>'
+      }).join('');
+      sampleSelect.addEventListener('change',function(){
+        var chosen=PY_SAMPLES.filter(function(sample){return sample.name===sampleSelect.value})[0];
+        if(!chosen)return;
+        pyEl('code').value=chosen.code;
+        pyEl('file-name').textContent=chosen.name+' \\u00b7 '+chosen.code.split('\\n').length+' lines';
+        pyEl('file-name').dataset.name=chosen.name;
+        pyFail('');pyWarn();
+        sampleSelect.value='';
+        pyEl('code').focus();
+      });
+    }
     pyEl('width').addEventListener('input',pyArea);
     pyEl('height').addEventListener('input',pyArea);
     document.getElementById('insert-python').addEventListener('click',function(){
