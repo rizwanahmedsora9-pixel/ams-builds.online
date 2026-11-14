@@ -58,7 +58,7 @@
     themeBtn.addEventListener('click', function () {
       var next = isDark() ? 'light' : 'dark';
       root.setAttribute('data-theme', next);
-      try { localStorage.setItem('example1-theme', next); } catch (e) {}
+      try { localStorage.setItem('site-theme', next); } catch (e) {}
     });
   }
 

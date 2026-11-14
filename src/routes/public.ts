@@ -17,10 +17,8 @@ import { landingEnabled, landingPlayShown, landingScreenMarkup, parseLandingAudi
 import { readTokens, schemeMeta } from '../lib/tokens';
 import { titleFor } from '../lib/origin';
 import { publicPageHierarchy, type PublicPageHierarchy } from '../lib/page-hierarchy';
-import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
-import { bundledThemeAsset } from '../lib/bundled-theme';
-import { APP_VERSION } from '../lib/version';
-import { assetMime, cleanAssetPath, isRefusedAsset } from '../lib/theme-manifest';
+import { getThemeAsset, loadTheme } from '../lib/theme-store';
+import { cleanAssetPath, isRefusedAsset } from '../lib/theme-manifest';
 
 import { PYAPP_RUNNER_CSP, PYAPP_RUNNER_PATH, pythonRunnerPage } from '../lib/pyapp';
 
@@ -87,17 +85,11 @@ site.get('/theme-assets/:slug/:path{.+}', async (c) => {
   const raw = c.req.param('path');
   const path = cleanAssetPath(raw);
   if (!path || isRefusedAsset(path)) return c.notFound();
-  let file = await getThemeAsset(c.env, slug, path);
-  let cache = 'public, max-age=31536000, immutable';
-  if (!file) {
-    // The bundled default theme always has its files, installed or not (it is
-    // also the fallback when another theme fails to render).
-    const bundled = bundledThemeAsset(slug, path);
-    if (!bundled) return c.notFound();
-    file = { body: bundled.data.slice().buffer as ArrayBuffer, contentType: bundled.mime, etag: `bundled-${APP_VERSION}-${bundled.data.byteLength}` };
-    // Not immutable: an installed (possibly edited) copy may take this URL over.
-    cache = 'public, max-age=300';
-  }
+  // Only stored files are served: the app ships no theme of its own, so there
+  // is nothing to answer from memory when the file store has no copy.
+  const file = await getThemeAsset(c.env, slug, path);
+  if (!file) return c.notFound();
+  const cache = 'public, max-age=31536000, immutable';
   const etag = `"${file.etag}"`;
   const headers = new Headers({
     'Content-Type': file.contentType,
@@ -356,7 +348,7 @@ site.get('*', async (c) => {
 
   // Signed-in users always get fresh pages; ?preview=1 additionally shows drafts
   // to them, and &theme=slug renders the page with any installed theme (the
-  // editor's "Preview in theme" menu and the theme store use this).
+  // editor's "Preview in theme" menu and the theme preview screen use this).
   const hasSession = !!getCookie(c, SESSION_COOKIE);
   const signedIn = hasSession ? await sessionUser(c, c.var.cfg) : null;
   if (url.searchParams.has('theme') && (!signedIn || !can(signedIn, 'manage_themes'))) {
@@ -562,14 +554,6 @@ async function themeValues(env: Env, slug: string): Promise<Record<string, strin
   }
   entry.bySlug.set(slug, out);
   return out;
-}
-
-/** Uploads a theme asset from the panel (theme manager). Exported for tests. */
-export async function storeThemeAsset(env: Env, slug: string, path: string, data: ArrayBuffer): Promise<boolean> {
-  const mime = assetMime(path);
-  if (!mime || isRefusedAsset(path)) return false;
-  await putThemeAsset(env, slug, path, data, mime);
-  return true;
 }
 
 export default site;

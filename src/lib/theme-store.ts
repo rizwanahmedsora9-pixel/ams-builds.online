@@ -259,8 +259,9 @@ function sortTemplates(a: string, b: string): number {
 }
 
 /**
- * The active theme, or the bundled one. This lives here (rather than in
- * render.ts) so the panel and the renderer share one definition.
+ * The active theme, or the blank fallback when a site has no theme of its own.
+ * This lives here (rather than in render.ts) so the panel and the renderer share
+ * one definition.
  */
 export async function activeThemeFor(env: Env): Promise<ThemeBundle> {
   const { defaultTheme } = await import('../themes/default');
@@ -271,7 +272,7 @@ export async function activeThemeFor(env: Env): Promise<ThemeBundle> {
       if (theme && (theme.templates.base || theme.manifest.parent)) return theme;
     }
   } catch {
-    /* no themes table yet: the bundled theme */
+    /* no themes table yet: the blank fallback */
   }
   return defaultTheme;
 }

@@ -30,7 +30,11 @@ which customization settings and menu locations it supports.
 - The CSS/JS and inline icon examples are theme-owned, but the CMS may generate
   markup (including widget and page hierarchy output) that the theme styles.
 
-`src/themes/example1/` is an optional learning theme derived from Ahmed Pro.
-It demonstrates a top navigation, theme-defined header/footer, inline icon
-symbols, a stylesheet, responsive behavior and declared settings. See its README
-and `docs/theme-developer-guide.md` for package structure and development.
+**The CMS ships no theme.** A site with none renders bare, unstyled HTML until its
+owner uploads a package and activates it, so nothing here depends on a bundled
+design. A complete example package — top navigation, theme-defined header and
+footer, inline icon symbols, a stylesheet, a script, responsive behavior and
+declared settings — lives in `tests/fixtures/site-theme/`, which the test suite
+uploads; it is test data, not a product theme. See
+`docs/theme-developer-guide.md` and `docs/theme-package-spec.md` for package
+structure and development.

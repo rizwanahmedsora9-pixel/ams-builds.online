@@ -9,6 +9,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { ADMIN, TARGET, createHarness } from './helpers.mjs';
+import { FIXTURE, fixtureFiles } from './fixture-theme.mjs';
 import { JSDOM, VirtualConsole } from 'jsdom';
 
 let admin = '/admin-panel';
@@ -98,6 +99,16 @@ const themeId = async (name) => {
   return Number(row[1]);
 };
 
+/** Uploads the fixture package and activates it: the site's first theme. */
+async function installTheme() {
+  const uploaded = await uploadTheme(`${THEME.slug}.zip`, makeZip(fixtureFiles()));
+  // The flash quotes the name a person gave it: Theme “Site Theme” v1.0.0 installed · 2 assets.
+  assert.match(uploaded.location, new RegExp(`${THEME.name}” v${THEME.version.replace(/\./g, '\\.')} installed`), uploaded.location);
+  const id = await themeId(THEME.name);
+  await adminPost(`/themes/${id}/activate`, {});
+  return id;
+}
+
 // Reads the primary menu: the top-level links of the header's site-nav. A
 // dropdown's links (inside `.subnav`) are sub-menu items, not menu entries.
 const nav = (htmlText) => {
@@ -122,8 +133,11 @@ const INSTALL = {
   title: 'E2E Test Site', domain: 'example.com', slug: 'admin-panel',
 };
 const state = {};
-// The one theme the app ships: the installer activates it and the store lists it.
-const BUNDLED = { slug: 'ahmed-pro-theme', name: 'Ahmed Pro Theme' };
+// The app ships no theme: a new site is a clean slate, bare and unstyled, until
+// its owner uploads one. The suite does exactly that — it uploads the package in
+// tests/fixtures/ and activates it — so every test after that point exercises the
+// theme engine against a real design instead of against nothing.
+const THEME = FIXTURE;
 
 test('1. fresh start: storage is healthy and every URL leads to the installer', async () => {
   const health = JSON.parse((await anon('/api/health')).text);
@@ -163,18 +177,22 @@ test('3. installer sets the site up and then locks itself', async () => {
   log('installed; /install now returns 404 for GET and POST');
 });
 
-test('4. public site shows the themed sample home page and caches it', async () => {
+test('4. public site: a clean slate with no theme, and it caches', async () => {
+  // No theme is installed and the app ships none, so the site answers with bare,
+  // unstyled HTML: the sample home page, and nothing that looks like a design.
   const first = await anon('/');
   assert.equal(first.status, 200);
   assert.match(first.text, /<title>E2E Test Site<\/title>/);
   assert.match(first.text, /Welcome to E2E Test Site/);
-  assert.match(first.text, /<a class="nav-link" href="\/blog"/, 'seeded menu is rendered');
+  assert.doesNotMatch(first.text, /<link rel="stylesheet"/, 'no theme, so no stylesheet');
+  assert.doesNotMatch(first.text, /theme-assets\//, 'and no theme file is fetched');
+  assert.doesNotMatch(first.text, /class="nav-link"/, 'the seeded menu exists, but nothing draws it yet');
   assert.equal(first.headers.get('x-cache'), 'MISS');
   assert.equal((await anon('/')).headers.get('x-cache'), 'HIT');
   assert.equal((await anon('/blog')).status, 200);
   assert.equal((await anon('/missing-page')).status, 404);
   assert.equal((await anon('/home')).location, '/', 'home page slug redirects to /');
-  log('home 200 (MISS then HIT), blog 200, unknown page 404');
+  log('no theme: bare home 200 (MISS then HIT), blog 200, unknown page 404');
 });
 
 test('5. admin panel: protected, CSRF enforced, login works', async () => {
@@ -201,6 +219,23 @@ test('5. admin panel: protected, CSRF enforced, login works', async () => {
   assert.match(dash.text, /<b>8<\/b><span>Posts/);
   assert.match(dash.text, /<b>0<\/b><span>Media/);
   log('anonymous access redirected, missing/foreign CSRF rejected, logged in by email, dashboard 14/8/0');
+});
+
+test('5a. the first theme: a package uploads, activates and dresses the site', async () => {
+  await installTheme();
+  const themed = await anon('/');
+  assert.match(themed.text, /<a class="nav-link" href="\/blog"/, 'the seeded menu is drawn now');
+  assert.match(
+    themed.text,
+    new RegExp(`<link rel="stylesheet" href="/theme-assets/${THEME.slug}/style\\.css\\?v=${THEME.version}"`),
+    'the stylesheet is one of the theme\'s own served assets',
+  );
+  assert.match(themed.text, /<section class="hero">/, 'and the theme\'s templates render');
+
+  const manager = (await get(`${admin}/themes`)).text;
+  assert.match(manager, new RegExp(`data-theme-slug="${THEME.slug}"`), 'the uploaded theme is listed');
+  assert.doesNotMatch(manager, /\/themes\/store\//, 'the panel has no theme store: nothing ships to install');
+  log('the clean slate becomes a themed site the moment a package is uploaded and activated');
 });
 
 test('6. pages: create, publish, edit, cache is invalidated', async () => {
@@ -717,7 +752,7 @@ test('10f. the landing screen wears the active theme, and Enter site sits on the
     return { html, css, vars };
   };
 
-  // The bundled theme: its light palette, not a hard-coded navy.
+  // The active theme: its light palette, not a hard-coded navy.
   const nova = await themed();
   assert.equal(nova.vars.bg, '#f6f8fc', "the screen takes the active theme's background");
   assert.equal(nova.vars.fg, '#111c2e', 'and its text colour');
@@ -936,17 +971,17 @@ test('12a1. pages: parent/child hierarchy, hidden header children, and public br
   log('page tree, parent picker, cycle guard, automatic child cards, breadcrumbs, and menu hiding work');
 });
 
-test('12b. themes: the bundled theme previews the real site and a custom upload round-trips', async () => {
+test('12b. themes: an installed theme previews the real site and a custom upload round-trips', async () => {
   const manager = await get(`${admin}/themes`);
   const activeRows = [...manager.text.matchAll(/<li style="flex-wrap:wrap" data-theme-id="(\d+)" data-theme-slug="([^"]+)">([\s\S]*?)<\/li>/g)];
   const activeRow = activeRows.find((row) => /badge published/.test(row[3]));
   assert.ok(activeRow, 'an active installed theme exists');
-  assert.equal(activeRow[2], BUNDLED.slug, 'the active theme is the bundled one');
+  assert.equal(activeRow[2], THEME.slug, 'the active theme is the one the suite uploaded');
 
-  // The store card offers a live preview of the real site.
-  const previewPanel = await get(`${admin}/themes/preview/${BUNDLED.slug}`);
+  // The theme's own screen offers a live preview of the real site.
+  const previewPanel = await get(`${admin}/themes/preview/${THEME.slug}`);
   assert.match(previewPanel.text, /id="theme-preview-frame"/);
-  assert.match((await get(`/?preview=1&theme=${BUNDLED.slug}`)).text, /class="hero"/, 'the preview renders existing CMS data');
+  assert.match((await get(`/?preview=1&theme=${THEME.slug}`)).text, /class="hero"/, 'the preview renders existing CMS data');
 
   // A custom theme uploads, appears in the registry, and can be switched to.
   const custom = {
@@ -1040,16 +1075,21 @@ test('12c. themes: upload JSON and zip, activate, replace, download, delete', as
   assert.equal(manage.status, 200);
   assert.match(manage.text, /data-asset|\/theme-assets\/zip-theme\/style\.css/, 'the manager lists the stylesheet asset');
   assert.match((await get(`${admin}/themes/zip-theme/validate`)).text, /No problems found|Warning/, 'the validator reports on an installed theme');
-  const baseId = await themeId(BUNDLED.name);
+  const baseId = await themeId(THEME.name);
   await adminPost(`/themes/${baseId}/activate`, {});
   assert.match((await anon('/')).text, /class="site-header"/);
   assert.match(decodeURIComponent((await adminPost(`/themes/${zipId}/delete`, {})).location), /deleted/);
   assert.match(decodeURIComponent((await adminPost(`/themes/${jsonId}/delete`, {})).location), /deleted/);
-  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only the bundled theme is left');
+  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only the suite\'s theme is left');
   log('5 bad uploads rejected with reasons; JSON + zip themes installed, activated, replaced live, downloaded, deleted');
 });
 
-test('12b1. the bundled theme: hero home, clean pages, and settings that reach the page', async () => {
+test('12b1. the installed theme: hero home, clean pages, and settings that reach the page', async () => {
+  // A page for the theme to lay out. The installer seeds only the home page, so
+  // this case states its own preconditions.
+  const aboutSaved = await adminPost('/pages/save', { title: 'About', slug: 'about', body: '<h2>About us</h2><p>Who we are and what we build.</p>', status: 'published' });
+  assert.equal(aboutSaved.status, 303, 'the About page is created');
+
   // The home page: a full hero, post cards, the header menu and the footer,
   // with nothing left unrendered.
   const home = await anon('/');
@@ -1099,38 +1139,21 @@ test('12b1. the bundled theme: hero home, clean pages, and settings that reach t
   assert.match((await anon('/')).text, /<div class="topbar">/, 'the defaults are back');
 });
 
-test('12c. theme store: bundled and example themes are offered', async () => {
-  const store = await get(`${admin}/themes`);
-  // `<h3>Name <small …` — the version suffix is not part of the name.
-  const storeCards = (html) => [...html.matchAll(/<h3>([^<]+?)\s*<small/g)].map((m) => m[1]);
-  assert.deepEqual(storeCards(store.text), [BUNDLED.name, 'Example 1'], 'both themes appear in the store');
-  // It is already installed (the installer activates it), and its card shows the
-  // screenshot the package ships.
-  assert.match(store.text, new RegExp(`class="store-item__shot" style="background-image:url\\(/theme-assets/${BUNDLED.slug}/screenshot\\.png`));
-  const shot = await anon(`/theme-assets/${BUNDLED.slug}/screenshot.png`);
-  assert.equal(shot.status, 200);
-  assert.equal(shot.headers.get('content-type'), 'image/png');
-  // Any install form on the page targets it only (an active theme shows no
-  // install button of its own; the install route is exercised below).
-  const installLinks = [...store.text.matchAll(/store\/([a-z0-9-]+)\/install/g)].map((m) => m[1]);
-  assert.ok(installLinks.every((slug) => [BUNDLED.slug, 'example1'].includes(slug)), 'only the bundled and example themes are offered');
-  assert.doesNotMatch(store.text, /AMS Nova|store\/nova\//, 'the previous bundled theme is gone');
-  // The optional study theme can be installed, activated and exported; the
-  // public site changes theme while the panel stays available.
-  await adminPost('/themes/store/example1/install', { activate: 1 });
-  const exampleHome = await anon('/');
-  assert.match(exampleHome.text, /<header class="site-header">/);
-  assert.match(exampleHome.text, /\/theme-assets\/example1\/style\.css/);
-  const installed = await get(`${admin}/themes`);
-  const exampleDownload = installed.text.match(/href="([^" ]*\/themes\/\d+\/download)"[^>]*>Download<\/a>[\s\S]*?/);
-  assert.ok(exampleDownload, 'installed theme has an export link');
-  assert.equal((await get(exampleDownload[1])).status, 200, 'theme zip can be downloaded');
+test('12c. no theme store: one uploaded theme renders every page kind from a single shell', async () => {
+  const manager = await get(`${admin}/themes`);
+  assert.doesNotMatch(manager.text, /\/themes\/store\/|data-store-theme=|store-item__shot/, 'the panel ships no themes and offers no one-click installs');
+  assert.doesNotMatch(manager.text, /Ahmed Pro Theme|Example 1|AMS Nova/, 'no bundled design is listed');
+  assert.match(manager.text, /Upload a theme/, 'owners bring their own');
+  assert.equal((await adminPost('/themes/store/nope/install', {})).status, 404, 'and the old install route is gone');
 
-  // Reinstalling keeps it the active theme.
-  assert.match((await adminPost(`/themes/store/${BUNDLED.slug}/install`, { activate: 1 })).location, new RegExp(`${BUNDLED.name} is now your active theme`));
-  assert.match((await anon('/')).text, /class="hero"/, 'it renders its hero after (re)activation');
+  // What is installed can be taken back out as a package.
+  const download = manager.text.match(/href="([^" ]*\/themes\/\d+\/download)"[^>]*>Download<\/a>/);
+  assert.ok(download, 'an installed theme has an export link');
+  assert.equal((await get(download[1])).status, 200, 'theme zip can be downloaded');
 
-  // Every page kind renders from the one shell, with no leaked tags.
+  // Every page kind renders from the one shell, with no leaked tags. The About
+  // page and the fixture theme are left behind by the cases above; the posts and
+  // the blog archive were seeded by the earlier content cases.
   const paths = ['/', '/blog', `/${new Date().getUTCFullYear()}/${String(new Date().getUTCMonth() + 1).padStart(2, '0')}/launch-day-more`, '/about', '/search?q=launch', '/nowhere'];
   for (const path of paths) {
     const res = await anon(path);
@@ -1140,21 +1163,19 @@ test('12c. theme store: bundled and example themes are offered', async () => {
     assert.doesNotMatch(res.text, /\{\{/, `${path} has no unrendered template tags`);
     assert.doesNotMatch(res.text, /https?:\/\/(?!127\.0\.0\.1|example\.)/, `${path} loads nothing external`);
     // The stylesheet and the script are the theme's own served assets…
-    assert.match(res.text, new RegExp(`<link rel="stylesheet" href="/theme-assets/${BUNDLED.slug}/style\\.css\\?v=`), `${path} links the theme stylesheet`);
-    assert.match(res.text, new RegExp(`<script defer src="/theme-assets/${BUNDLED.slug}/static/js/theme\\.js"></script>`), `${path} loads the theme script`);
+    assert.match(res.text, new RegExp(`<link rel="stylesheet" href="/theme-assets/${THEME.slug}/style\\.css\\?v=`), `${path} links the theme stylesheet`);
+    assert.match(res.text, new RegExp(`<script defer src="/theme-assets/${THEME.slug}/static/js/theme\\.js"></script>`), `${path} loads the theme script`);
     // …and every inline script (the colour-scheme bootstrap) carries the
     // per-response CSP nonce.
     for (const tag of res.text.match(/<script\b[^>]*>/g) || []) {
       assert.match(tag, /\bnonce="|\bsrc="\/theme-assets\//, `${path} only ships nonce-stamped or same-origin scripts`);
     }
   }
-  const script = await anon(`/theme-assets/${BUNDLED.slug}/static/js/theme.js`);
+  const script = await anon(`/theme-assets/${THEME.slug}/static/js/theme.js`);
   assert.equal(script.status, 200);
   assert.match(script.headers.get('content-type'), /^text\/javascript/);
-  assert.match(script.text, /ahmed-theme/, 'the script is the package file');
-
-  assert.match((await adminPost('/themes/store/nope/install', {})).text, /not in the store/);
-  log('the store lists one theme; it reinstalls, activates, and renders every page from one shell');
+  assert.match(script.text, /site-theme/, 'the script is the package file');
+  log('no store and no bundled themes; one uploaded theme renders every page kind from one shell');
 });
 
 test('12d. comments are gone: no form on a post, no admin screen, and posting is refused', async () => {
@@ -1660,12 +1681,12 @@ test('17. the editor markup for images, links, blocks and breaks survives the sa
   const slug = ((await get(`${admin}/posts/${id}`)).text.match(/name="slug" value="([^"]*)"/) || [])[1];
   assert.ok(slug, 'the post has a slug');
   // The permalink style and the active theme are whatever earlier tests left
-  // behind, so ask the site rather than assuming /blog/ and the bundled theme.
+  // behind, so ask the site rather than assuming /blog/ and the installed theme.
   const url = JSON.parse((await anon(`/api/posts/${slug}`)).text).url;
   // Render with a known theme: earlier tests leave a fixture theme active, and
   // this test is about the saved markup, not about which theme is current.
-  const page = await get(`${url}?preview=1&theme=${BUNDLED.slug}`);
-  assert.equal(page.status, 200, `${url} renders in the bundled theme`);
+  const page = await get(`${url}?preview=1&theme=${THEME.slug}`);
+  assert.equal(page.status, 200, `${url} renders in the installed theme`);
 
   // Alignment + width are the two things the editor's bar writes.
   assert.match(page.text, /<figure class="image-block align-left" style="width:35%">/);
@@ -1683,8 +1704,8 @@ test('17. the editor markup for images, links, blocks and breaks survives the sa
   assert.match(page.text, /<hr class="page-break">/);
   assert.match(page.text, /<div class="html-block"><p>Custom block<\/p><\/div>/);
   assert.match(page.text, /youtube-nocookie.com\/embed\/dQw4w9WgXcQ/);
-  // The bundled theme styles the break and the figure placement.
-  const themeCss = (await anon(`/theme-assets/${BUNDLED.slug}/style.css`)).text || '';
+  // The installed theme styles the break and the figure placement.
+  const themeCss = (await anon(`/theme-assets/${THEME.slug}/style.css`)).text || '';
   assert.match(themeCss, /hr\.page-break\s*\{\s*border-top-style:\s*dashed/);
   assert.match(themeCss, /figure\.image-block\s*\{\s*margin:\s*1\.5em auto/);
 
@@ -1792,8 +1813,8 @@ test('17b. page-specific posts: assign to one or more pages/sub-pages and hide f
   const hubPage = await anon('/guides-hub');
   assert.doesNotMatch(hubPage.text, /Exclusive Subpage Post/, 'parent page does not show posts assigned only to its children');
 
-  // Switch back to the bundled theme so /blog and /category/* have full archive templates.
-  const novaId = await themeId(BUNDLED.name);
+  // Switch back to the suite's theme so /blog and /category/* have full archive templates.
+  const novaId = await themeId(THEME.name);
   await adminPost(`/themes/${novaId}/activate`, {});
 
   const blogIndex = await anon('/blog');
@@ -1819,9 +1840,9 @@ test('17b. page-specific posts: assign to one or more pages/sub-pages and hide f
   assert.equal(apiSub.total, 1);
   assert.equal(apiSub.posts[0].slug, 'exclusive-subpage-post');
 
-  // Direct post URL still works and links back to the assigned page in the bundled theme.
+  // Direct post URL still works and links back to the assigned page in the installed theme.
   const postView = JSON.parse((await anon('/api/posts/exclusive-subpage-post')).text);
-  const single = await get(`${postView.url}?preview=1&theme=${BUNDLED.slug}`);
+  const single = await get(`${postView.url}?preview=1&theme=${THEME.slug}`);
   assert.equal(single.status, 200);
   assert.match(single.text, /Only on selected sub-pages\./);
   assert.match(single.text, /Back to (Android|Python) Subpage/);

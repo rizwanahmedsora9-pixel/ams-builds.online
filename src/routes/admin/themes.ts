@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, Ctx } from '../../types';
 import { can } from '../../lib/auth';
-import { bumpCache, getSettings, setSettings, type Settings } from '../../lib/config';
+import { bumpCache } from '../../lib/config';
 import { MAX_THEME_ASSET, MAX_THEME_UPLOAD, ThemeError, readUpload, saveTheme } from '../../lib/themes';
 import {
   MAX_ASSETS_PER_THEME, assetMime, cleanAssetPath, isRefusedAsset, parseManifest, resolveSettings, settingDefaults,
@@ -21,10 +21,6 @@ import { hasTable } from '../../lib/schema';
 import { inspectTemplate } from '../../lib/template';
 import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
 import { card, emptyState, notice } from '../../admin/components';
-import { storeThemes, type StoreTheme } from '../../themes';
-
-/** The one bundled theme: the default, and the fallback. */
-const bundledTheme = storeThemes[0];
 import { themeFailureFor } from '../../lib/render';
 import { clearThemeValueCache } from '../public';
 
@@ -37,62 +33,6 @@ const guard = async (c: Ctx, next: () => Promise<void>) => {
 };
 themes.use('/themes', guard);
 themes.use('/themes/*', guard);
-
-/**
- * A theme that was edited in the panel differs from the store package it came
- * from. Remember the fingerprint of the store files when they were installed, so
- * an update can tell "you changed this" from "the store changed this" instead of
- * silently overwriting someone's work.
- */
-const storeStampKey = (slug: string): string => `theme_store_stamp_${slug}`;
-
-function installedFingerprint(st: StoreTheme): string {
-  const payload = JSON.stringify([st.version, st.templates, st.partials ?? {}, st.css]);
-  let hash = 5381;
-  for (let i = 0; i < payload.length; i++) hash = ((hash * 33) ^ payload.charCodeAt(i)) >>> 0;
-  return hash.toString(36);
-}
-
-/** Which files of an installed theme differ from the store package of the same slug. */
-function locallyEditedFiles(st: StoreTheme, theme: StoredTheme): string[] {
-  const changed: string[] = [];
-  for (const [name, body] of Object.entries(st.templates)) if (theme.templates[name] !== body) changed.push(`${name}.html`);
-  for (const [name, body] of Object.entries(st.partials ?? {})) if ((theme.partials ?? {})[name] !== body) changed.push(`partials/${name}.html`);
-  if (theme.css.trim() !== st.css.trim()) changed.push('style.css');
-  return changed;
-}
-
-const STOPWORDS = new Set(['theme', 'ams', 'the', 'and']);
-
-/** A store name and an installed name can differ by a suffix; match them loosely. */
-const storeNameKey = (name: string): string =>
-  name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter((w) => w && !STOPWORDS.has(w)).join('-');
-
-/** A slug that no theme has yet, derived from a name. */
-function uniqueSlug(name: string, taken: Set<string>): string {
-  const base = slugify(name).replace(/-+/g, '-').slice(0, 32) || 'theme';
-  if (!taken.has(base)) return base;
-  for (let n = 2; n < 100; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
-  return `${base}-${Date.now().toString(36)}`;
-}
-
-/**
- * Whether the theme installed under `slug` was edited in the panel since it was
- * installed from the store, and which files changed. Two signals, both cheap:
- * the name matches a store theme (which also catches a theme saved as a copy),
- * and the package fingerprint recorded at install time no longer matches the
- * installed files.
- */
-function storeConflict(c: { env: Parameters<typeof getSettings>[0]; settings: Settings }, slug: string, theme: StoredTheme): { store: StoreTheme; files: string[] } | null {
-  const match = storeThemes.find((st) => st.slug === slug)
-    ?? storeThemes.find((st) => storeNameKey(st.name) === storeNameKey(theme.name));
-  if (!match) return null;
-  const files = locallyEditedFiles(match, theme);
-  const stamp = c.settings[storeStampKey(slug)] ?? '';
-  const storeChanged = stamp !== '' && stamp !== installedFingerprint(match);
-  if (!files.length && !storeChanged) return null;
-  return { store: match, files };
-}
 
 const fmtSize = (n: number): string => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 
@@ -135,11 +75,11 @@ themes.get('/themes', async (c) => {
 
   return layout(c, 'Themes', html`
 <h1>Themes</h1>
-${failure ? notice(html`<b>${failure.slug}</b> failed to render, so the site is falling back to ${bundledTheme.name}. Check its templates in <a href="${base}/themes/${encodeURIComponent(failure.slug)}/edit">Edit</a> — the message was “${failure.fail!.message}”.`, { tone: 'danger', title: 'Theme failed' }) : ''}
+${failure ? notice(html`<b>${failure.slug}</b> failed to render, so visitors are getting the blank fallback: unstyled content until this is fixed. Check its templates in <a href="${base}/themes/${encodeURIComponent(failure.slug)}/edit">Edit</a> — the message was “${failure.fail!.message}”.`, { tone: 'danger', title: 'Theme failed' }) : ''}
 ${v2 ? '' : ''}
 ${rows.some((t) => t.active)
   ? ''
-  : notice(html`No theme is active. The site uses a built-in fallback until you upload and activate your own theme.`, { tone: 'warn' })}
+  : notice(html`No theme is active. Until you upload and activate one, every page is bare, unstyled HTML — a clean slate, so the theme you install is the only thing deciding how the site looks.`, { tone: 'warn' })}
 
 <h2 style="margin-top:1.4rem">Installed themes</h2>
 <div class="card">
@@ -206,71 +146,6 @@ async function activate(c: Ctx, where: 'id' | 'slug', value: string | number, no
   ]);
   await bumpCache(c.env, c.var.cfg);
 }
-
-themes.post('/themes/store/:slug/install', async (c) => {
-  const stored = storeThemes.find((t) => t.slug === c.req.param('slug'));
-  if (!stored) return errorPage(c, 404, 'That theme is not in the store.');
-  const existing = await loadTheme(c.env, { slug: stored.slug });
-  const settings = await getSettings(c.env);
-  const conflict = existing ? storeConflict({ env: c.env, settings }, stored.slug, existing) : null;
-  const choice = String(c.var.form.get('conflict') ?? '');
-
-  // Three answers to "the store has a newer package and you have edited your copy".
-  if (conflict && conflict.files.length) {
-    if (choice === 'keep') {
-      // Record that the store moved on, so the card stops nagging, but leave the
-      // installed files alone.
-      await setSettings(c.env, { ...settings, [storeStampKey(stored.slug)]: installedFingerprint(stored) });
-      return go(c, '/themes', { ok: `Kept your edits to ${stored.slug}. v${stored.version} is available whenever you want it — the store copy is untouched.` });
-    }
-    if (choice === 'copy') {
-      // Freeze the edited theme under a name of its own, then take the store's.
-      const copyName = `${existing!.name} (mine)`.slice(0, 60);
-      const { results: usedSlugs } = await c.env.DB.prepare('SELECT slug FROM themes').all<{ slug: string }>();
-      const copySlug = uniqueSlug(copyName, new Set(usedSlugs.map((r) => r.slug)));
-      const copyManifest = {
-        ...existing!.manifest, name: copyName, slug: copySlug, version: existing!.version,
-        changelog: [{ version: existing!.version, notes: `Copy of ${stored.name} made in the panel.` }],
-      };
-      await saveTheme(c.env, {
-        manifest: copyManifest, templates: existing!.templates, partials: existing!.partials ?? {},
-        css: existing!.css, assets: [], skipped: [],
-      });
-      await audit(c, 'installed', 'theme', `Saved your edits to “${existing!.name}” as “${copyName}”`, copySlug);
-    }
-    // `replace`, or a request with no choice, falls through: the snapshot below is
-    // what makes it reversible.
-  }
-  if (existing) await recordThemeVersion(c.env, existing, { note: conflict?.files.length ? `Before store update (replaced ${conflict.files.join(', ')})` : 'Before store update', authorId: c.var.user.id });
-  try {
-    await saveTheme(c.env, { ...stored, assets: [], skipped: [] });
-  } catch (err) {
-    if (err instanceof ThemeError) return go(c, '/themes', { err: err.message });
-    throw err;
-  }
-  // A store theme's stylesheet ships with the app, not as an uploaded asset.
-  // Remember what the store package looked like when it landed, so a later edit
-  // can be told apart from the store moving on.
-  await setSettings(c.env, { ...settings, [storeStampKey(stored.slug)]: installedFingerprint(stored) });
-  await putThemeAsset(c.env, stored.slug, 'style.css', new TextEncoder().encode(stored.css).buffer as ArrayBuffer, 'text/css; charset=utf-8');
-  await indexAsset(c.env, stored.slug, { path: 'style.css', mime: 'text/css; charset=utf-8', data: new TextEncoder().encode(stored.css) });
-  // Files the manifest cannot describe (the screenshot) are written here, so an
-  // installed store theme matches what a zip upload of the same theme would be.
-  for (const file of stored.packageFiles ?? []) {
-    const clean = cleanAssetPath(file.path);
-    if (!clean) continue;
-    await putThemeAsset(c.env, stored.slug, clean, file.data.slice().buffer as ArrayBuffer, file.mime);
-    await indexAsset(c.env, stored.slug, { path: clean, mime: file.mime, data: file.data });
-  }
-  if (c.var.form.get('activate') === '1' || c.req.query('activate') === '1') {
-    await activate(c, 'slug', stored.slug, 'Before store install');
-    await audit(c, existing ? 'updated' : 'installed', 'theme', `${existing ? 'Reinstalled' : 'Installed'} theme “${stored.name}” v${stored.version}`, stored.slug);
-    await audit(c, 'activated', 'theme', `Activated theme “${stored.name}”`, stored.slug);
-    return go(c, '/themes', { ok: `${stored.name} is now your active theme.` });
-  }
-  await bumpCache(c.env, c.var.cfg);
-  return go(c, '/themes', { ok: `${stored.name} v${stored.version} installed.` });
-});
 
 themes.post('/themes/:id{[0-9]+}/activate', async (c) => {
   const id = Number(c.req.param('id'));
@@ -359,7 +234,7 @@ themes.get('/themes/new', async (c) => {
 <form method="post" action="${base}/themes/new" class="card">
   ${csrfField(c)}
   <label for="name" style="margin-top:0">Theme name</label>
-  <input type="text" id="name" name="name" required maxlength="60" placeholder="Journal" value="${themeNameSuggestion(c)}">
+  <input type="text" id="name" name="name" required maxlength="60" placeholder="Journal" value="${await themeNameSuggestion(c)}">
   <label for="kind">Starting point</label>
   <select id="kind" name="kind">
     <option value="blank">Blank — layout, page and stylesheet</option>
@@ -372,9 +247,11 @@ themes.get('/themes/new', async (c) => {
 });
 
 /** A name that is not taken, so the form can be submitted as-is. */
-function themeNameSuggestion(c: Ctx): string {
-  void c;
-  const taken = new Set(storeThemes.map((s) => s.slug));
+async function themeNameSuggestion(c: Ctx): Promise<string> {
+  const { results } = await c.env.DB.prepare('SELECT slug FROM themes').all<{ slug: string }>()
+    .catch(() => ({ results: [] as { slug: string }[] }));
+  // `blank` is the fallback's slug, which is never a row but must never be taken.
+  const taken = new Set([...results.map((r) => r.slug), 'blank']);
   for (let i = 1; i < 40; i++) {
     const name = i === 1 ? 'My theme' : `My theme ${i}`;
     if (!taken.has(slugify(name))) return name;
@@ -383,7 +260,7 @@ function themeNameSuggestion(c: Ctx): string {
 }
 
 /** Words that are pages of their own under /themes, never theme slugs. */
-const RESERVED_THEME_SLUGS = ['validate', 'new', 'preview', 'upload', 'store'];
+const RESERVED_THEME_SLUGS = ['validate', 'new', 'preview', 'upload'];
 
 themes.get('/themes/:slug{[a-z0-9-]+}', async (c) => {
   // `/themes/new` and `/themes/validate` are their own screens; a route pattern
@@ -411,7 +288,7 @@ ${theme.active ? html`<p><span class="badge published">Active theme</span> <a cl
       <form method="post" action="${base}/themes/${theme.id}/activate" class="inline">${csrfField(c)}<button class="btn small" type="submit">Activate</button></form>
       <a class="btn ghost small" href="/?preview=1&theme=${encodeURIComponent(slug)}" target="_blank" rel="noopener">Preview on your site</a>
       <a class="btn ghost small" href="${base}/themes/${encodeURIComponent(slug)}/edit">Edit templates</a></p>`}
-${failure ? notice(html`This theme threw while rendering, so visitors saw ${bundledTheme.name} instead. ${failure.message}`, { tone: 'danger', title: 'Render failed' }) : ''}
+${failure ? notice(html`This theme threw while rendering, so visitors saw the blank fallback — unstyled content — instead. ${failure.message}`, { tone: 'danger', title: 'Render failed' }) : ''}
 ${theme.manifest.description ? html`<p class="muted">${theme.manifest.description}</p>` : ''}
 ${theme.manifest.author ? html`<p class="muted">By ${theme.manifest.author}${theme.manifest.homepage ? html` · <a href="${theme.manifest.homepage}" target="_blank" rel="noopener noreferrer">homepage</a>` : ''}</p>` : ''}
 ${parent ? html`<p class="muted">Inherits templates, partials and assets from <a href="${base}/themes/${encodeURIComponent(parent.slug)}">${parent.name}</a>.</p>` : ''}
@@ -1003,27 +880,22 @@ themes.post('/themes/new', async (c) => {
 /* --------------------------------------------------------------- preview */
 
 /**
- * The theme store's live preview: the real site, rendered with a theme that is
- * not (or not yet) active.
- *
- * A store theme that has never been installed has no row and no asset URL, so
- * its stylesheet is served from memory (`preview.css`). An installed theme is
- * served exactly as it would be live. Nothing here activates anything: the
- * renderer takes a bundle for this request only.
+ * A live preview: the real site rendered with a theme that is installed but not
+ * (or not yet) active, so a theme can be tried against real content before it
+ * goes live. Nothing here activates anything — the renderer takes a bundle for
+ * this request only.
  */
-const previewCache = new WeakMap<object, Map<string, StoreTheme>>();
-const storeThemeFor = (slug: string): StoreTheme | undefined => storeThemes.find((t) => t.slug === slug);
-
 themes.get('/themes/preview/:slug', async (c) => {
   const slug = c.req.param('slug');
   const base = c.var.base;
   const from = String(c.req.query('from') || '/themes').slice(0, 200);
   const fresh = String(c.req.query('version') || '').slice(0, 20);
-  const store = storeThemeFor(slug);
   const installed = await loadTheme(c.env, { slug });
-  const name = installed?.name ?? store?.name ?? slug;
-  const version = installed?.version ?? store?.version ?? '';
-  const active = installed ? (await c.env.DB.prepare('SELECT active FROM themes WHERE slug=?').bind(slug).first<{ active: number }>())?.active === 1 : false;
+  if (!installed) return errorPage(c, 404, 'Theme not found.');
+  const row = await c.env.DB.prepare('SELECT id, active FROM themes WHERE slug=?').bind(slug).first<{ id: number; active: number }>();
+  const active = row?.active === 1;
+  const name = installed.name;
+  const version = installed.version;
 
   // Paths the preview frame can show: the home page, the blog, a post, a page.
   const [home, post] = await Promise.all([
@@ -1045,9 +917,9 @@ themes.get('/themes/preview/:slug', async (c) => {
       ${['desktop', 'tablet', 'mobile'].map((d) => html`<a class="btn ${d === 'desktop' ? '' : 'ghost'} small" href="${base}/themes/preview/${encodeURIComponent(slug)}?path=${encodeURIComponent(start)}&from=${encodeURIComponent(from)}#${d}" data-preview-device="${d}">${d}</a>`)}
     </span>
     ${active ? html`<span class="badge published">Active</span>` : html`
-      <form method="post" action="${base}/themes/store/${encodeURIComponent(slug)}/install" class="inline">${csrfField(c)}<button class="btn small" type="submit">${installed ? 'Activate' : 'Install and activate'}</button><input type="hidden" name="activate" value="1"></form>
-      <form method="post" action="${base}/themes/store/${encodeURIComponent(slug)}/install" class="inline">${csrfField(c)}<button class="btn ghost small" type="submit">${installed ? 'Reinstall' : 'Install only'}</button></form>`}
-    <a class="btn ghost small" href="${from}">${t('themes.back_to_store')}</a>
+      <form method="post" action="${base}/themes/${row!.id}/activate" class="inline">${csrfField(c)}<button class="btn small" type="submit">Activate</button></form>
+      <a class="btn ghost small" href="${base}/themes/${encodeURIComponent(slug)}">Manage</a>`}
+    <a class="btn ghost small" href="${base}${from}">${from === '/themes' ? 'Back to themes' : 'Back'}</a>
   </div>
 </div>
 <div class="customizer__preview" data-device="desktop">
@@ -1059,23 +931,15 @@ ${raw(`<script>document.querySelectorAll('[data-preview-device]').forEach(functi
 });
 
 /**
- * A store theme's stylesheet, for the preview of a theme that is not installed.
- * Public only in the sense that publishes nothing private: it is one of the
- * app's own files, selected by a slug that must exist in the store.
+ * An installed theme's stylesheet for the preview frame, uncached so an edit is
+ * visible on the next reload. A theme that is not installed has no file to serve.
  */
 themes.get('/themes/preview/:slug/style.css', async (c) => {
   const slug = c.req.param('slug');
-  const installed = await loadTheme(c.env, { slug });
-  if (installed) {
-    const asset = await getThemeAsset(c.env, slug, 'style.css');
-    if (asset) {
-      const body = asset.body instanceof ArrayBuffer ? asset.body : await new Response(asset.body).arrayBuffer();
-      return new Response(body, { headers: { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' } });
-    }
-  }
-  const store = storeThemeFor(slug);
-  if (!store) return errorPage(c, 404, 'Theme not found.');
-  return new Response(store.css, { headers: { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' } });
+  const asset = await getThemeAsset(c.env, slug, 'style.css');
+  if (!asset) return errorPage(c, 404, 'Theme not found.');
+  const body = asset.body instanceof ArrayBuffer ? asset.body : await new Response(asset.body).arrayBuffer();
+  return new Response(body, { headers: { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' } });
 });
 
 /* -------------------------------------------------------------- download */

@@ -2,6 +2,7 @@
 
 Status: proposal · Target: `0.2.0 → 1.0.0` · Owner: AMS
 Scope: admin panel shell, posts/pages workflow, appearance hub, theme architecture, theme store.
+(The theme store was taken back out in 0.9.0: the CMS ships no themes — see the note on Phase 5.)
 
 ---
 
@@ -449,7 +450,15 @@ criteria over HTTP: an unsaved brand colour and an unsaved theme setting reach t
 else, the save keeps both, the same manifest settings become controls with no code, and a page with its own
 template renders it publicly while a page without one keeps the default.
 
-### Phase 5 — Theme store & lifecycle (6 d) — ✅ shipped in 0.8.0
+### Phase 5 — Theme store & lifecycle (6 d) — ✅ shipped in 0.8.0 · storefront removed in 0.9.0
+
+> **Superseded in part.** The CMS now ships no themes at all, so the storefront half of this phase is
+> gone: no cards to list, no one-click install, no bundled update to offer, and no bundled design to fall
+> back to. A fresh site renders bare, unstyled HTML until its owner uploads a theme and activates it.
+> Everything here about the *lifecycle* still stands — live preview, the in-panel file editor,
+> validate-on-save, `theme_versions` history, rollback, zip export/import and "new theme from a template".
+> The two demonstration themes were never product themes; a complete example package lives in
+> `tests/fixtures/site-theme/` for the test suite to upload.
 
 - **Storefront quality**: real screenshots (`screenshot.png` in the package, rendered via
   `/theme-assets/...`; fall back to a token-generated gradient card if absent), live "Preview" modal

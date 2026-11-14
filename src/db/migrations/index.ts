@@ -6,7 +6,7 @@ import { resetSchemaCache } from '../../lib/schema';
  * by the installer; each entry here upgrades an already-installed database.
  * Append new entries with the next version number - never edit old ones.
  */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 /**
  * A migration statement that must not take the whole batch down.
@@ -155,7 +155,8 @@ const POST_PAGES = [
 
 /**
  * A migration is a list of SQL statements, and optionally a step in code for
- * work SQL alone cannot do (writing a bundled theme's files to the file store).
+ * work SQL alone cannot do (deleting a retired theme's files from the file
+ * store).
  */
 type Migration = { version: number; name: string; statements: string[]; run?: (env: Env) => Promise<void> };
 
@@ -169,19 +170,12 @@ export const migrations: Migration[] = [
   { version: 9, name: 'Page-specific posts', statements: POST_PAGES },
   { version: 10, name: 'Page icons', statements: [tolerant("ALTER TABLE content ADD COLUMN icon TEXT NOT NULL DEFAULT ''")] },
   {
-    // The app ships a single theme now. Sites installed with an earlier bundled
-    // theme switch to it, and the retired bundled themes are removed.
+    // Used to install the bundled theme this release stopped shipping. A site
+    // upgrading from before it reaches version 13 below, which removes every
+    // bundled theme, so this step has nothing left to do.
     version: 11,
-    name: 'Default theme: Ahmed Pro Theme',
+    name: 'Bundled theme (superseded by version 13)',
     statements: [],
-    run: async (env) => {
-      const { adoptDefaultTheme } = await import('../../lib/bundled-theme');
-      await adoptDefaultTheme(env);
-      // Cached pages were rendered by the previous theme.
-      const { getConfig, bumpCache } = await import('../../lib/config');
-      const cfg = await getConfig(env);
-      if (cfg) await bumpCache(env, cfg);
-    },
   },
   {
     // Version 2 used to create the comments table. Comments are gone from the
@@ -196,6 +190,25 @@ export const migrations: Migration[] = [
       'DROP TABLE IF EXISTS comments',
       "DELETE FROM settings WHERE site_id=1 AND key IN ('comments_enabled','comments_require_approval')",
     ],
+  },
+  {
+    // The app ships no themes. Every theme an earlier release bundled — and
+    // installed into the site on the owner's behalf — is removed, so the site is
+    // the same clean slate a new install gets: it renders the blank fallback
+    // until a theme is uploaded and activated. Themes the owner uploaded are not
+    // in that list and are left alone.
+    version: 13,
+    name: 'No bundled themes',
+    statements: [],
+    run: async (env) => {
+      const { clearRetiredThemes } = await import('../../lib/retired-themes');
+      const removed = await clearRetiredThemes(env);
+      if (!removed.length) return;
+      // Cached pages were rendered by a theme that no longer exists.
+      const { getConfig, bumpCache } = await import('../../lib/config');
+      const cfg = await getConfig(env);
+      if (cfg) await bumpCache(env, cfg);
+    },
   },
 ];
 

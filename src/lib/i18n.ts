@@ -51,7 +51,7 @@ export const en: Catalogue = {
   'audit.newer': 'Newer',
 
   // Capabilities
-  'caps.manage_themes': 'Themes and the theme store',
+  'caps.manage_themes': 'Upload, edit and activate themes',
   'caps.manage_appearance': 'Customizer, Identity and Templates',
   'caps.edit_others_posts': "Edit everyone's posts",
   'caps.manage_pages': 'Create and edit pages',
@@ -66,15 +66,11 @@ export const en: Catalogue = {
   'caps.manage_media': 'The media library',
   'caps.write_posts': 'Write and edit own posts',
 
-  // Theme store & lifecycle
+  // Theme lifecycle
   'themes.preview': 'Live preview',
   'themes.preview_hint': 'The real site, rendered with this theme. Nothing is activated.',
-  'themes.back_to_store': 'Back to the theme store',
   'themes.rollback': 'Roll back',
   'themes.rollback_confirm': 'Replace the current files with this snapshot?',
-  'themes.conflict': 'You have local edits to this theme.',
-  'themes.conflict_keep': 'Save my changes as a copy, then update',
-  'themes.conflict_replace': 'Replace my changes with the new version',
   'themes.export': 'Export as .zip',
   'themes.editor': 'Edit files',
   'themes.editor_hint': 'Plain text: no build step, no dependency. Every save is validated before it is stored.',

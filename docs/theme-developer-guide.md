@@ -8,8 +8,12 @@ plain files, partials are files too, the stylesheet is served as an asset rather
 than inlined, and every helper is a pure function over data the CMS supplies — no
 template can execute code.
 
-Read this alongside the bundled default theme in `src/themes/ahmed-pro-theme/`,
-which is a complete version 3 package and an example of everything below.
+**The CMS ships no theme.** A site with none renders bare, unstyled HTML until its
+owner uploads one, so there is no bundled design to read alongside this guide. A
+complete version 3 package — templates, partials, a stylesheet, a script and
+settings — lives in `tests/fixtures/site-theme/`, which the test suite uploads to
+exercise everything below; it is an example, not a product theme and not a
+starting point (**Appearance → Themes → Make your own** is).
 The panel itself is described in the [Panel Guide](panel-guide.md); the plan that
 built this is in [the roadmap](panel-overhaul-roadmap.md).
 
@@ -43,7 +47,8 @@ built this is in [the roadmap](panel-overhaul-roadmap.md).
 
 Upload a `.zip` with this `theme.json` next to the files it names (or a single `.json` bundle, the way
 themes were written before — those still load). Only `base` — or a `parent` to inherit from — is required;
-anything else falls back to the bundled default theme (Ahmed Pro Theme). `partials/header.html` is picked up without being declared, and
+anything else falls back to another template of your own theme (`search` → `archive` → `page` → `home`), so
+switching theme never blanks a page. `partials/header.html` is picked up without being declared, and
 everything under `assets/` is stored as a theme asset.
 
 **Limits:** 6 MB upload, 512 KB per asset, 80 assets, PNG/JPEG/GIF/WebP/AVIF/ICO, WOFF/WOFF2/TTF/OTF and a
@@ -104,18 +109,19 @@ slot) before it ever goes live.
   screen can list the history newest-first and **Roll back** to any of it. A rollback snapshots the version it
   replaces, so reverting is itself revertible; ten snapshots are kept per theme.
 - **Preview** any installed theme at `/?preview=1&theme=slug` while signed in (never cached, never public).
-  The store's **Preview** button uses the same engine before a theme is installed at all.
+  The **Preview** button on the Themes screen frames that same URL, with a choice of device widths; a theme
+  that is not installed has nothing to preview, because the app ships none.
 - **Screenshots** — ship `screenshot.png` in the package (declared as `screenshot` in `theme.json`, or the
-  file of that name at the root). The store card shows it through `/theme-assets/<slug>/screenshot.png` once
-  the theme is installed, and a palette gradient when a theme ships none. About 1200×800 is a good size.
+  file of that name at the root) and it is stored and served like any other asset, at
+  `/theme-assets/<slug>/screenshot.png`. Nothing in the panel requires one. About 1200×800 is a good size.
 - **Export and import** — **Download** on the theme screen produces a zip: `theme.json` naming each file,
   the templates, `partials/*.html`, `style.css` and the assets, byte-for-byte. Upload it again and the
   templates and stylesheet come back identical. `download.json` is the same theme as one JSON file.
-- **Local edits vs the store** — if you edit a theme in the panel that the store also ships, the store shows
-  **Update available vX → vY** with the changelog, and asks whether to keep your changes, replace them with
-  the store version, or save yours as a copy under a new slug.
-- **A theme that throws** while rendering cannot take the site down: the page falls back to the bundled default theme (Ahmed Pro Theme) and
-  the Themes screen says which theme failed and why.
+- **Local edits vs a newer package** — uploading a package whose slug is already installed replaces those
+  files, and snapshots yours first (*Before uploading vX.Y.Z* in the theme's history), so **Roll back**
+  brings your edits home. Nothing is replaced silently, and nothing arrives from the app: there is no store.
+- **A theme that throws** while rendering cannot take the site down: the page falls back to the same bare,
+  unstyled skeleton a site with no theme renders with, and the Themes screen says which theme failed and why.
 - Themes contain markup, so only install themes you trust.
 
 ## Editing a theme without a terminal

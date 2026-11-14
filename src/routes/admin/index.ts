@@ -27,10 +27,6 @@ import terms from './terms';
 import preferences from './preferences';
 import assets from './assets';
 import shellRoutes from './shell';
-import { defaultTheme } from '../../themes/default';
-
-const BUNDLED_THEME_NAME = defaultTheme.name;
-
 /**
  * Admin panel. Mounted by the root app under "/{admin-slug}" with that prefix
  * already stripped, so routes here are written relative ("/pages", "/media").
@@ -248,7 +244,7 @@ admin.get('/', async (c) => {
         body: html`<dl class="kv kv--tight">
           <dt>Version</dt><dd>${APP_VERSION}</dd>
           <dt>Schema</dt><dd>${schema}${pendingUpdates ? html` · <a href="${base}/updates">${pendingUpdates} update${pendingUpdates === 1 ? '' : 's'} ready</a>` : ' · up to date'}</dd>
-          <dt>Theme</dt><dd>${theme ? `${theme.name} v${theme.version}` : BUNDLED_THEME_NAME}</dd>
+          <dt>Theme</dt><dd>${theme ? `${theme.name} v${theme.version}` : html`None — <a href="${base}/themes">upload one</a>`}</dd>
         </dl>`,
       })}
     </aside>
