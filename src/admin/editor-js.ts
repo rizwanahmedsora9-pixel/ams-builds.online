@@ -83,7 +83,7 @@ export const EDITOR_JS = `<script>
     }
     if(visual)visual.setAttribute('aria-hidden',mode==='html'?'true':'false');
     if(ta)ta.setAttribute('aria-hidden',mode==='text'?'true':'false');
-    syncStats();
+    syncStats();syncToolbar();
   }
   function note(text){
     if(!status)return;
@@ -97,7 +97,13 @@ export const EDITOR_JS = `<script>
     var clone=visual.cloneNode(true);
     clone.querySelectorAll('.is-selected').forEach(function(el){el.classList.remove('is-selected')});
     clone.querySelectorAll('img[draggable]').forEach(function(el){el.removeAttribute('draggable')});
+    clone.querySelectorAll('figure.python-app').forEach(function(el){el.removeAttribute('contenteditable')});
     return clone.innerHTML;
+  }
+  // A Python app is one object in the visual editor: the caret can sit beside
+  // it, never inside its code. The flag is editor-only and is not saved.
+  function decorate(){
+    visual.querySelectorAll('figure.python-app').forEach(function(el){el.setAttribute('contenteditable','false')});
   }
 
   /**
@@ -160,6 +166,7 @@ export const EDITOR_JS = `<script>
   function toText(){
     var caret=caretOffset();
     visual.innerHTML=ta.value;
+    decorate();
     mode='text';
     ta.hidden=true;visual.hidden=false;
     syncMode();
@@ -246,10 +253,55 @@ export const EDITOR_JS = `<script>
           ta.setSelectionRange(start+open.length,end+open.length);
         }
         if(typeof markDirty==='function')markDirty();
-        syncStats();
+        syncStats();syncToolbar();
       });
     });
   }
+  if(toolbar){
+    // Undo, redo and clear formatting act on whichever pane is showing.
+    toolbar.querySelectorAll('[data-exec]').forEach(function(btn){
+      btn.addEventListener('mousedown',function(e){e.preventDefault()});
+      btn.addEventListener('click',function(){
+        var command=btn.dataset.exec;
+        if(mode==='text'){visual.focus();restoreSelection()}
+        else{if(command==='removeFormat')return;ta.focus()}
+        document.execCommand(command,false,null);
+        if(mode==='text'){rememberSelection();positionOverlay()}
+        if(typeof markDirty==='function')markDirty();
+        syncStats();syncToolbar();
+      });
+    });
+  }
+  /**
+   * Lights the buttons that describe the text under the cursor: bold inside
+   * bold, H2 inside a heading, Link inside a link. In the HTML pane nothing is
+   * lit, because source has no formatting state to report.
+   */
+  var BLOCK_NAMES={'heading 2':'h2','heading 3':'h3','heading 4':'h4','paragraph':'p','normal':'p','div':'p','quote':'blockquote','formatted':'pre'};
+  function syncToolbar(){
+    if(!toolbar||typeof document.queryCommandState!=='function')return;
+    var live=mode==='text';
+    var sel=window.getSelection();
+    var inside=live&&sel&&sel.rangeCount&&visual.contains(sel.anchorNode);
+    var block='';
+    if(inside){
+      try{block=String(document.queryCommandValue('formatBlock')||'').toLowerCase().replace(/[<>]/g,'')}catch(e){}
+      block=BLOCK_NAMES[block]||block;
+    }
+    toolbar.querySelectorAll('[data-command]').forEach(function(btn){
+      var on=false,command=btn.dataset.command;
+      if(inside){
+        if(command==='formatBlock')on=btn.dataset.value===block;
+        else if(command!=='insertHorizontalRule'){try{on=!!document.queryCommandState(command)}catch(e){}}
+      }
+      btn.setAttribute('aria-pressed',String(on));
+    });
+    toolbar.querySelectorAll('[data-link-open]').forEach(function(btn){
+      btn.setAttribute('aria-pressed',String(!!(inside&&closestLink(sel.anchorNode))));
+    });
+    toolbar.querySelectorAll('[data-exec="removeFormat"]').forEach(function(btn){btn.disabled=!live});
+  }
+  if(document.addEventListener)document.addEventListener('selectionchange',syncToolbar);
   visual.addEventListener('keyup',rememberSelection);
   visual.addEventListener('mouseup',rememberSelection);
 
@@ -570,6 +622,7 @@ export const EDITOR_JS = `<script>
     var paragraph=document.createElement('p');paragraph.appendChild(document.createElement('br'));
     var fragment=document.createDocumentFragment();fragment.appendChild(figure);fragment.appendChild(paragraph);
     range.insertNode(fragment);
+    decorate();
     range.setStart(paragraph,0);range.collapse(true);
     sel.removeAllRanges();sel.addRange(range);savedRange=range.cloneRange();
     if(typeof markDirty==='function')markDirty();
@@ -810,64 +863,138 @@ export const EDITOR_JS = `<script>
     });
   }
 
-  /* ------------------------------------------- image size & anchors */
-  // Click an image in Text mode: it gets an outline, four corner anchors you
-  // can drag, and a size/align bar. Width is stored as width:% on the figure
-  // (or the bare <img>), alignment as align-left/center/right — both survive
-  // saving (the sanitizer keeps exactly those) so the page matches the editor.
-  var imageTools=document.getElementById('image-tools');
-  var imgOverlay=document.getElementById('img-overlay');
+  /* ------------------------------------- selected block: size & anchors */
+  // Click an image or a Python app in Text mode: it gets a frame with anchors
+  // to drag and a small bar floating beside it. Width is stored as width:% on
+  // the figure (or the bare <img>), an app's height as height:px, alignment as
+  // align-left/center/right - exactly what the sanitizer keeps, so the page
+  // matches the editor.
+  var imageTools=document.getElementById('image-tools'),pyTools=document.getElementById('python-tools');
+  var imgOverlay=document.getElementById('img-overlay'),sizeBadge=document.getElementById('img-overlay-size');
   var imgWidth=document.getElementById('img-width'),imgWidthOut=document.getElementById('img-width-out');
-  var selectedImg=null,selectedBlock=null;
+  var pyHeight=document.getElementById('py-height');
+  var selectedImg=null,selectedBlock=null,selectedKind='';
+  var raf=window.requestAnimationFrame||function(fn){return setTimeout(fn,16)};
+  var SNAPS=[25,33,50,67,75,100];
 
+  function toolBars(){return [imageTools,pyTools].filter(function(bar){return !!bar})}
+  function activeBar(){return selectedKind==='python'?pyTools:selectedKind==='image'?imageTools:null}
+  /** The element the frame hugs: the picture itself, or the whole app card. */
+  function frameTarget(){return selectedKind==='python'?selectedBlock:selectedImg}
   function imageBlockOf(img){var f=img.closest?img.closest('figure'):null;return f||img}
+  /** The width a percentage refers to: the writing column, without its padding. */
+  function columnWidth(){
+    var w=visual.clientWidth||1;
+    if(window.getComputedStyle){
+      var cs=window.getComputedStyle(visual);
+      w-=(parseFloat(cs.paddingLeft)||0)+(parseFloat(cs.paddingRight)||0);
+    }
+    return Math.max(1,w);
+  }
+  function minWidth(){return selectedKind==='python'?30:10}
   function imageWidthPct(){
     if(!selectedBlock)return 50;
     var inline=parseFloat((selectedBlock.style&&selectedBlock.style.width)||'');
     if(inline)return Math.round(inline);
-    var w=selectedImg.getBoundingClientRect().width,host=visual.clientWidth||1;
-    return Math.max(10,Math.min(100,Math.round(w/host*100)));
+    var w=selectedBlock.getBoundingClientRect().width;
+    return Math.max(minWidth(),Math.min(100,Math.round(w/columnWidth()*100)));
+  }
+  function blockHeightPx(){
+    if(!selectedBlock)return 420;
+    var inline=parseFloat((selectedBlock.style&&selectedBlock.style.height)||'');
+    return Math.round(inline||selectedBlock.getBoundingClientRect().height||420);
   }
   function syncImageTools(){
-    if(!imageTools||!selectedImg)return;
+    var bar=activeBar();
+    if(!bar||!selectedBlock)return;
     var pct=imageWidthPct();
-    if(imgWidth)imgWidth.value=String(pct);
-    if(imgWidthOut)imgWidthOut.textContent=pct+'%';
-    imageTools.querySelectorAll('[data-img-size]').forEach(function(b){b.setAttribute('aria-pressed',String(Number(b.dataset.imgSize)===pct))});
+    if(selectedKind==='image'){
+      if(imgWidth)imgWidth.value=String(pct);
+      if(imgWidthOut)imgWidthOut.textContent=pct+'%';
+    }else{
+      if(pyHeight&&document.activeElement!==pyHeight)pyHeight.value=String(blockHeightPx());
+      bar.querySelectorAll('[data-py-autorun]').forEach(function(b){b.setAttribute('aria-pressed',String(!selectedBlock.classList.contains('python-app--manual')))});
+    }
+    bar.querySelectorAll('[data-img-size]').forEach(function(b){b.setAttribute('aria-pressed',String(Number(b.dataset.imgSize)===pct))});
     var align=selectedBlock.classList.contains('align-left')?'left':selectedBlock.classList.contains('align-right')?'right':'center';
-    imageTools.querySelectorAll('[data-img-align]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.imgAlign===align))});
+    bar.querySelectorAll('[data-img-align]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.imgAlign===align))});
+  }
+  /**
+   * Puts the floating bar above the block; below it when there is no room; and
+   * pinned under the formatting bar when the block is taller than the screen,
+   * so the controls are never scrolled out of reach.
+   */
+  function placeBar(r,b){
+    var bar=activeBar();
+    toolBars().forEach(function(one){if(one!==bar)one.hidden=true});
+    if(!bar)return;
+    bar.hidden=false;
+    var h=bar.offsetHeight||0,w=bar.offsetWidth||0,gap=12;
+    var limit=(toolbar&&toolbar.getBoundingClientRect?toolbar.getBoundingClientRect().bottom:0)+6;
+    var top=r.top-h-gap;
+    if(top<limit){
+      var below=r.top+r.height+gap;
+      top=below+h<=(window.innerHeight||below+h)?below:Math.min(limit,r.top+r.height-h-gap);
+    }
+    var left=Math.max(0,Math.min(r.left-b.left+(r.width-w)/2,(b.width||w)-w));
+    bar.style.top=Math.round(top-b.top)+'px';
+    bar.style.left=Math.round(left)+'px';
   }
   function positionOverlay(){
-    if(!imgOverlay||!selectedImg||mode!=='text'){if(imgOverlay)imgOverlay.hidden=true;return}
-    var r=selectedImg.getBoundingClientRect(),b=box.getBoundingClientRect();
+    var el=frameTarget();
+    if(!imgOverlay||!el||mode!=='text'){
+      if(imgOverlay)imgOverlay.hidden=true;
+      toolBars().forEach(function(bar){bar.hidden=true});
+      return;
+    }
+    // Undo, a paste over it or the HTML pane can take the block away.
+    if(!visual.contains(el)){clearImageSelection();return}
+    var r=el.getBoundingClientRect(),b=box.getBoundingClientRect();
     imgOverlay.hidden=false;
+    imgOverlay.dataset.kind=selectedKind;
     imgOverlay.style.left=(r.left-b.left)+'px';
     imgOverlay.style.top=(r.top-b.top)+'px';
     imgOverlay.style.width=r.width+'px';
     imgOverlay.style.height=r.height+'px';
+    placeBar(r,b);
   }
-  function selectImage(img){
+  function selectBlock(block,kind,img){
     clearImageSelection();
-    selectedImg=img;selectedBlock=imageBlockOf(img);
-    selectedBlock.classList.add('is-selected');
-    if(selectedBlock===img)img.classList.add('is-selected');
-    img.setAttribute('draggable','false');
-    if(imageTools)imageTools.hidden=false;
+    selectedBlock=block;selectedKind=kind;selectedImg=img||null;
+    block.classList.add('is-selected');
     syncImageTools();positionOverlay();
   }
+  function selectImage(img){
+    selectBlock(imageBlockOf(img),'image',img);
+    img.setAttribute('draggable','false');
+  }
+  function selectPython(fig){selectBlock(fig,'python',null)}
   function clearImageSelection(){
     if(selectedBlock)selectedBlock.classList.remove('is-selected');
     if(selectedImg)selectedImg.classList.remove('is-selected');
-    selectedImg=null;selectedBlock=null;
-    if(imageTools)imageTools.hidden=true;
+    selectedImg=null;selectedBlock=null;selectedKind='';
+    toolBars().forEach(function(bar){bar.hidden=true});
     if(imgOverlay)imgOverlay.hidden=true;
+    if(sizeBadge)sizeBadge.hidden=true;
   }
-  function applyImageWidth(pct){
+  function showBadge(){
+    if(!sizeBadge||!selectedBlock)return;
+    sizeBadge.hidden=false;
+    sizeBadge.textContent=imageWidthPct()+'%'+(selectedKind==='python'?' \u00d7 '+blockHeightPx()+'px':'');
+  }
+  function applyImageWidth(pct,quiet){
     if(!selectedBlock)return;
-    pct=Math.max(10,Math.min(100,Math.round(pct)||50));
+    pct=Math.max(minWidth(),Math.min(100,Math.round(pct)||50));
     selectedBlock.style.width=pct+'%';
-    if(selectedBlock!==selectedImg)selectedImg.style.width='100%';
-    if(typeof markDirty==='function')markDirty();
+    if(selectedImg&&selectedBlock!==selectedImg)selectedImg.style.width='100%';
+    if(!quiet&&typeof markDirty==='function')markDirty();
+    syncImageTools();positionOverlay();
+  }
+  function applyBlockHeight(px,quiet){
+    if(!selectedBlock||selectedKind!=='python')return;
+    px=U.clampHeight?U.clampHeight(Math.round(px/10)*10):Math.max(160,Math.min(1200,Math.round(px)));
+    selectedBlock.style.height=px+'px';
+    if(!quiet&&typeof markDirty==='function')markDirty();
     syncImageTools();positionOverlay();
   }
   function applyImageAlign(align){
@@ -877,12 +1004,40 @@ export const EDITOR_JS = `<script>
     if(typeof markDirty==='function')markDirty();
     syncImageTools();positionOverlay();
   }
+  function removeSelectedBlock(){
+    if(!selectedBlock)return;
+    var block=selectedBlock;clearImageSelection();block.remove();
+    if(typeof markDirty==='function')markDirty();
+    visual.focus();syncStats();
+  }
+  /** Swap the block with the element before or after it. */
+  function moveSelectedBlock(direction){
+    if(!selectedBlock)return;
+    var block=selectedBlock,parent=block.parentNode;
+    var other=direction==='up'?block.previousElementSibling:block.nextElementSibling;
+    if(!parent||!other)return;
+    parent.insertBefore(block,direction==='up'?other:other.nextSibling);
+    if(typeof markDirty==='function')markDirty();
+    if(block.scrollIntoView)block.scrollIntoView({block:'nearest'});
+    positionOverlay();
+  }
   if(visual){
     visual.addEventListener('click',function(e){
+      var app=e.target&&e.target.closest?e.target.closest('figure.python-app'):null;
+      if(app&&visual.contains(app)){e.preventDefault();selectPython(app);return}
       var img=e.target&&e.target.closest?e.target.closest('img'):null;
       if(img&&visual.contains(img)){selectImage(img)}
       else if(e.target===visual||(e.target.closest&&!e.target.closest('figure.image-block')))clearImageSelection();
     });
+    // A selected block answers the keyboard like any object: Delete removes
+    // it, Escape lets go, and typing anything else returns to the text.
+    visual.addEventListener('keydown',function(e){
+      if(!selectedBlock||e.ctrlKey||e.metaKey||e.altKey)return;
+      if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();removeSelectedBlock()}
+      else if(e.key==='Escape'||String(e.key||'').length===1||e.key==='Enter')clearImageSelection();
+    });
+    window.addEventListener('scroll',function(){if(selectedBlock)positionOverlay()},{passive:true});
+    if(window.ResizeObserver)new ResizeObserver(function(){if(selectedBlock)positionOverlay()}).observe(visual);
     visual.addEventListener('scroll',positionOverlay);
     // Typing above the image, or the image finishing loading, moves it: keep
     // the corner anchors glued to it instead of leaving them floating stale.
@@ -890,19 +1045,26 @@ export const EDITOR_JS = `<script>
     visual.addEventListener('load',function(e){if(e.target&&e.target.tagName==='IMG')positionOverlay()},true);
     window.addEventListener('resize',positionOverlay);
   }
-  if(imageTools){
+  toolBars().forEach(function(bar){
     // Keep the editor selection alive when a button is pressed, but let the
-    // width slider receive its own pointer events so it can actually drag.
-    imageTools.addEventListener('mousedown',function(e){if(e.target.closest&&e.target.closest('button'))e.preventDefault()});
-    imageTools.querySelectorAll('[data-img-size]').forEach(function(b){b.addEventListener('click',function(){applyImageWidth(Number(b.dataset.imgSize))})});
-    imageTools.querySelectorAll('[data-img-align]').forEach(function(b){b.addEventListener('click',function(){applyImageAlign(b.dataset.imgAlign)})});
-    var removeBtn=imageTools.querySelector('[data-img-remove]');
-    if(removeBtn)removeBtn.addEventListener('click',function(){
+    // sliders and the height box receive their own pointer events.
+    bar.addEventListener('mousedown',function(e){if(e.target.closest&&e.target.closest('button'))e.preventDefault()});
+    bar.querySelectorAll('[data-img-size]').forEach(function(b){b.addEventListener('click',function(){applyImageWidth(Number(b.dataset.imgSize))})});
+    bar.querySelectorAll('[data-img-align]').forEach(function(b){b.addEventListener('click',function(){applyImageAlign(b.dataset.imgAlign)})});
+    bar.querySelectorAll('[data-block-move]').forEach(function(b){b.addEventListener('click',function(){moveSelectedBlock(b.dataset.blockMove)})});
+    bar.querySelectorAll('[data-img-remove]').forEach(function(b){b.addEventListener('click',removeSelectedBlock)});
+  });
+  if(pyTools){
+    pyTools.querySelectorAll('[data-py-autorun]').forEach(function(b){b.addEventListener('click',function(){
       if(!selectedBlock)return;
-      var block=selectedBlock;clearImageSelection();block.remove();
+      selectedBlock.classList.toggle('python-app--manual');
       if(typeof markDirty==='function')markDirty();
-      visual.focus();syncStats();
-    });
+      syncImageTools();
+    })});
+    pyTools.querySelectorAll('[data-py-edit]').forEach(function(b){b.addEventListener('click',function(){if(selectedBlock)openPythonDialog(selectedBlock)})});
+  }
+  if(pyHeight)pyHeight.addEventListener('change',function(){applyBlockHeight(Number(pyHeight.value)||420)});
+  if(imageTools){
     // Edit the words the reader sees under the picture without going to HTML.
     var captionBtn=imageTools.querySelector('[data-img-caption]');
     if(captionBtn)captionBtn.addEventListener('click',function(){
@@ -968,22 +1130,151 @@ export const EDITOR_JS = `<script>
     });
   }
   if(imgWidth)imgWidth.addEventListener('input',function(){applyImageWidth(Number(imgWidth.value))});
-  // Drag any corner anchor: horizontal distance becomes the new width.
+  // Drag an anchor. The side and corner anchors set the width; on an app the
+  // bottom ones set the height too. The edge follows the pointer exactly: a
+  // centred block grows on both sides, so its change is doubled, and a block
+  // pinned left or right always grows away from the side it is pinned to.
   if(imgOverlay)imgOverlay.querySelectorAll('[data-handle]').forEach(function(handle){
     handle.addEventListener('pointerdown',function(e){
-      if(!selectedImg)return;
+      if(!selectedBlock||(e.button!=null&&e.button>0))return;
       e.preventDefault();e.stopPropagation();
-      var west=handle.dataset.handle.indexOf('w')!==-1;
-      var startX=e.clientX,startW=selectedImg.getBoundingClientRect().width,host=visual.clientWidth||1;
+      var dir=handle.dataset.handle;
+      var horizontal=dir!=='s',vertical=selectedKind==='python'&&dir.indexOf('s')!==-1;
+      var left=selectedBlock.classList.contains('align-left'),right=selectedBlock.classList.contains('align-right');
+      var sign=left?1:right?-1:(dir.indexOf('w')!==-1?-1:1),gain=left||right?1:2;
+      var rect=selectedBlock.getBoundingClientRect();
+      var startX=e.clientX,startY=e.clientY,startW=rect.width,startH=rect.height,host=columnWidth();
+      var last=null,frame=0;
       try{handle.setPointerCapture(e.pointerId)}catch(err){/* capture is a nicety; window-level drag still works without it */}
-      function move(ev){applyImageWidth((startW+(west?startX-ev.clientX:ev.clientX-startX))/host*100)}
-      function up(){window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',up)}
-      // On window, not just the 12px handle: a fast drag leaves the handle.
+      box.classList.add('is-resizing');
+      showBadge();
+      function apply(){
+        frame=0;
+        if(!last||!selectedBlock)return;
+        if(horizontal){
+          var pct=(startW+(last.clientX-startX)*sign*gain)/host*100;
+          // Common sizes are magnetic; hold Alt for a free size.
+          if(!last.altKey)SNAPS.forEach(function(stop){if(Math.abs(pct-stop)<1.5)pct=stop});
+          applyImageWidth(pct,true);
+        }
+        if(vertical)applyBlockHeight(startH+(last.clientY-startY),true);
+        showBadge();
+      }
+      function move(ev){last=ev;if(!frame)frame=raf(apply)}
+      function up(){
+        window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',up);
+        if(last)apply();
+        box.classList.remove('is-resizing');
+        if(sizeBadge)sizeBadge.hidden=true;
+        if(last&&typeof markDirty==='function')markDirty();
+        positionOverlay();
+      }
+      // On window, not just the small handle: a fast drag leaves the handle.
       window.addEventListener('pointermove',move);
       window.addEventListener('pointerup',up);
       window.addEventListener('pointercancel',up);
     });
   });
+
+  /* ------------------------------------------------------- python app */
+  // One dialog adds an app and edits the selected one: pick a .py file (or
+  // paste the code), choose the area it takes on the page, and it goes in as a
+  // block that is selected straight away so its anchors are ready to drag.
+  var pyDialog=document.getElementById('python-dialog'),pyEditing=null;
+  var PY_MAX=300000;
+  function pyEl(id){return document.getElementById('python-'+id)}
+  function pyWarn(){
+    var list=pyEl('warnings');
+    if(!list)return;
+    var notes=U.pythonWarnings?U.pythonWarnings(pyEl('code').value):[];
+    list.innerHTML=notes.map(function(text){return '<li>'+esc(text)+'</li>'}).join('');
+    list.hidden=!notes.length;
+  }
+  function pyArea(){
+    var w=Number(pyEl('width').value)||100,h=Number(pyEl('height').value)||420;
+    pyEl('width-out').textContent=w+'%';
+    pyEl('height-out').textContent=h+'px';
+    var sample=pyEl('area-box');
+    if(sample){sample.style.width=w+'%';sample.style.height=Math.round(h/900*4.6*10)/10+'rem'}
+  }
+  function pyFail(text){var error=pyEl('error');error.textContent=text;error.hidden=!text}
+  function openPythonDialog(block){
+    if(!pyDialog)return;
+    pyEditing=block||null;
+    var pre=block?block.querySelector('pre'):null;
+    pyEl('code').value=pre?pre.textContent:'';
+    pyEl('file').value='';
+    pyEl('file-name').textContent=block?(block.getAttribute('title')||'app.py'):'No file chosen';
+    pyEl('file-name').dataset.name=block?(block.getAttribute('title')||''):'';
+    pyEl('width').value=String(block?Math.round(parseFloat(block.style.width)||100):100);
+    pyEl('height').value=String(block?Math.round(parseFloat(block.style.height)||420):420);
+    pyEl('autorun').checked=!(block&&block.classList.contains('python-app--manual'));
+    document.getElementById('python-dialog-title').textContent=block?'Edit Python app':'Add Python app';
+    document.getElementById('insert-python').textContent=block?'Save changes':'Insert app';
+    pyFail('');pyWarn();pyArea();
+    openDialog(pyDialog,block?pyEl('code'):document.getElementById('python-file-button'));
+  }
+  if(pyDialog){
+    var addPython=document.getElementById('add-python');
+    if(addPython){
+      addPython.addEventListener('mousedown',function(){if(mode==='text')rememberSelection()});
+      addPython.addEventListener('click',function(){openPythonDialog(null)});
+    }
+    document.getElementById('python-file-button').addEventListener('click',function(){pyEl('file').click()});
+    pyEl('file').addEventListener('change',function(){
+      var file=pyEl('file').files&&pyEl('file').files[0];
+      if(!file)return;
+      pyFail('');
+      if(!/\\.pyw?$/i.test(file.name)){pyFail('Choose a Python file: its name ends in .py');return}
+      if(file.size>PY_MAX){pyFail('That file is larger than 300 KB. A single-file app is expected here.');return}
+      var reader=new FileReader();
+      reader.onload=function(){
+        var text=String(reader.result||'');
+        if(text.indexOf('\\u0000')!==-1){pyFail('That file is not plain text.');return}
+        pyEl('code').value=text;
+        pyEl('file-name').textContent=file.name+' \\u00b7 '+text.split('\\n').length+' lines';
+        pyEl('file-name').dataset.name=file.name;
+        pyWarn();
+      };
+      reader.onerror=function(){pyFail('That file could not be read.')};
+      reader.readAsText(file);
+    });
+    pyEl('code').addEventListener('input',pyWarn);
+    pyEl('width').addEventListener('input',pyArea);
+    pyEl('height').addEventListener('input',pyArea);
+    document.getElementById('insert-python').addEventListener('click',function(){
+      var code=pyEl('code').value;
+      if(!code.trim()){pyFail('Choose a .py file or paste the program first.');pyEl('code').focus();return}
+      if(code.length>PY_MAX){pyFail('The program is larger than 300 KB.');return}
+      var editing=pyEditing&&visual.contains(pyEditing)?pyEditing:null;
+      var align=editing&&editing.classList.contains('align-left')?'left':editing&&editing.classList.contains('align-right')?'right':'center';
+      var markup=U.pythonFigure?U.pythonFigure({
+        code:code,name:pyEl('file-name').dataset.name||'app.py',align:align,
+        width:Number(pyEl('width').value),height:Number(pyEl('height').value),manual:!pyEl('autorun').checked,
+      }):'';
+      if(!markup){pyFail('The program could not be prepared.');return}
+      pyDialog.close();
+      var placed=null;
+      if(editing){
+        var holder=document.createElement('div');holder.innerHTML=markup;
+        placed=holder.firstElementChild;
+        editing.replaceWith(placed);
+        decorate();
+        if(typeof markDirty==='function')markDirty();
+      }else{
+        insertImageAtCaret(markup);
+        // The caret was left in the paragraph right after the new block.
+        var after=savedRange&&savedRange.startContainer;
+        placed=after&&after.previousSibling;
+      }
+      if(mode==='text'&&placed&&placed.classList&&placed.classList.contains('python-app')){
+        if(placed.scrollIntoView)placed.scrollIntoView({block:'nearest'});
+        selectPython(placed);
+      }
+      note(editing?'Python app updated.':'Python app added. Drag its handles to resize it; it runs on the page once this is saved.');
+    });
+    pyDialog.addEventListener('close',function(){pyEditing=null});
+  }
 
   /* ------------------------------------------------------------- boot */
   mode='html';
@@ -1037,6 +1328,6 @@ export const EDITOR_JS = `<script>
   syncStats();
 
   /** The image tools need the picker's callback above, so expose it for tests. */
-  window.amsEditor={setMode:setMode,mode:function(){return mode},serialize:function(){return currentBody()},tidy:tidyHtml,selectImage:selectImage,stats:syncStats};
+  window.amsEditor={selectPython:selectPython,syncToolbar:syncToolbar,setMode:setMode,mode:function(){return mode},serialize:function(){return currentBody()},tidy:tidyHtml,selectImage:selectImage,stats:syncStats};
 })();
 </script>`;

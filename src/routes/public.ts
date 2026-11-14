@@ -23,6 +23,8 @@ import { bundledThemeAsset } from '../lib/bundled-theme';
 import { APP_VERSION } from '../lib/version';
 import { assetMime, cleanAssetPath, isRefusedAsset } from '../lib/theme-manifest';
 
+import { PYAPP_RUNNER_CSP, PYAPP_RUNNER_PATH, pythonRunnerPage } from '../lib/pyapp';
+
 const site = new Hono<AppEnv>();
 
 site.use('*', async (c, next) => {
@@ -52,6 +54,26 @@ site.get('/media/*', async (c) => {
   });
   if (c.req.header('if-none-match') === etag) return new Response(null, { status: 304, headers });
   return new Response(file.body, { headers });
+});
+
+/* ------------------------------------------------------------ python apps */
+/**
+ * The document a Python app block frames. It is static (the program arrives by
+ * postMessage from the page that embeds it), carries its own policy instead of
+ * the site's, and is sandboxed twice: by the iframe attribute and by the
+ * `sandbox` directive here, so opening the URL directly is just as contained.
+ */
+site.get(PYAPP_RUNNER_PATH, (c) => {
+  return new Response(pythonRunnerPage(), {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Robots-Tag': 'noindex',
+      'Referrer-Policy': 'no-referrer',
+      'Content-Security-Policy': PYAPP_RUNNER_CSP,
+    },
+  });
 });
 
 /* ----------------------------------------------------------- theme assets */

@@ -12,6 +12,7 @@ import { activeThemeFor, applyLayout, loadTheme, renderWithTheme, themeAssetUrl 
 import { variablesFor } from './tokens';
 import { DEFAULT_WIDGET_AREAS, widgetKey } from './theme-manifest';
 import { cspFor, nonceFor } from './security';
+import { withPythonApps } from './pyapp';
 import { verificationTags } from './plugins';
 import { readTokens, supportedTokens, tokensCss, schemeMeta } from './tokens';
 
@@ -424,7 +425,7 @@ export async function renderTheme(
       inner += `\n<div class="comments-fallback">${commentsHtml}</div>`;
     }
     const pageContent = `${hierarchyMarkup.before}${inner}${hierarchyMarkup.after}`;
-    return applyLayout(theme, opts.template, pageContent, {
+    return withPythonApps(applyLayout(theme, opts.template, pageContent, {
       ...shared,
       content: pageContent,
       theme_css: theme.css.replace(/<\/style/gi, '<\\/style'),
@@ -434,7 +435,7 @@ export async function renderTheme(
       // before custom CSS so an author's final say still has the last word.
       head: buildHead(opts.meta, settings, url.origin, headExtra, nonce, tokensBlock, scheme),
       footer: buildFooter(settings, theme, hooks.footer.join('\n'), nonce),
-    }, renderOpts);
+    }, renderOpts), nonce);
   } catch (err) {
     // A theme that throws must not take the site down: render the bundled theme
     // and tell the admins (the banner is rendered by the panel, not here).
@@ -451,7 +452,7 @@ export async function renderTheme(
       ?? defaultTheme.templates.page ?? '';
     const safeInner = fallbackSource ? renderWithTheme(defaultTheme, fallbackSource, shared, fallbackOpts) : '';
     const fallbackContent = `${hierarchyMarkup.before}${safeInner || inner || ''}${hierarchyMarkup.after}`;
-    return applyLayout(defaultTheme, opts.template, fallbackContent, {
+    return withPythonApps(applyLayout(defaultTheme, opts.template, fallbackContent, {
       ...shared,
       content: fallbackContent,
       theme_css: fallbackCss,
@@ -459,7 +460,7 @@ export async function renderTheme(
       tokens_css: tokensBlock,
       head: buildHead(opts.meta, settings, url.origin, headExtra, nonce, tokensBlock, scheme),
       footer: buildFooter(settings, defaultTheme, hooks.footer.join('\n'), nonce),
-    }, fallbackOpts);
+    }, fallbackOpts), nonce);
   }
 }
 

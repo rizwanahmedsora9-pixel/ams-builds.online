@@ -796,6 +796,9 @@ content.post('/posts/bulk', async (c) => {
 });
 
 /* ------------------------------------------------------------------ editor */
+/** A toolbar glyph: stroke-only on the sprite's 24px grid, coloured by the button. */
+const tb = (paths: string): Raw => raw(`<svg class="tb-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths}</svg>`);
+
 /**
  * Editor styles live here rather than in the shared ADMIN_CSS so the
  * classic/modern choice and the Text/HTML toggle look right on both skins.
@@ -809,14 +812,23 @@ export const EDITOR_CSS = `<style>
 .ams-editor-switch button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
 .ams-editor-bar .hint{margin:0;flex:1 1 12rem}
 .ams-editor-pane[hidden]{display:none!important}
-.ams-editor .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem;margin-bottom:.4rem}
-.ams-editor .toolbar button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:3rem;height:2.25rem;padding:0 .55rem;border:1px solid var(--line);border-radius:.3rem;background:var(--surface);color:var(--fg);font:inherit;font-size:.82rem;line-height:1.2;white-space:nowrap;cursor:pointer}
-.ams-editor .toolbar button:hover{border-color:var(--accent);color:var(--accent)}
+/* Formatting bar: icon buttons in labelled groups. It wraps by whole groups on
+   a wide screen, becomes one swipeable row on a narrow one, and sticks under
+   the top bar so the tools stay in reach in a long post. */
+.ams-editor .toolbar{position:sticky;top:calc(var(--topbar-h) + .25rem);z-index:15;display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .1rem;margin-bottom:.4rem;box-shadow:var(--shadow-sm)}
+.tb-group{display:flex;align-items:center;gap:.1rem;flex:0 0 auto;padding:0 .35rem;border-left:1px solid var(--line)}
+.tb-group:first-child{padding-left:0;border-left:0}
+.ams-editor .toolbar button{display:inline-flex;align-items:center;justify-content:center;gap:.35rem;flex:0 0 auto;min-width:2.25rem;height:2.25rem;padding:0 .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--fg);font:inherit;font-size:.86rem;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer;transition:background var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease),transform var(--dur-fast) var(--ease)}
+.ams-editor .toolbar button.tb-wide{font-weight:500;padding:0 .6rem}
+.ams-editor .toolbar button:hover{background:var(--surface-2);color:var(--accent)}
+.ams-editor .toolbar button:active{transform:scale(.94);background:var(--accent-soft)}
+.ams-editor .toolbar button[disabled]{opacity:.4;cursor:default;pointer-events:none}
+.tb-ico{width:1.15rem;height:1.15rem;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 /* Keep native text selection vivid inside both editor modes; the global
    selection colour is intentionally softer for ordinary page text. */
 .ams-editor .visual-editor::selection,.ams-editor .visual-editor *::selection,.ams-editor textarea.code::selection{background:var(--accent);color:var(--accent-fg)}
 .ams-editor .toolbar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.ams-editor .toolbar button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
+.ams-editor .toolbar button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 .toolbar-separator{width:1px;height:1.25rem;margin:0 .2rem;background:var(--line);align-self:center;flex:0 0 auto}
 .ams-editor textarea.code,.ams-editor .visual-editor{min-height:22rem;margin:0;width:100%}
 .ams-editor-status{margin:.35rem 0 0;color:var(--muted);font-size:.78rem;min-height:1.1em}
@@ -829,13 +841,14 @@ export const EDITOR_CSS = `<style>
 .ams-editor.is-classic .ams-editor-bar .hint{display:none}
 .ams-editor.is-classic .ams-editor-stats{margin-left:auto}
 .ams-editor.is-classic .ams-editor-switch button{padding:.2rem .55rem;font-size:.78rem}
-.ams-editor.is-classic .toolbar{gap:.15rem;margin:0;padding:.35rem;border:1px solid var(--line);border-bottom:0;border-radius:.35rem .35rem 0 0;background:var(--bg)}
-.ams-editor.is-classic .toolbar button{padding:.2rem .45rem;font-size:.8rem;border-radius:.2rem;background:var(--surface)}
+.ams-editor.is-classic .toolbar{gap:.2rem .1rem;margin:0;padding:.3rem .35rem;border:1px solid var(--line);border-bottom:0;border-radius:.35rem .35rem 0 0;background:var(--bg)}
+.ams-editor.is-classic .toolbar button{min-width:1.95rem;height:1.95rem;padding:0 .4rem;font-size:.8rem;border-radius:.25rem}
+.ams-editor.is-classic .tb-label{display:none}
 .ams-editor.is-classic textarea.code,.ams-editor.is-classic .visual-editor{border-radius:0 0 .35rem .35rem;min-height:24rem}
 .ams-editor.is-classic .ams-editor-status{padding:0 .2rem}
 /* Modern: roomy writing surface, a framed toolbar and generous spacing. */
 .ams-editor.is-modern textarea.code,.ams-editor.is-modern .visual-editor{min-height:26rem;padding:1.1rem 1.2rem;font-size:1rem;line-height:1.7}
-.ams-editor.is-modern .toolbar{gap:.35rem;padding:.5rem;border:1px solid var(--line);border-radius:.55rem;background:var(--bg)}
+.ams-editor.is-modern .toolbar{padding:.4rem .5rem;border:1px solid var(--line);border-radius:.55rem;background:var(--bg)}
 .ams-editor.is-modern textarea.code{font-size:.92rem;line-height:1.65}
 .ams-mode-dialog .ams-mode-options{display:grid;gap:.5rem;margin:1rem 0}
 .ams-mode-dialog .ams-mode-option{display:block;width:100%;padding:.75rem .85rem;border:1px solid var(--line);border-radius:.5rem;background:var(--surface);color:var(--fg);font:inherit;text-align:left;cursor:pointer}
@@ -867,23 +880,81 @@ export const EDITOR_CSS = `<style>
 .visual-editor.is-dropping{outline:2px dashed var(--accent);outline-offset:-2px;background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .ams-editor-drop{margin:.3rem 0 0;padding:.4rem .6rem;border:1px dashed var(--accent);border-radius:.35rem;color:var(--accent);font-size:.8rem}
 .ams-editor-drop[hidden]{display:none!important}
-.image-tools{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.4rem 0;padding:.4rem .5rem;border:1px solid var(--accent);border-radius:.45rem;background:var(--bg);font-size:.82rem}
+/* The bar for a selected image or app floats beside the block instead of
+   pushing the page down: nothing moves under the pointer when you click. */
+.image-tools{position:absolute;z-index:32;left:0;top:0;display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .45rem;max-width:100%;margin:0;padding:.35rem .5rem;border:1px solid var(--line-strong);border-radius:.6rem;background:var(--surface);box-shadow:var(--shadow-lg);font-size:.8rem}
 .image-tools[hidden]{display:none!important}
-.image-tools b{margin-right:.15rem}
+.image-tools b{margin-right:.1rem;font-size:.78rem}
+.image-tools__set{display:inline-flex;border:1px solid var(--line);border-radius:.4rem;overflow:hidden}
 /* The panel's global label style is a block with vertical margins; inside this
    bar it has to sit on the same line as the slider it belongs to. */
 .image-tools label{display:inline-flex;align-items:center;gap:.35rem;margin:0;font-weight:400;white-space:nowrap}
-.image-tools button{padding:.22rem .55rem;border:1px solid var(--line);border-radius:.3rem;background:var(--surface);color:var(--fg);font:inherit;font-size:.8rem;cursor:pointer;flex:0 0 auto}
-.image-tools button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
-.image-tools input[type=range]{width:7rem;accent-color:var(--accent)}
+.image-tools button{min-height:1.9rem;padding:0 .55rem;border:0;border-left:1px solid var(--line);background:var(--surface);color:var(--fg);font:inherit;font-size:.78rem;cursor:pointer;flex:0 0 auto;white-space:nowrap}
+.image-tools__set button:first-child{border-left:0}
+.image-tools button:hover{background:var(--surface-2);color:var(--accent)}
+.image-tools button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.image-tools button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
+.image-tools .image-tools__danger:hover{background:var(--danger-soft);color:var(--danger)}
+.image-tools input[type=range]{width:6.5rem;accent-color:var(--accent)}
+.image-tools input[type=number]{width:4.6rem;height:1.9rem;padding:0 .35rem;font-size:.8rem}
 .image-tools output{min-width:3ch;font-variant-numeric:tabular-nums}
-.img-overlay{position:absolute;z-index:30;pointer-events:none;border:2px solid var(--accent);box-sizing:border-box}
+/* Resize frame: round anchors on the corners, pills on the sides, each with a
+   touch-sized invisible hit area so a thumb or a fast mouse does not miss. */
+.img-overlay{position:absolute;z-index:30;pointer-events:none;border:1.5px solid var(--accent);border-radius:2px;box-sizing:border-box}
 .img-overlay[hidden]{display:none!important}
-.img-overlay span{position:absolute;width:12px;height:12px;margin:-7px 0 0 -7px;border:2px solid var(--accent);border-radius:2px;background:var(--surface);pointer-events:auto;touch-action:none}
+.img-overlay span{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border:2px solid var(--accent);border-radius:50%;background:var(--surface);box-shadow:var(--shadow-sm);pointer-events:auto;touch-action:none;transition:transform var(--dur-fast) var(--ease)}
+.img-overlay span::after{content:'';position:absolute;inset:-10px}
+.img-overlay span:hover,.is-resizing .img-overlay span{transform:scale(1.25);background:var(--accent)}
 .img-overlay span[data-handle=nw]{left:0;top:0;cursor:nwse-resize}
 .img-overlay span[data-handle=ne]{left:100%;top:0;cursor:nesw-resize}
 .img-overlay span[data-handle=sw]{left:0;top:100%;cursor:nesw-resize}
 .img-overlay span[data-handle=se]{left:100%;top:100%;cursor:nwse-resize}
+.img-overlay span[data-handle=w],.img-overlay span[data-handle=e]{top:50%;width:8px;height:26px;margin:-13px 0 0 -4px;border-radius:4px;cursor:ew-resize}
+.img-overlay span[data-handle=w]{left:0}
+.img-overlay span[data-handle=e]{left:100%}
+.img-overlay span[data-handle=s]{left:50%;top:100%;width:26px;height:8px;margin:-4px 0 0 -13px;border-radius:4px;cursor:ns-resize}
+.img-overlay[data-kind=image] span[data-handle=s]{display:none}
+.img-overlay__size{position:absolute;right:.4rem;bottom:.4rem;padding:.15rem .45rem;border-radius:.3rem;background:var(--fg);color:var(--bg);font-size:.72rem;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.img-overlay__size[hidden]{display:none}
+/* While a handle is dragged nothing else may react: no text selection, no
+   hover flicker, and the pointer keeps its resize shape off the handle. */
+.ams-editor.is-resizing,.ams-editor.is-resizing *{user-select:none!important;-webkit-user-select:none!important}
+.ams-editor.is-resizing .image-tools{opacity:0;pointer-events:none}
+.ams-editor.is-resizing .visual-editor{pointer-events:none}
+/* A Python app in the editor: a card with its file name and the first lines of
+   its code. It is one block, selected and resized like an image. */
+.visual-editor figure.python-app{display:flex;flex-direction:column;box-sizing:border-box;width:100%;max-width:100%;height:420px;margin:1em auto;border:1px solid var(--line-strong);border-radius:.55rem;overflow:hidden;background:var(--surface-2);cursor:pointer;user-select:none;-webkit-user-select:none}
+.visual-editor figure.python-app::before{content:'Python app \\00B7  ' attr(title);flex:0 0 auto;padding:.5rem .75rem;border-bottom:1px solid var(--line);background:var(--surface);color:var(--fg);font-size:.8rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.visual-editor figure.python-app.python-app--manual::before{content:'Python app \\00B7  ' attr(title) ' \\00B7  starts on click'}
+.visual-editor figure.python-app pre{flex:1 1 auto;min-height:0;margin:0;padding:.6rem .75rem;border:0;border-radius:0;overflow:hidden;background:none;color:var(--muted);font-family:var(--mono-font);font-size:.74rem;line-height:1.5;white-space:pre;pointer-events:none}
+.visual-editor figure.python-app pre code{padding:0;background:none;color:inherit;font:inherit}
+.visual-editor figure.python-app.align-left{margin:.3em 1em 1em 0}
+.visual-editor figure.python-app.align-right{margin:.3em 0 1em 1em}
+.visual-editor figure.python-app.is-selected{outline:2px solid var(--accent);outline-offset:2px}
+/* Python dialog */
+#python-dialog{width:min(40rem,94vw)}
+.py-file{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;margin:.6rem 0 .2rem}
+.py-file span{min-width:0;overflow-wrap:anywhere}
+.py-code{min-height:9rem;max-height:32vh;font-size:.8rem;line-height:1.5;white-space:pre;overflow:auto;tab-size:4}
+.py-warnings{margin:.5rem 0 0;padding:.5rem .7rem .5rem 1.7rem;border:1px solid var(--warn);border-radius:.4rem;background:var(--warn-soft);font-size:.82rem}
+.py-warnings[hidden]{display:none}
+.py-area{margin:.9rem 0 0;padding:.6rem .8rem .8rem;border:1px solid var(--line);border-radius:.5rem;min-width:0}
+.py-area legend{padding:0 .35rem;font-weight:600;font-size:.85rem}
+.py-area__grid{display:grid;grid-template-columns:minmax(0,1fr) 7.5rem;gap:1rem;align-items:center}
+.py-area__fields label{margin-top:.4rem}
+.py-area__page{display:flex;flex-direction:column;align-items:center;gap:.3rem;height:7rem;padding:.5rem;border:1px solid var(--line);border-radius:.35rem;background:var(--bg);overflow:hidden}
+.py-area__page span{flex:0 0 auto;width:100%;height:.3rem;border-radius:.2rem;background:var(--line)}
+.py-area__page i{flex:0 0 auto;width:100%;height:2.8rem;border:1.5px solid var(--accent);border-radius:.2rem;background:var(--accent-soft)}
+@media (max-width:820px){
+  .ams-editor .toolbar,.ams-editor.is-classic .toolbar{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;-webkit-overflow-scrolling:touch;top:var(--topbar-h)}
+  .ams-editor .toolbar button{min-width:2.5rem;height:2.5rem}
+  .tb-label{display:none}
+  .image-tools{gap:.3rem}
+  .image-tools input[type=range]{width:5rem}
+  .py-area__grid{grid-template-columns:minmax(0,1fr)}
+  .py-area__page{display:none}
+}
+@media (hover:none){.img-overlay span{width:16px;height:16px;margin:-8px 0 0 -8px}}
 /* Link and image-block dialogs: the form beside the picture, so the writer
    sees what will be placed before it goes in. */
 .image-block-form{display:grid;grid-template-columns:minmax(8rem,12rem) minmax(0,1fr);gap:1rem;align-items:start;margin:.5rem 0}
@@ -1100,54 +1171,96 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
         <p class="ams-editor-stats" id="editor-stats" aria-live="off"></p>
       </div>
       <div class="toolbar" id="editor-toolbar" role="toolbar" aria-label="Content formatting" aria-controls="visual-editor">
-        <button type="button" data-wrap="<strong>|</strong>" data-command="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button>
-        <button type="button" data-wrap="<em>|</em>" data-command="italic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button>
-        <button type="button" data-wrap="<u>|</u>" data-command="underline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button>
-        <button type="button" data-wrap="<s>|</s>" data-command="strikeThrough" title="Strikethrough" aria-label="Strikethrough"><s>S</s></button>
-        <span class="toolbar-separator" aria-hidden="true"></span>
-        <button type="button" data-wrap="<h2>|</h2>" data-command="formatBlock" data-value="h2" title="Heading 2">H2</button>
-        <button type="button" data-wrap="<h3>|</h3>" data-command="formatBlock" data-value="h3" title="Heading 3">H3</button>
-        <button type="button" data-wrap="<h4>|</h4>" data-command="formatBlock" data-value="h4" title="Heading 4">H4</button>
-        <button type="button" data-wrap="<p>|</p>" data-command="formatBlock" data-value="p" title="Paragraph" aria-label="Paragraph">&para;</button>
-        <span class="toolbar-separator" aria-hidden="true"></span>
-        <button type="button" data-wrap="<ul>&#10;  <li>|</li>&#10;</ul>" data-command="insertUnorderedList" title="Bulleted list">List</button>
-        <button type="button" data-wrap="<ol>&#10;  <li>|</li>&#10;</ol>" data-command="insertOrderedList" title="Numbered list">1. List</button>
-        <button type="button" data-wrap="<blockquote>|</blockquote>" data-command="formatBlock" data-value="blockquote" title="Quote">Quote</button>
-        <button type="button" data-wrap="<pre><code>|</code></pre>" title="Code block">Code</button>
-        <button type="button" data-wrap="<hr>|" data-command="insertHorizontalRule" title="Divider line" aria-label="Divider">&mdash;</button>
-        <span class="toolbar-separator" aria-hidden="true"></span>
-        <button type="button" data-link-open title="Add or edit a link (Ctrl+L)">Link</button>
-        <button type="button" data-picker-image id="insert-image" title="Insert an image from the media library or upload one now">${icon('image', { cls: 'ico--sm' })} Media</button>
-        <button type="button" id="add-page-break" title="Mark where a printed page ends (Print only)">Page break</button>
-        ${type === 'post' ? html`<button type="button" data-open-picker="featured" title="Choose the post's featured image">Featured image</button>` : ''}
-        <span class="toolbar-separator" aria-hidden="true"></span>
-        <button type="button" id="add-html-block" title="Insert a custom HTML block">&lt;/&gt; HTML block</button>
-        <button type="button" id="add-youtube" title="Embed a YouTube video">&#9654; YouTube</button>
+        <div class="tb-group" role="group" aria-label="History">
+          <button type="button" data-exec="undo" title="Undo (Ctrl+Z)" aria-label="Undo">${tb('<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>')}</button>
+          <button type="button" data-exec="redo" title="Redo (Ctrl+Y)" aria-label="Redo">${tb('<path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/>')}</button>
+        </div>
+        <div class="tb-group" role="group" aria-label="Text style">
+          <button type="button" data-wrap="<strong>|</strong>" data-command="bold" title="Bold (Ctrl+B)" aria-label="Bold" aria-pressed="false"><b>B</b></button>
+          <button type="button" data-wrap="<em>|</em>" data-command="italic" title="Italic (Ctrl+I)" aria-label="Italic" aria-pressed="false"><i>I</i></button>
+          <button type="button" data-wrap="<u>|</u>" data-command="underline" title="Underline (Ctrl+U)" aria-label="Underline" aria-pressed="false"><u>U</u></button>
+          <button type="button" data-wrap="<s>|</s>" data-command="strikeThrough" title="Strikethrough" aria-label="Strikethrough" aria-pressed="false"><s>S</s></button>
+          <button type="button" data-exec="removeFormat" title="Clear formatting from the selection" aria-label="Clear formatting">${tb('<path d="M6 5h12"/><path d="M12 5 9 19"/><path d="m15 14 5 5M20 14l-5 5"/>')}</button>
+        </div>
+        <div class="tb-group" role="group" aria-label="Headings">
+          <button type="button" data-wrap="<h2>|</h2>" data-command="formatBlock" data-value="h2" title="Heading 2" aria-pressed="false">H2</button>
+          <button type="button" data-wrap="<h3>|</h3>" data-command="formatBlock" data-value="h3" title="Heading 3" aria-pressed="false">H3</button>
+          <button type="button" data-wrap="<h4>|</h4>" data-command="formatBlock" data-value="h4" title="Heading 4" aria-pressed="false">H4</button>
+          <button type="button" data-wrap="<p>|</p>" data-command="formatBlock" data-value="p" title="Paragraph" aria-label="Paragraph" aria-pressed="false">&para;</button>
+        </div>
+        <div class="tb-group" role="group" aria-label="Lists and blocks">
+          <button type="button" data-wrap="<ul>&#10;  <li>|</li>&#10;</ul>" data-command="insertUnorderedList" title="Bulleted list" aria-label="Bulleted list" aria-pressed="false">${tb('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6v.01M4.5 12v.01M4.5 18v.01"/>')}</button>
+          <button type="button" data-wrap="<ol>&#10;  <li>|</li>&#10;</ol>" data-command="insertOrderedList" title="Numbered list" aria-label="Numbered list" aria-pressed="false">${tb('<path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 5h1.5v4M4 9h3M4 14.5h2.5L4 18h3"/>')}</button>
+          <button type="button" data-wrap="<blockquote>|</blockquote>" data-command="formatBlock" data-value="blockquote" title="Quote" aria-label="Quote" aria-pressed="false">${tb('<path d="M5 17c2.5-1 3.5-3 3.5-5.5V7H4v5h3"/><path d="M14 17c2.5-1 3.5-3 3.5-5.5V7H13v5h3"/>')}</button>
+          <button type="button" data-wrap="<pre><code>|</code></pre>" title="Code block" aria-label="Code block">${tb('<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>')}</button>
+          <button type="button" data-wrap="<hr>|" data-command="insertHorizontalRule" title="Divider line" aria-label="Divider">${tb('<path d="M4 12h16"/><path d="M8 7h8M8 17h8" opacity=".45"/>')}</button>
+        </div>
+        <div class="tb-group tb-group--insert" role="group" aria-label="Insert">
+          <button type="button" class="tb-wide" data-link-open title="Add or edit a link (Ctrl+Shift+K)" aria-pressed="false">${tb('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1"/>')}<span class="tb-label">Link</span></button>
+          <button type="button" class="tb-wide" data-picker-image id="insert-image" title="Insert an image from the media library or upload one now">${tb('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 16-5-5-9 9"/>')}<span class="tb-label">Media</span></button>
+          <button type="button" class="tb-wide" id="add-python" title="Embed a single-file Python program that runs on the page">${tb('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 10 3 2.5L7 15M12.5 15H17"/>')}<span class="tb-label">Python app</span></button>
+          <button type="button" class="tb-wide" id="add-youtube" title="Embed a YouTube video">${tb('<rect x="3" y="5.5" width="18" height="13" rx="3.5"/><path d="M10.5 9.5v5l4-2.5Z"/>')}<span class="tb-label">YouTube</span></button>
+          <button type="button" class="tb-wide" id="add-html-block" title="Insert a custom HTML block">${tb('<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>')}<span class="tb-label">HTML block</span></button>
+          <button type="button" class="tb-wide" id="add-page-break" title="Mark where a printed page ends (Print only)">${tb('<path d="M6 3v5h12V3M6 21v-5h12v5"/><path d="M3 12h2M8 12h2M14 12h2M19 12h2"/>')}<span class="tb-label">Page break</span></button>
+          ${type === 'post' ? html`<button type="button" class="tb-wide" data-open-picker="featured" title="Choose the post's featured image">${tb('<path d="m12 4 2.4 5 5.4.7-4 3.8 1 5.4L12 16.3 7.200 18.9l1-5.4-4-3.8 5.4-.7Z"/>')}<span class="tb-label">Featured image</span></button>` : ''}
+        </div>
       </div>
       <div id="image-tools" class="image-tools" hidden role="group" aria-label="Selected image size and alignment">
         <b>Image</b>
-        <button type="button" data-img-size="25">S 25%</button>
-        <button type="button" data-img-size="50">M 50%</button>
-        <button type="button" data-img-size="75">L 75%</button>
-        <button type="button" data-img-size="100">Full 100%</button>
+        <span class="image-tools__set">
+          <button type="button" data-img-size="25">S 25%</button>
+          <button type="button" data-img-size="50">M 50%</button>
+          <button type="button" data-img-size="75">L 75%</button>
+          <button type="button" data-img-size="100">Full 100%</button>
+        </span>
         <label>Width <input type="range" id="img-width" min="10" max="100" step="1" value="50"> <output id="img-width-out" for="img-width">50%</output></label>
-        <button type="button" data-img-align="left">Left</button>
-        <button type="button" data-img-align="center" aria-pressed="true">Center</button>
-        <button type="button" data-img-align="right">Right</button>
-        <span class="toolbar-separator" aria-hidden="true"></span>
-        <button type="button" data-img-alt title="Describe the image for screen readers">Alt</button>
-        <button type="button" data-img-caption title="Add or edit the caption under the image">Caption</button>
-        <button type="button" data-img-link title="Link the image to a URL">Link</button>
-        <button type="button" data-img-remove>Remove</button>
+        <span class="image-tools__set">
+          <button type="button" data-img-align="left">Left</button>
+          <button type="button" data-img-align="center" aria-pressed="true">Center</button>
+          <button type="button" data-img-align="right">Right</button>
+        </span>
+        <span class="image-tools__set">
+          <button type="button" data-img-alt title="Describe the image for screen readers">Alt</button>
+          <button type="button" data-img-caption title="Add or edit the caption under the image">Caption</button>
+          <button type="button" data-img-link title="Link the image to a URL">Link</button>
+        </span>
+        <span class="image-tools__set">
+          <button type="button" data-block-move="up" title="Move above the previous block" aria-label="Move up">&uarr;</button>
+          <button type="button" data-block-move="down" title="Move below the next block" aria-label="Move down">&darr;</button>
+          <button type="button" data-img-remove class="image-tools__danger" title="Remove (Delete)">Remove</button>
+        </span>
+      </div>
+      <div id="python-tools" class="image-tools" hidden role="group" aria-label="Selected Python app size and placement">
+        <b>Python app</b>
+        <span class="image-tools__set">
+          <button type="button" data-img-size="50">50%</button>
+          <button type="button" data-img-size="75">75%</button>
+          <button type="button" data-img-size="100">Full</button>
+        </span>
+        <label>Height <input type="number" id="py-height" min="160" max="1200" step="10" value="420" inputmode="numeric"> px</label>
+        <span class="image-tools__set">
+          <button type="button" data-img-align="left">Left</button>
+          <button type="button" data-img-align="center" aria-pressed="true">Center</button>
+          <button type="button" data-img-align="right">Right</button>
+        </span>
+        <span class="image-tools__set">
+          <button type="button" data-py-edit title="Change the code, the file or the area">Edit code</button>
+          <button type="button" data-py-autorun aria-pressed="true" title="Start when a visitor scrolls to it; off shows a Run button first">Auto-start</button>
+        </span>
+        <span class="image-tools__set">
+          <button type="button" data-block-move="up" title="Move above the previous block" aria-label="Move up">&uarr;</button>
+          <button type="button" data-block-move="down" title="Move below the next block" aria-label="Move down">&darr;</button>
+          <button type="button" data-img-remove class="image-tools__danger" title="Remove (Delete)">Remove</button>
+        </span>
       </div>
       <p class="ams-editor-drop" id="image-drop-hint" hidden>Drop an image to upload and place it here.</p>
-      <div id="img-overlay" class="img-overlay" hidden aria-hidden="true"><span data-handle="nw"></span><span data-handle="ne"></span><span data-handle="sw"></span><span data-handle="se"></span></div>
+      <div id="img-overlay" class="img-overlay" hidden aria-hidden="true"><span data-handle="nw"></span><span data-handle="ne"></span><span data-handle="sw"></span><span data-handle="se"></span><span data-handle="w"></span><span data-handle="e"></span><span data-handle="s"></span><output id="img-overlay-size" class="img-overlay__size" hidden></output></div>
       <div id="visual-editor" class="visual-editor ams-editor-pane" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="content-label" data-placeholder="Write your content here…" hidden></div>
       <textarea id="body" name="body" class="code ams-editor-pane" spellcheck="true" aria-label="Content (HTML source)">${row?.body ?? ''}</textarea>
       <p class="ams-editor-status" id="editor-status" role="status" aria-live="polite"></p>
     </div>
-    <p class="hint">Text and HTML always show the same content: switch freely, nothing is lost. Paste keeps the words and drops foreign styling. Ctrl/Cmd+S saves, Ctrl/Cmd+B/I/U format, Ctrl/Cmd+Shift+K makes a link. Add as many HTML and YouTube blocks as you need.</p>
-    ${can(c.var.user, 'manage_settings') ? html`<p class="hint">Admin HTML is not sanitized when you save.</p>` : html`<p class="hint">Unsafe HTML is removed when you save. YouTube embeds added with the YouTube button are allowed.</p>`}
+    <p class="hint">Text and HTML always show the same content: switch freely, nothing is lost. Paste keeps the words and drops foreign styling. Ctrl/Cmd+S saves, Ctrl/Cmd+B/I/U format, Ctrl/Cmd+Shift+K makes a link. Click an image or a Python app to resize it by its handles; Delete removes it.</p>
+    ${can(c.var.user, 'manage_settings') ? html`<p class="hint">Admin HTML is not sanitized when you save.</p>` : html`<p class="hint">Unsafe HTML is removed when you save. YouTube embeds and Python apps added with their toolbar buttons are allowed.</p>`}
   </div>
   ${postFields}
   ${pageFields}
@@ -1237,6 +1350,37 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
   <div class="row dialog-actions">
     <button type="button" class="btn ghost" data-close-dialog>Cancel</button>
     <button type="button" class="btn" id="insert-image-block">Insert image</button>
+  </div>
+</dialog>
+<dialog id="python-dialog" aria-labelledby="python-dialog-title">
+  <h2 id="python-dialog-title">Add Python app</h2>
+  <p class="hint">Choose a single-file <code>.py</code> program. It runs in each visitor's browser, in a sandbox that cannot touch your site, so no server is needed. Programs that <code>print()</code> and ask with <code>input()</code> work as written.</p>
+  <div class="py-file">
+    <button type="button" class="btn ghost" id="python-file-button">${icon('upload', { cls: 'ico--sm' })} Choose .py file</button>
+    <input type="file" id="python-file" accept=".py,.pyw,text/x-python,text/plain" hidden>
+    <span class="muted" id="python-file-name">No file chosen</span>
+  </div>
+  <label for="python-code">Code <span class="muted">(paste or edit here)</span></label>
+  <textarea id="python-code" class="code py-code" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="name = input(&quot;Your name: &quot;)&#10;print(&quot;Hello,&quot;, name)"></textarea>
+  <ul class="py-warnings" id="python-warnings" hidden></ul>
+  <fieldset class="py-area">
+    <legend>Area on the page</legend>
+    <div class="py-area__grid">
+      <div class="py-area__fields">
+        <label for="python-width">Width</label>
+        <p class="row image-block-form__width"><input type="range" id="python-width" min="30" max="100" step="5" value="100"> <output id="python-width-out" for="python-width">100%</output></p>
+        <label for="python-height">Height</label>
+        <p class="row image-block-form__width"><input type="range" id="python-height" min="200" max="900" step="10" value="420"> <output id="python-height-out" for="python-height">420px</output></p>
+      </div>
+      <div class="py-area__page" aria-hidden="true"><span></span><span></span><i id="python-area-box"></i><span></span></div>
+    </div>
+    <p class="hint">After inserting, click the app in the editor and drag its handles to resize it right on the page.</p>
+    <label class="check"><input type="checkbox" id="python-autorun" checked> Start automatically when a visitor scrolls to it</label>
+  </fieldset>
+  <p class="form-error" id="python-error" role="alert" hidden></p>
+  <div class="row dialog-actions">
+    <button type="button" class="btn ghost" data-close-dialog>Cancel</button>
+    <button type="button" class="btn" id="insert-python">Insert app</button>
   </div>
 </dialog>
 <dialog id="html-block-dialog" aria-labelledby="html-block-title">

@@ -17,6 +17,10 @@
  *   wordCount(html)        - { words, chars } for the live counter
  *   readingMinutes(words)
  *   youtubeId(url) / hasRawBlock(html)
+ *   pythonFigure({code, name, width, height, align, manual})
+ *                          - an embedded Python app, in the one shape the
+ *                            sanitizer keeps and the public page runs
+ *   pythonWarnings(code)   - what cannot work in a browser, said before saving
  *
  * The tests run this exact string in a VM (tests/editor.test.mjs).
  */
@@ -132,7 +136,52 @@ export const EDITOR_UTILS_JS = `<script>
     return '<figure class="image-block align-'+align+'" style="width:'+width+'%">'+inner+'</figure>';
   }
 
+  function clampHeight(px){
+    var n=Math.round(Number(px)||0);
+    if(!n)return 420;
+    return Math.max(160,Math.min(1200,n));
+  }
+  function pythonName(name){
+    var n=String(name==null?'':name).replace(/^.*[\\\\/]/,'').replace(/[^A-Za-z0-9._ -]/g,'').trim().slice(0,80);
+    if(!n||n.charAt(0)==='.')n='app.py';
+    if(!/\\.pyw?$/i.test(n))n+='.py';
+    return n;
+  }
+
+  /**
+   * A Python app block. The source travels as escaped text inside
+   * <pre><code>, so it is inert markup everywhere (the editor, a feed, a page
+   * with scripts off) until the public page hands it to the sandboxed runner.
+   * Width is a percentage and height is pixels: the two style declarations the
+   * sanitizer keeps on a figure.
+   */
+  function pythonFigure(opts){
+    var o=opts||{};
+    var code=String(o.code==null?'':o.code).replace(/\\r\\n?/g,'\\n').replace(/\\u0000/g,'');
+    if(!code.trim())return '';
+    var align=['left','center','right'].indexOf(o.align)>=0?o.align:'center';
+    var width=Math.max(30,clampWidth(o.width==null?100:o.width));
+    return '<figure class="python-app align-'+align+(o.manual?' python-app--manual':'')+'" style="width:'+width+'%;height:'+clampHeight(o.height)+'px" title="'+esc(pythonName(o.name))+'"><pre><code>'+esc(code)+'</code></pre></figure>';
+  }
+
+  // Pyodide runs CPython in the page. What needs a desktop, a server or
+  // another process cannot work there; say so while the writer can still act.
+  var PY_LIMITS=[
+    [/^[ \\t]*(?:import|from)[ \\t]+(tkinter|customtkinter|turtle|pygame|PyQt[456]|PySide[26]|kivy|wx|curses)\\b/m,'opens a desktop window, which a web page cannot show. Only programs that print and ask with input() run here.'],
+    [/^[ \\t]*(?:import|from)[ \\t]+(flask|django|fastapi|uvicorn|streamlit|gradio|socket|socketserver|bottle|aiohttp)\\b/m,'needs a server or a network socket. A browser page cannot host one.'],
+    [/^[ \\t]*(?:import|from)[ \\t]+(subprocess|multiprocessing|threading)\\b/m,'starts threads or other programs, which are not available in the browser.'],
+  ];
+  function pythonWarnings(code){
+    var text=String(code==null?'':code),out=[];
+    PY_LIMITS.forEach(function(rule){
+      var hit=text.match(rule[0]);
+      if(hit)out.push('"'+hit[1]+'" '+rule[1]);
+    });
+    return out;
+  }
+
   window.amsEditorUtils={
+    clampHeight: clampHeight, pythonName: pythonName, pythonFigure: pythonFigure, pythonWarnings: pythonWarnings,
     esc: esc, safeHref: safeHref, slugify: slugify, hasRawBlock: hasRawBlock,
     youtubeId: youtubeId, wordCount: wordCount, readingMinutes: readingMinutes,
     plainText: plainText, clampWidth: clampWidth,
