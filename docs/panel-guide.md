@@ -425,3 +425,19 @@ footer; custom themes can use `site.social` (a list of `name`, `label`, and
 `url` objects) and `site.social_footer` to respect the footer toggle. Existing installed
 themes keep their customizations; reinstall or update a bundled theme to pick up
 the new footer partial.
+
+## Python apps in a post or page
+
+The editor's **Python app** button embeds a single-file `.py` program that runs on the published page.
+
+1. Click **Python app**, choose the `.py` file (or paste the code), and set the area it takes: width in percent, height in pixels.
+2. The app lands in the text as one block. Click it to select it, then drag the handles: the sides and corners set the width, the bottom ones the height. The floating bar has size presets, alignment, **Edit code**, **Auto-start**, move up/down and **Remove** (or press Delete).
+3. Save. On the public page the block becomes a terminal that runs the program.
+
+What to expect:
+
+- The program runs **in the visitor's browser** with [Pyodide](https://pyodide.org) (CPython as WebAssembly), loaded from `cdn.jsdelivr.net`. Nothing runs on your server, and the first run downloads about 10 MB.
+- It runs inside a sandboxed frame (`/__pyapp/runner`) with no access to your site's cookies or panel, so authors without admin rights can use it too.
+- `print()` and `input()` work as written, including `input()` inside functions, methods and `__init__`. Popular scientific packages bundled with Pyodide (numpy, pandas, matplotlib…) are fetched when imported; `plt.show()` draws the figure into the terminal.
+- Desktop windows (tkinter, pygame, turtle), web servers (Flask, Django), threads and subprocesses cannot run in a web page. The dialog warns when it sees those imports.
+- With **Auto-start** off, visitors get a **Run** button and nothing is downloaded until they press it. With scripts disabled, the page shows the source as a code listing.

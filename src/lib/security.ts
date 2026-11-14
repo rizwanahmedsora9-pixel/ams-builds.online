@@ -69,6 +69,10 @@ export function cspFor(opts: { mode: CspMode; nonce: string }): { header: string
     "default-src 'self'",
     `script-src 'self'${nonce}`,
     `style-src 'self' 'unsafe-inline'${nonce}`,
+    // A nonce switches 'unsafe-inline' off for the whole directive, which would
+    // also drop the width/alignment the editor saves on an image or app block.
+    // Style *attributes* get their own rule; they cannot run script.
+    "style-src-attr 'unsafe-inline'",
     "img-src 'self' data: https:",
     "font-src 'self' data:",
     "media-src 'self' https:",
@@ -108,7 +112,7 @@ const URL_ATTRS = new Set(['href', 'src']);
  */
 const SAFE_STYLE_TAGS = new Set(['figure', 'img', 'div']);
 const SAFE_STYLE_VALUE = /^(\d{1,3}(?:\.\d+)?%|\d{1,4}px|auto|left|right|center|block|none)$/i;
-const SAFE_STYLE_PROPS = new Set(['width', 'max-width', 'margin-left', 'margin-right', 'float', 'display', 'text-align']);
+const SAFE_STYLE_PROPS = new Set(['width', 'height', 'max-width', 'margin-left', 'margin-right', 'float', 'display', 'text-align']);
 export function safeStyle(value: string): string {
   const kept: string[] = [];
   for (const decl of value.split(';')) {
@@ -117,6 +121,8 @@ export function safeStyle(value: string): string {
     const val = rest.join(':').trim().toLowerCase();
     if (!SAFE_STYLE_PROPS.has(prop) || !SAFE_STYLE_VALUE.test(val)) continue;
     if (prop === 'width' && val.endsWith('%') && parseFloat(val) > 100) continue;
+    // A height is only ever the pixel height of an embedded app block.
+    if (prop === 'height' && !/^\d{2,4}px$/.test(val)) continue;
     kept.push(`${prop}:${val}`);
     if (kept.length >= 6) break;
   }
@@ -203,7 +209,8 @@ export function sanitizeHtml(input: string): string {
 }
 
 export const stripTags = (html: string): string =>
-  html.replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  // An embedded Python app's source is not prose: keep it out of excerpts.
+  html.replace(/<figure\b[^>]*\bclass="[^"]*\bpython-app\b[\s\S]*?<\/figure\s*>/gi, ' ').replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
 /* --------------------------------------------------------------- rate limit */
 
