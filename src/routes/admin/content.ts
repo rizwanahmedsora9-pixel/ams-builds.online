@@ -1337,7 +1337,7 @@ ${autosave ? restoreBanner(autosave, base, kind, row!.id) : ''}
 </dialog>
 <dialog id="python-dialog" aria-labelledby="python-dialog-title">
   <h2 id="python-dialog-title">Add Python app</h2>
-  <p class="hint">Choose a single-file <code>.py</code> program. It runs in each visitor's browser, in a sandbox that cannot touch your site, so no server is needed. Programs that <code>print()</code> and ask with <code>input()</code> work as written.</p>
+  <p class="hint">Choose a single-file <code>.py</code> program. It runs in each visitor's browser, in a sandbox that cannot touch your site, so no server is needed. Programs that <code>print()</code> and ask with <code>input()</code> work as written, and <code>ams_pick_file()</code> / <code>ams_download()</code> move a file (an image in, a PDF out).</p>
   <div class="py-file">
     <button type="button" class="btn ghost" id="python-file-button">${icon('upload', { cls: 'ico--sm' })} Choose .py file</button>
     <input type="file" id="python-file" accept=".py,.pyw,text/x-python,text/plain" hidden>
