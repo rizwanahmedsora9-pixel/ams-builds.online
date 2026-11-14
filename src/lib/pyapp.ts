@@ -28,10 +28,13 @@ export const PYAPP_RUNNER_PATH = '/__pyapp/runner';
 /** The runner's own policy: it replaces (not inherits) the site's CSP. */
 export const PYAPP_RUNNER_CSP = [
   "default-src 'none'",
+  // The worker is a blob:; the interpreter is fetched from the CDN inside it.
   "script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net",
   "worker-src blob:",
   "style-src 'unsafe-inline'",
   "img-src data: blob:",
+  // jsdelivr sends wheels for cross-origin fetches; without this the interpreter
+  // and its packages are refused.
   "connect-src https:",
   "frame-ancestors 'self'",
   // `allow-downloads` lets a program hand the visitor a file it made (a PDF,
@@ -42,26 +45,33 @@ export const PYAPP_RUNNER_CSP = [
 const inlineJs = (value: string): string => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
 const WORKER_JS = `
-var pending=null,pendingFile=null;
+var pending=null,pendingFile=null,booted=0,running=0,base='',index='',boot='';
 function send(kind,value){
   // Python hands a produced file over as JSON; the runner wants an object.
   if(kind==='file'&&typeof value==='string'){try{value=JSON.parse(value)}catch(e){return}}
   postMessage({t:String(kind),s:value});
 }
+// A classic worker, not a module worker: this frame has an opaque origin (it is
+// sandboxed without allow-same-origin), and in Chrome a module worker started
+// from a blob: URL there never starts and never reports why. importScripts and
+// a global loadPyodide() (pyodide.js, not pyodide.mjs) need no modules at all.
 self.onmessage=function(e){
   var m=e.data||{};
+  if(m.t==='config'&&!booted){booted=1;base=m.base;index=m.index||m.base;boot=m.boot}
   if(m.t==='line'&&pending){var r=pending;pending=null;r(m.s);return}
   // Files stay JSON on both hops: a JS array of objects would reach Python as
   // proxies, not dicts.
   if(m.t==='files'&&pendingFile){var p=pendingFile;pendingFile=null;p(m.files&&m.files.length?JSON.stringify(m.files):'');return}
-  if(m.t!=='run')return;
+  if(m.t!=='run'||!booted||running)return;
+  running=1;
   (async function(){
     try{
-      var mod=await import(m.base+'pyodide.mjs');
-      var py=await mod.loadPyodide({indexURL:m.index||m.base});
+      if(!self.loadPyodide)await importScripts(base+'pyodide.js');
+      if(!self.loadPyodide)throw new Error('pyodide.js did not define loadPyodide');
+      var py=await self.loadPyodide({indexURL:index});
       postMessage({t:'status',s:'Preparing…'});
       try{await py.loadPackagesFromImports(m.code,{messageCallback:function(){},errorCallback:function(){}})}catch(err){}
-      py.runPython(m.boot);
+      py.runPython(boot);
       var run=py.globals.get('ams_run');
       postMessage({t:'start'});
       var status=await run(m.code,m.name,send,function(){
@@ -76,6 +86,7 @@ self.onmessage=function(e){
       });
       postMessage({t:'end',s:String(status)});
     }catch(err){
+      running=0;
       postMessage({t:'fail',s:String(err&&err.message||err)});
     }
   })();
@@ -120,7 +131,7 @@ const RUNNER_JS = `
   var out=document.getElementById('out'),screen=document.getElementById('screen');
   var dot=document.getElementById('dot'),statusEl=document.getElementById('status'),nameEl=document.getElementById('name');
   var restart=document.getElementById('restart');
-  var code=null,name='app.py',worker=null,field=null,touched=false,chars=0,MAX=400000;
+  var code=null,name='app.py',worker=null,field=null,touched=false,chars=0,MAX=400000,watchdog=null,started=0;
   function state(kind,text){dot.className='dot '+kind;statusEl.textContent=text}
   function nearEnd(){return screen.scrollHeight-screen.scrollTop-screen.clientHeight<40}
   function add(node){
@@ -241,17 +252,33 @@ const RUNNER_JS = `
     // they have clicked into it.
     if(touched)try{field.focus({preventScroll:true})}catch(e){field.focus()}
   }
-  function stop(){if(worker){worker.terminate();worker=null}field=null}
+  function stop(){
+    if(watchdog){clearTimeout(watchdog);watchdog=null}
+    if(worker){worker.terminate();worker=null}
+    started=0;
+    field=null;
+  }
   function start(){
     stop();
     out.textContent='';chars=0;
     state('load','Loading Python… the first run downloads about 12 MB');
     var url;
     try{
+      // A classic worker on purpose: in a frame with an opaque origin (this one
+      // is sandboxed without allow-same-origin) Chrome never starts a module
+      // worker from a blob: URL, and never says so. importScripts needs neither.
       url=URL.createObjectURL(new Blob([WORKER],{type:'text/javascript'}));
-      worker=new Worker(url,{type:'module'});
+      worker=new Worker(url);
     }catch(err){state('err','This browser cannot run Python here');write('Web Workers are not available in this browser.\\n','e');return}
     var mine=worker;
+    // One script in the worker loads the interpreter; if the network refuses it
+    // the worker dies quietly, so the wait is bounded and then explained.
+    watchdog=setTimeout(function(){
+      if(mine!==worker||!started)return;
+      state('err','Python could not start');
+      write('Python did not start within 90 seconds. Check the connection to cdn.jsdelivr.net and press Restart.\\n','e');
+      stop();
+    },90000);
     mine.onmessage=function(e){
       if(mine!==worker)return;
       var m=e.data||{};
@@ -261,8 +288,11 @@ const RUNNER_JS = `
       else if(m.t==='file')download(m.s);
       else if(m.t==='pick')pick(m.s);
       else if(m.t==='status')state('load',m.s);
-      else if(m.t==='start')state('run','Running');
-      else if(m.t==='ask')ask();
+      else if(m.t==='start'){
+        started=1;
+        if(watchdog){clearTimeout(watchdog);watchdog=null}
+        state('run','Running');
+      }else if(m.t==='ask')ask();
       else if(m.t==='end'){
         state(m.s==='error'?'err':'','');
         statusEl.textContent=m.s==='error'?'Stopped with an error':'Finished';
@@ -280,8 +310,11 @@ const RUNNER_JS = `
       write('Python could not be loaded'+(e&&e.message?': '+e.message:'')+'.\\n','e');
       stop();
     };
-    mine.postMessage({t:'run',code:code,name:name,base:BASE,boot:BOOT});
-    setTimeout(function(){try{URL.revokeObjectURL(url)}catch(e){}},30000);
+    mine.postMessage({t:'config',base:BASE,boot:BOOT});
+    mine.postMessage({t:'run',code:code,name:name});
+    // The worker needs the blob only to fetch its one script; the interpreter
+    // and its packages come from the CDN after that.
+    setTimeout(function(){try{URL.revokeObjectURL(url)}catch(e){}},10000);
   }
   restart.addEventListener('click',function(){touched=true;if(code!==null)start()});
   screen.addEventListener('mousedown',function(e){
