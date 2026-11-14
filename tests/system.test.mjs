@@ -43,6 +43,11 @@ test('a small site exists to lose: pages, a post, media and a redirect', async (
   const { anon, adminPost, request, csrf } = harness;
   assert.match((await adminPost('/pages/save', { title: 'Legacy Page', slug: 'legacy-page', body: '<p>Who we are.</p>', status: 'published' })).location, /ok=/);
   assert.match((await adminPost('/posts/save', { title: 'First post', body: '<p>Hello.</p>', status: 'published' })).location, /ok=/);
+  const theme = new FormData();
+  theme.set('_csrf', await csrf());
+  theme.set('theme', new File([JSON.stringify({ name: 'Old Test Theme', version: '1.0', templates: { base: '<html><body>{{{content}}}</body></html>' } })], 'old-theme.json', { type: 'application/json' }));
+  assert.match((await request(`${admin}/themes/upload`, { method: 'POST', body: theme })).location, /Old Test Theme/);
+  assert.match((await harness.get(`${admin}/themes`)).text, /data-theme-slug="old-test-theme"/);
   const body = new FormData();
   body.set('_csrf', await csrf());
   body.append('files', new File([PNG], 'team.png', { type: 'image/png' }));
@@ -63,8 +68,8 @@ test('the reset button is in Tools, and the screen counts what it will destroy',
   assert.equal(page.status, 200);
   assert.match(page.text, /Reset the panel/);
   assert.match(page.text, /This cannot be undone\./);
-  assert.match(page.text, /<dt>Pages<\/dt><dd>15<\/dd>/, 'the demo pages plus the About page');
-  assert.match(page.text, /<dt>Posts<\/dt><dd>9<\/dd>/);
+  assert.match(page.text, /<dt>Pages<\/dt><dd>2<\/dd>/, 'the starter home and the Legacy page');
+  assert.match(page.text, /<dt>Posts<\/dt><dd>1<\/dd>/);
   assert.match(page.text, /<dt>Media files<\/dt><dd>1<\/dd>/);
   assert.match(page.text, /<dt>Panel accounts, including yours<\/dt><dd>1<\/dd>/);
   assert.match(page.text, /<dt>Redirects<\/dt><dd>1<\/dd>/);
@@ -79,7 +84,7 @@ test('the reset button is in Tools, and the screen counts what it will destroy',
 
 test('a reset needs the word, the password and an admin', async () => {
   const { get, anon, adminPost } = harness;
-  const stillThere = async () => assert.equal((await anon('/about')).status, 200, 'the site is untouched');
+  const stillThere = async () => assert.equal((await anon('/legacy-page')).status, 200, 'the site is untouched');
 
   assert.match((await adminPost('/tools/reset', { current_password: ADMIN.password, confirm: 'nope' })).location, /err=Type RESET/);
   await stillThere();
@@ -145,6 +150,19 @@ test('the site can be installed again from zero', async () => {
   assert.equal((await anon('/old')).status, 404, 'the old redirect did not come back');
   assert.equal((await anon('/admin-panel')).status, 404, 'the old admin URL is not the panel any more');
   assert.equal((await get('/fresh-panel')).status, 200);
+  assert.equal(JSON.parse((await anon('/api/posts')).text).total, 0, 'no demo posts return after reset');
+  const themes = (await get('/fresh-panel/themes')).text;
+  assert.match(themes, /No uploaded themes/, 'no theme is installed');
+  assert.doesNotMatch(themes, /data-theme-slug=|data-store-theme=/, 'no old or store theme cards are shown');
+  assert.match(themes, /Upload a theme/, 'owners can upload their own theme');
+  const newTheme = new FormData();
+  newTheme.set('_csrf', await harness.csrf());
+  newTheme.set('theme', new File([JSON.stringify({ name: 'My Theme', version: '1.0', templates: { base: '<html><body data-mine="yes">{{{content}}}</body></html>' } })], 'mine.json', { type: 'application/json' }));
+  assert.match((await harness.request('/fresh-panel/themes/upload', { method: 'POST', body: newTheme })).location, /My Theme/);
+  const uploaded = (await get('/fresh-panel/themes')).text.match(/data-theme-id="(\d+)" data-theme-slug="my-theme"/);
+  assert.ok(uploaded, 'a new theme can be uploaded');
+  await harness.adminPost(`/themes/${uploaded[1]}/activate`, {});
+  assert.match((await anon('/')).text, /data-mine="yes"/, 'the uploaded theme can be activated');
   assert.match((await get('/fresh-panel/media')).text, /No media items found/, 'the library is empty');
   assert.match((await get('/fresh-panel/tools')).text, /0 rules/, 'so are the redirects');
   log('reinstalled under a new admin URL: one sample page, empty library, no redirects');

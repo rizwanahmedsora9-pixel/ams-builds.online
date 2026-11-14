@@ -7,8 +7,6 @@ import { markInstalled, saveConfig, validAdminSlug } from '../lib/config';
 import { cleanDomain, sameOrigin } from '../lib/security';
 import { displayTitle, siteNameFromHost } from '../lib/origin';
 import { html, raw, shell, type Raw } from '../lib/ui';
-import { defaultThemeStatements, writeDefaultThemeFiles } from '../lib/bundled-theme';
-import { demoContentStatements } from '../lib/demo-content';
 
 /**
  * First-run wizard. The root app only routes here while the KV "installed"
@@ -53,7 +51,7 @@ function wizard(v: Values, errors: string[] = []): string {
     </section>
     <section data-step>
       <h2>3. Install</h2>
-      <p>This creates the database tables, the default theme and a sample home page, then locks the installer.</p>
+      <p>This creates the database tables and a starter home page, then locks the installer. You can upload your own theme and create your own posts.</p>
       <p class="hint">Built the site wrong later? An admin can reopen this wizard with <b>Tools &rarr; Danger zone &rarr; Reset the panel</b>, which deletes everything first.</p>
       <button class="btn" type="submit" style="width:100%">Install</button>
     </section>
@@ -134,15 +132,11 @@ install.post('/', async (c) => {
   await createSchema(c.env);
 
   const db = c.env.DB;
-  // The bundled theme's stylesheet, script and screenshot are served assets like
-  // any other theme's, so the file store gets them at install time.
-  const themeFiles = await writeDefaultThemeFiles(c.env);
   const setting = db.prepare('INSERT OR REPLACE INTO settings (site_id,key,value) VALUES (1,?,?)');
   const homeBody = `<h1>Welcome to ${shownTitle.replace(/[<>&]/g, '')}</h1>\n<p>This is your sample home page. Sign in to the admin panel to edit it, write your first post and upload media.</p>`;
   await db.batch([
     db.prepare("INSERT INTO users (username,email,password_hash,role,created_at) VALUES (?,?,?,'admin',?)").bind(v.username, v.email, await hashPassword(password), now),
     db.prepare('INSERT OR REPLACE INTO sites (id,hostname,name,created_at) VALUES (1,?,?,?)').bind(v.domain, shownTitle, now),
-    ...defaultThemeStatements(c.env, themeFiles, { active: true, now }),
     db.prepare("INSERT INTO content (site_id,type,title,slug,body,status,author_id,published_at,created_at,updated_at) VALUES (1,'page','Home','home',?,'published',1,?,?,?)").bind(homeBody, now, now, now),
     db.prepare("INSERT INTO menus (id,site_id,name,location) VALUES (1,1,'Primary','primary')"),
     db.prepare("INSERT INTO menu_items (menu_id,label,url,position) VALUES (1,'Home','/',0),(1,'Blog','/blog',1)"),
@@ -156,7 +150,6 @@ install.post('/', async (c) => {
     setting.bind('schema_version', String(SCHEMA_VERSION)),
     setting.bind('installed_at', now),
     db.prepare("INSERT OR REPLACE INTO settings (site_id,key,value) SELECT 1,'home_page_id',CAST(id AS TEXT) FROM content WHERE site_id=1 AND type='page' AND slug='home'"),
-    ...demoContentStatements(db, now, 1),
   ]);
   await markInstalled(c.env);
 

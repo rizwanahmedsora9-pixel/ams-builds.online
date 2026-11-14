@@ -530,12 +530,11 @@ becomes controls with no code — are in the [Panel Guide](docs/panel-guide.md#a
 
 ## Themes
 
-**Themes** in the admin panel has a built-in store, a manager for every installed theme, an uploader and a
+**Themes** in the admin panel has a manager for installed themes, an uploader and a
 validator. A theme package can ship templates, partials, a stylesheet and binary assets (logo, fonts, one
 `theme.js`), and a theme can inherit from another one.
 
-**Ahmed Pro Theme is the default theme, and the only one the app ships**: a new install starts with it, a
-site with no active theme renders with it, and a theme that throws while rendering falls back to it.
+**Fresh installs and reinstalls after a panel reset have no installed themes or demo posts.** Upload and activate your own theme in the panel. A starter Home page is created; sites with no active theme, or a theme that throws while rendering, use the bundled Ahmed Pro fallback.
 
 | Store theme | Look |
 | --- | --- |

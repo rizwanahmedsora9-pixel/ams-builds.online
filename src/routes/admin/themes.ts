@@ -39,36 +39,6 @@ themes.use('/themes', guard);
 themes.use('/themes/*', guard);
 
 /**
- * A store card's screenshot: the file the theme ships (bundled or installed),
- * or '' so the caller falls back to a palette gradient.
- */
-function storeScreenshot(st: StoreTheme, installedPaths: string[], installed: boolean): string {
-  const path = st.manifest.screenshot;
-  if (!path) return '';
-  // Only a theme that is installed has the file to serve, and only when it was
-  // actually written: a stale manifest must not point at a 404.
-  if (!installed || !installedPaths.includes(path)) return '';
-  return `${themeAssetUrl(st.slug, path)}?v=${encodeURIComponent(st.version)}`;
-}
-
-/** Fallback card art: the theme's own three colours, laid out as a page. */
-function gradientFor(st: StoreTheme): string {
-  const [bg, fg, accent] = [st.preview[0] || '#f5f2ec', st.preview[1] || '#2b2b2b', st.preview[2] || '#b4552d'];
-  return `linear-gradient(180deg, ${bg} 0 64%, ${fg} 64% 70%, ${bg} 70% 100%), linear-gradient(90deg, ${accent} 0 28%, ${bg} 28% 100%)`;
-}
-
-/** "1.2.0" > "1.10.0"? No — compare numerically, field by field. */
-function compareVersion(a: string, b: string): number {
-  const pa = String(a).split('.').map((n) => Number.parseInt(n, 10) || 0);
-  const pb = String(b).split('.').map((n) => Number.parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (d) return d;
-  }
-  return 0;
-}
-
-/**
  * A theme that was edited in the panel differs from the store package it came
  * from. Remember the fingerprint of the store files when they were installed, so
  * an update can tell "you changed this" from "the store changed this" instead of
@@ -156,24 +126,11 @@ const manifestOf = (row: { manifest: string }): Partial<ThemeManifest> => {
 themes.get('/themes', async (c) => {
   const base = c.var.base;
   const rows = await installedRows(c);
-  const [counts, versions, assetPaths, v2] = await Promise.all([
+  const [counts, versions, v2] = await Promise.all([
     Promise.all(rows.map((t) => assetCount(c.env, t.slug))),
     Promise.all(rows.map((t) => listThemeVersions(c.env, t.slug))),
-    Promise.all(rows.map(async (t) => (await listThemeAssets(c.env, t.slug)).map((a) => a.path))),
     hasTable(c.env, 'theme_archives').then(() => true),
   ]);
-  const installedSlugs = new Set(rows.map((t) => t.slug));
-  const assetsBySlug = new Map(rows.map((t, i) => [t.slug, assetPaths[i]]));
-  const settings = await getSettings(c.env);
-  // Which installed themes the store also ships and which files were edited.
-  const loadedThemes = await Promise.all(rows.map((t) => loadTheme(c.env, { slug: t.slug })));
-  const conflictFiles = new Map<string, string[]>();
-  rows.forEach((t, i) => {
-    const theme = loadedThemes[i];
-    if (!theme) return;
-    const conflict = storeConflict({ env: c.env, settings }, t.slug, theme);
-    if (conflict) conflictFiles.set(t.slug, conflict.files);
-  });
   const failure = rows.map((t) => ({ slug: t.slug, fail: themeFailureFor(t.slug) })).find((x) => x.fail);
 
   return layout(c, 'Themes', html`
@@ -182,45 +139,7 @@ ${failure ? notice(html`<b>${failure.slug}</b> failed to render, so the site is 
 ${v2 ? '' : ''}
 ${rows.some((t) => t.active)
   ? ''
-  : notice(html`No theme is active, so pages use the bundled ${bundledTheme.name}. <a href="${base}/themes/store/${bundledTheme.slug}/install?activate=1">Activate ${bundledTheme.name}</a>`, { tone: 'warn' })}
-
-<h2>Theme store</h2>
-<div class="store">
-  ${storeThemes.map((st) => {
-    const have = rows.find((t) => t.slug === st.slug);
-    const update = Boolean(have) && compareVersion(st.version, have!.version) > 0;
-    // The click-through carries the choice, and the prompt says which files would
-    // be replaced — no silent overwrite of panel edits.
-    const edited = have ? conflictFiles.get(st.slug) ?? [] : [];
-    const changelog = (st.manifest.changelog ?? []).slice(0, 1)[0];
-    // A real screenshot when the package ships one; otherwise one generated from
-    // the theme's own palette, so a card is never an empty grey box.
-    const shot = storeScreenshot(st, assetsBySlug.get(st.slug) ?? [], installedSlugs.has(st.slug));
-    return html`<div class="card store-item" data-store-theme="${st.slug}">
-      <div class="swatch" style="background:linear-gradient(135deg,${st.preview[1] || '#888'} 0 50%,${st.preview[2] || '#555'} 50% 100%);border-top:1.6rem solid ${st.preview[0] || '#fff'}" aria-hidden="true"></div>
-      <div class="store-item__shot" style="${shot ? `background-image:url(${shot})` : `background:${gradientFor(st)}`}" aria-hidden="true"></div>
-      <h3>${st.name} <small class="muted">v${st.version}</small></h3>
-      <p class="muted">${st.description || 'No description.'}${st.manifest.author ? html` <span class="muted">· by ${st.manifest.author}</span>` : ''}</p>
-      ${st.manifest.tags.length ? html`<p class="tags">${st.manifest.tags.map((t) => html`<span class="tag">${t}</span>`)}</p>` : ''}
-      ${update ? html`<div class="notice notice--info store-item__update" data-update="${st.slug}">
-        <p><b>Update available v${have!.version} → v${st.version}</b>${changelog && changelog.version === st.version && changelog.notes ? html` — ${changelog.notes}` : ''}</p>
-        ${edited.length ? html`<p class="hint">You edited ${edited.join(', ')} in the panel. Choose what happens to those edits:</p>
-        <div class="row">
-          <form method="post" action="${base}/themes/store/${st.slug}/install" class="inline">${csrfField(c)}<input type="hidden" name="conflict" value="keep"><button class="btn ghost small" type="submit">Keep my changes</button></form>
-          <form method="post" action="${base}/themes/store/${st.slug}/install" class="inline">${csrfField(c)}<input type="hidden" name="conflict" value="replace"><button class="btn ghost small" type="submit">Replace with v${st.version}</button></form>
-          <form method="post" action="${base}/themes/store/${st.slug}/install" class="inline">${csrfField(c)}<input type="hidden" name="conflict" value="copy"><button class="btn small" type="submit">Save mine as a copy</button></form>
-        </div>` : ''}
-      </div>` : ''}
-      <div class="row">
-        ${have?.active && !update ? html`<span class="badge published">Active</span>` : ''}
-        ${have && !have.active && !update ? html`<span class="badge draft">Installed</span>` : ''}
-        ${!have || update ? html`<form method="post" action="${base}/themes/store/${st.slug}/install" class="inline">${csrfField(c)}<button class="btn ghost small" type="submit">${update ? `Update ${have!.version} → ${st.version}` : 'Install'}</button></form>` : ''}
-        ${have?.active ? '' : html`<form method="post" action="${base}/themes/store/${st.slug}/install" class="inline">${csrfField(c)}<input type="hidden" name="activate" value="1"><button class="btn small" type="submit">${have ? 'Activate' : 'Install and activate'}</button></form>`}
-        <a class="btn ghost small" href="${base}/themes/preview/${st.slug}?from=${encodeURIComponent('/themes')}">Preview</a>
-      </div>
-    </div>`;
-  })}
-</div>
+  : notice(html`No theme is active. The site uses a built-in fallback until you upload and activate your own theme.`, { tone: 'warn' })}
 
 <h2 style="margin-top:1.4rem">Installed themes</h2>
 <div class="card">
@@ -238,7 +157,7 @@ ${rows.some((t) => t.active)
         <a class="btn ghost small" href="${base}/themes/${encodeURIComponent(t.slug)}">Manage</a>
         <a class="btn ghost small" href="${base}/themes/${t.id}/download">Download</a>
       </li>`;
-    }) : html`<li><div class="t"><strong>No uploaded themes</strong><small>Install one from the store, or upload your own below.</small></div></li>`}
+    }) : html`<li><div class="t"><strong>No uploaded themes</strong><small>Upload your own theme below.</small></div></li>`}
   </ul>
 </div>
 
@@ -250,11 +169,6 @@ ${rows.some((t) => t.active)
   <p class="hint">Up to ${String(Math.round(MAX_THEME_UPLOAD / 1048576))} MB. A zip may carry <code>theme.json</code>, <code>*.html</code> templates, <code>partials/*.html</code>, <code>style.css</code> and <code>assets/</code> (images, fonts, one optional <code>theme.js</code>). Uploading a theme with the same name replaces it, and the previous version is snapshotted first.</p>
   <p style="margin:.8rem 0 0"><button class="btn" type="submit">Upload theme</button></p>
 </form>
-
-${card({
-  title: 'Ready-made themes',
-  body: html`<p class="muted">One theme ships with the app: <b>${bundledTheme.name}</b>, and it is the default. ${bundledTheme.description} Its accent colour, content width, homepage hero, contact details and social links are set under Appearance &rarr; Customize.</p>`,
-})}
 
 <div class="card">
   <h2>Make your own</h2>
