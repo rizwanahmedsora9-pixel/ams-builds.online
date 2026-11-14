@@ -5,8 +5,10 @@
  * The browser-sent MIME type is never trusted: the extension decides the type,
  * so a renamed script cannot arrive as an image. Images cover every format a
  * camera, phone or design tool realistically produces; the client converts the
- * raster ones to WebP before upload (see src/admin/media-compress.ts), and the
- * original is kept only when it is already smaller or cannot be decoded.
+ * static raster ones to size-targeted WebP before upload (see
+ * src/admin/media-compress.ts). The original is kept when it already fits the
+ * target, when it is animated/vector, when conversion is off, or when the
+ * browser cannot decode/compress it.
  */
 
 export const IMAGE_TYPES: Record<string, string> = {
