@@ -438,3 +438,12 @@ What to expect:
 - `print()` and `input()` work as written, including `input()` inside functions, methods and `__init__`. Popular scientific packages bundled with Pyodide (numpy, pandas, matplotlib…) are fetched when imported; `plt.show()` draws the figure into the terminal.
 - Desktop windows (tkinter, pygame, turtle), web servers (Flask, Django), threads and subprocesses cannot run in a web page. The dialog warns when it sees those imports.
 - With **Auto-start** off, visitors get a **Run** button and nothing is downloaded until they press it. With scripts disabled, the page shows the source as a code listing.
+
+When an app does not run, the block itself says why:
+
+- **The editor canvas shows a card with the file name and the source, and nothing executes.** That is the editor preview, by design: a program runs only on the saved page, opened normally in a browser. Press **View** (or open the permalink) rather than judging from the canvas, and make sure the post is **published** — a draft is not served at its URL at all.
+- **The published page shows the code listing instead of a terminal.** The loader did not run: check that the block is still `<figure class="python-app">` with a `<pre><code>` inside after editing in the **HTML** tab, and that the visitor has JavaScript on. A fenced Markdown code block or a plain code block is only a listing; it needs the **Python app** button.
+- **The terminal says "Loading Python…" and then "Python could not be loaded".** The interpreter comes from `cdn.jsdelivr.net` on the visitor's machine, so a blocked CDN, a strict company proxy or an offline connection stops it here while the rest of the page is fine. The first run is about 12 MB (9.2 MB WebAssembly + 2.5 MB standard library); it is cached for later visits. Nothing is downloaded if **Auto-start** is off until the visitor presses **Run**.
+- **The terminal says "This browser cannot run Python here".** The browser is too old for Web Workers and WebAssembly; a current Chrome, Firefox, Edge or Safari runs it.
+- **The program stops with a traceback.** The line numbers are the writer's own. The usual cause is an import that a page cannot support (desktop windows, servers, threads, subprocesses) — the dialog lists those while you still have the code open.
+- **Nothing at all where the block should be.** The body was saved without the figure (for example the HTML editor stripped it, or it was pasted as escaped `&lt;figure&gt;` text). Insert it again with **Python app**.
