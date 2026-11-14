@@ -34,17 +34,26 @@ export const PYAPP_RUNNER_CSP = [
   "img-src data: blob:",
   "connect-src https:",
   "frame-ancestors 'self'",
-  "sandbox allow-scripts",
+  // `allow-downloads` lets a program hand the visitor a file it made (a PDF,
+  // a CSV); without it Chrome silently drops the click on that link.
+  "sandbox allow-scripts allow-downloads",
 ].join('; ');
 
 const inlineJs = (value: string): string => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
 const WORKER_JS = `
-var pending=null;
-function send(kind,text){postMessage({t:String(kind),s:String(text)})}
+var pending=null,pendingFile=null;
+function send(kind,value){
+  // Python hands a produced file over as JSON; the runner wants an object.
+  if(kind==='file'&&typeof value==='string'){try{value=JSON.parse(value)}catch(e){return}}
+  postMessage({t:String(kind),s:value});
+}
 self.onmessage=function(e){
   var m=e.data||{};
   if(m.t==='line'&&pending){var r=pending;pending=null;r(m.s);return}
+  // Files stay JSON on both hops: a JS array of objects would reach Python as
+  // proxies, not dicts.
+  if(m.t==='files'&&pendingFile){var p=pendingFile;pendingFile=null;p(m.files&&m.files.length?JSON.stringify(m.files):'');return}
   if(m.t!=='run')return;
   (async function(){
     try{
@@ -57,6 +66,13 @@ self.onmessage=function(e){
       postMessage({t:'start'});
       var status=await run(m.code,m.name,send,function(){
         return new Promise(function(resolve){pending=resolve;postMessage({t:'ask'})});
+      },function(spec){
+        return new Promise(function(resolve){
+          pendingFile=resolve;
+          var parsed={accept:'*/*',multiple:false};
+          try{parsed=JSON.parse(spec)||parsed}catch(e){}
+          postMessage({t:'pick',s:parsed});
+        });
       });
       postMessage({t:'end',s:String(status)});
     }catch(err){
@@ -88,6 +104,12 @@ button:focus-visible,#in:focus-visible{outline:2px solid #58a6ff;outline-offset:
 #out .u{color:#79c0ff}
 #out .n{color:#8b949e;font-style:italic}
 #out img{display:block;max-width:100%;height:auto;margin:.5rem 0;border-radius:4px;background:#fff}
+#out .dl{display:inline-block;margin:.35rem .4rem .35rem 0;padding:.35rem .7rem;border:1px solid #30363d;border-radius:6px;background:#21262d;color:#79c0ff;text-decoration:none;font:inherit}
+#out .dl:hover{background:#30363d}
+#out .dl:focus-visible{outline:2px solid #58a6ff;outline-offset:1px}
+#out .note{color:#8b949e;font-style:italic}
+.pick{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:.55rem 0;padding:.55rem .65rem;border:1px dashed #30363d;border-radius:6px;background:#161b22;color:#8b949e;font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+.pick b{color:#e6edf3;font-weight:600;overflow-wrap:anywhere}
 #in{display:inline-block;width:12ch;min-width:2ch;max-width:100%;padding:0;border:0;border-bottom:1px dashed #58a6ff;background:transparent;color:#79c0ff;font:inherit;outline:0;caret-color:#58a6ff}
 @media (prefers-reduced-motion:reduce){.dot{animation:none!important}}
 `;
@@ -121,6 +143,83 @@ const RUNNER_JS = `
     if(!/^data:image\\/png;base64,[A-Za-z0-9+\\/=]+$/.test(src))return;
     var img=document.createElement('img');img.alt='Figure drawn by the program';img.src=src;add(img);
   }
+  function human(bytes){
+    if(bytes<1024)return bytes+' B';
+    if(bytes<1048576)return (bytes/1024).toFixed(bytes<10240?1:0)+' KB';
+    return (bytes/1048576).toFixed(1)+' MB';
+  }
+  // A file the program made: the visitor clicks to save it. The click only
+  // becomes a download because the frame is sandboxed with allow-downloads.
+  function download(item){
+    if(!item||typeof item.data!=='string')return;
+    var name=String(item.name||'file').replace(/[^A-Za-z0-9._ -]/g,'_').slice(0,120)||'file';
+    try{
+      var bin=atob(item.data),arr=new Uint8Array(bin.length);
+      for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+      var url=URL.createObjectURL(new Blob([arr],{type:item.mime||'application/octet-stream'}));
+      var link=document.createElement('a');
+      link.className='dl';link.href=url;link.download=name;
+      link.textContent='\\u2913 Download '+name+' · '+human(arr.length);
+      add(link);
+      setTimeout(function(){try{URL.revokeObjectURL(url)}catch(e){}},600000);
+    }catch(err){write('The file could not be prepared for download.\\n','e')}
+  }
+  // A file the program asked for: the visitor picks it, and the bytes go back
+  // to the worker as base64. The host page never sees them.
+  function pick(spec){
+    state('wait','Waiting for you to choose a file');
+    var accept=(spec&&spec.accept)||'*/*',many=!!(spec&&spec.multiple);
+    var row=document.createElement('div');row.className='pick';
+    var label=document.createElement('span');
+    label.textContent='The program needs a file'+(accept!=='*/*'?' ('+accept+')':'')+(many?' — you may choose more than one':'');
+    var button=document.createElement('button');button.type='button';button.textContent='Choose file'+(many?'s':'');
+    var cancel=document.createElement('button');cancel.type='button';cancel.textContent='Cancel';
+    var input=document.createElement('input');
+    input.type='file';input.accept=accept;input.multiple=many;
+    input.style.position='absolute';input.style.width='1px';input.style.height='1px';
+    input.style.opacity='0';input.setAttribute('aria-hidden','true');input.tabIndex=-1;
+    function finish(files){
+      if(field!==row)return;
+      field=null;row.remove();
+      if(worker)worker.postMessage({t:'files',files:files});
+    }
+    function chosen(files){
+      if(!files.length){finish([]);return}
+      write(files.map(function(f){return '\\u2192 '+f.name+'\\n'}).join(''),'u');
+      state('run','Running');
+      finish(files);
+    }
+    input.addEventListener('change',function(){
+      var files=Array.prototype.slice.call(input.files||[]);
+      if(!files.length){finish([]);return}
+      var picked=[],left=files.length,failed=false;
+      function done(){
+        if(--left>0)return;
+        if(failed&&!picked.length)write('That file could not be read.\\n','e');
+        chosen(picked.filter(Boolean));
+      }
+      files.forEach(function(file,index){
+        var reader=new FileReader();
+        reader.onload=function(){
+          var url=String(reader.result||''),comma=url.indexOf(',');
+          if(comma>0)picked[index]={name:file.name,mime:file.type||'application/octet-stream',data:url.slice(comma+1)};
+          done();
+        };
+        reader.onerror=function(){failed=true;done()};
+        reader.readAsDataURL(file);
+      });
+    });
+    button.addEventListener('click',function(){input.click()});
+    cancel.addEventListener('click',function(){
+      write('\\u2192 no file chosen\\n','n');
+      state('run','Running');
+      finish([]);
+    });
+    row.appendChild(label);row.appendChild(button);row.appendChild(cancel);row.appendChild(input);
+    field=row;
+    out.appendChild(row);
+    screen.scrollTop=screen.scrollHeight;
+  }
   function ask(){
     state('wait','Waiting for your input');
     field=document.createElement('input');
@@ -146,7 +245,7 @@ const RUNNER_JS = `
   function start(){
     stop();
     out.textContent='';chars=0;
-    state('load','Loading Python… the first run downloads about 10 MB');
+    state('load','Loading Python… the first run downloads about 12 MB');
     var url;
     try{
       url=URL.createObjectURL(new Blob([WORKER],{type:'text/javascript'}));
@@ -159,6 +258,8 @@ const RUNNER_JS = `
       if(m.t==='out')write(m.s,'');
       else if(m.t==='err')write(m.s,'e');
       else if(m.t==='img')image(m.s);
+      else if(m.t==='file')download(m.s);
+      else if(m.t==='pick')pick(m.s);
       else if(m.t==='status')state('load',m.s);
       else if(m.t==='start')state('run','Running');
       else if(m.t==='ask')ask();
@@ -276,7 +377,7 @@ export const PYAPP_PUBLIC_JS = `(function(){
       if(poster)poster.remove();
       pre.hidden=true;
       var frame=document.createElement('iframe');
-      frame.setAttribute('sandbox','allow-scripts');
+      frame.setAttribute('sandbox','allow-scripts allow-downloads');
       frame.setAttribute('title','Python app: '+name);
       frame.setAttribute('referrerpolicy','no-referrer');
       window.addEventListener('message',function(e){

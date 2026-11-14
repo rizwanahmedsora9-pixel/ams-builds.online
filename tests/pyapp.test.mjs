@@ -233,7 +233,7 @@ test('a published app is served with its loader; other pages pay nothing', async
   const script = page.text.match(/<script nonce="([^"]+)">\(function\(\)\{\s*var figs=document\.querySelectorAll\('figure\.python-app'\)/);
   assert.ok(script, 'the loader is inline and carries the response nonce');
   assert.match(page.text, new RegExp(`<style nonce="${script[1]}">figure\\.python-app\\{`), 'with the block stylesheet');
-  assert.match(page.text, /frame\.setAttribute\('sandbox','allow-scripts'\)/, 'the app is framed without same-origin access');
+  assert.match(page.text, /frame\.setAttribute\('sandbox','allow-scripts allow-downloads'\)/, 'the app is framed without same-origin access');
   const csp = page.headers.get('content-security-policy') || page.headers.get('content-security-policy-report-only') || '';
   assert.match(csp, new RegExp(`script-src 'self' 'nonce-${script[1]}'`));
   assert.match(csp, /frame-src 'self'/);
@@ -247,7 +247,7 @@ test('a published app is served with its loader; other pages pay nothing', async
   const live = dom.window.document.querySelector('figure.python-app');
   const frame = live.querySelector('iframe');
   assert.ok(frame, 'the app starts without a click');
-  assert.equal(frame.getAttribute('sandbox'), 'allow-scripts');
+  assert.equal(frame.getAttribute('sandbox'), 'allow-scripts allow-downloads');
   assert.equal(frame.getAttribute('src'), pyapp.PYAPP_RUNNER_PATH);
   assert.equal(live.querySelector('pre').hidden, true);
   assert.equal(live.style.width, '80%');
@@ -278,7 +278,7 @@ test('the runner is a static, sandboxed document with its own policy', async () 
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type'), /text\/html/);
   const csp = res.headers.get('content-security-policy');
-  assert.match(csp, /(^|; )sandbox allow-scripts($|;)/, 'opaque origin even when opened directly');
+  assert.match(csp, /(^|; )sandbox allow-scripts allow-downloads($|;)/, 'opaque origin even when opened directly');
   assert.doesNotMatch(csp, /allow-same-origin/);
   assert.match(csp, /default-src 'none'/);
   assert.match(csp, /frame-ancestors 'self'/);
@@ -294,7 +294,7 @@ test('the runner is a static, sandboxed document with its own policy', async () 
 /* ------------------------------------------------------- 4. real Python */
 
 /** Drives the shipped worker script against the real interpreter. */
-function runProgram(code, answers = []) {
+function runProgram(code, answers = [], files = []) {
   const page = pyapp.pythonRunnerPage();
   const [, base, boot, worker] = page.match(/var BASE=("(?:[^"\\]|\\.)*"),BOOT=("(?:[^"\\]|\\.)*"),WORKER=("(?:[^"\\]|\\.)*");/).map((part, i) => (i ? JSON.parse(part) : part));
   assert.match(base, /^https:\/\/cdn\.jsdelivr\.net\/pyodide\/v[\d.]+\/full\/$/);
@@ -302,19 +302,26 @@ function runProgram(code, answers = []) {
   return new Promise((resolve, reject) => {
     const self = {};
     const queue = [...answers];
+    const pendingFiles = [...files];
     let out = '';
     const events = [];
+    let produced = null;
     const timer = setTimeout(() => reject(new Error('the program did not finish:\n' + out)), 60000);
     const postMessage = (m) => {
       events.push(m.t);
       if (m.t === 'out') out += m.s;
       else if (m.t === 'err') out += `[err]${m.s}`;
+      else if (m.t === 'file') produced = m.s;
+      else if (m.t === 'pick') {
+        const next = pendingFiles.length ? pendingFiles.shift() : null;
+        setTimeout(() => self.onmessage({ data: { t: 'files', files: next } }), 0);
+      }
       else if (m.t === 'ask') {
         if (!queue.length) { clearTimeout(timer); resolve({ out, events, status: 'waiting' }); return; }
         const line = queue.shift();
         out += line + '\n';
         setTimeout(() => self.onmessage({ data: { t: 'line', s: line } }), 0);
-      } else if (m.t === 'end' || m.t === 'fail') { clearTimeout(timer); resolve({ out, events, status: m.t === 'fail' ? `fail:${m.s}` : m.s }); }
+      } else if (m.t === 'end' || m.t === 'fail') { clearTimeout(timer); resolve({ out, events, status: m.t === 'fail' ? `fail:${m.s}` : m.s, produced }); }
     };
     new Function('self', 'postMessage', worker)(self, postMessage);
     self.onmessage({ data: { t: 'run', code, name: 'app.py', base: local, index: fileURLToPath(local), boot } });
@@ -469,5 +476,119 @@ test('the runner page: output lands in the terminal, the answer box feeds input(
   assert.equal(workers, 2, 'Restart starts a fresh interpreter');
   await until(() => doc.getElementById('in'), 'the answer box again');
   assert.equal(out(), 'Number: ', 'the screen was cleared');
+  window.close();
+});
+
+/* ------------------------------------------- 5. files in, files out */
+
+test('python: an image goes in and a PDF comes out, through the real bridge', async () => {
+  const photo = { name: 'cat.jpg', mime: 'image/jpeg', data: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 7, 7, 7, 7]).toString('base64') };
+  const r = await runProgram(`
+photo = ams_pick_file("image/*")
+raw = open(photo, "rb").read()
+print("picked", photo.split("/")[-1], len(raw))
+# One page, embedding the JPEG as it is (DCTDecode): a valid PDF with no package.
+pdf = (b"%PDF-1.4\\n"
+       b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\\n"
+       b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\\n"
+       b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 72 72]/Contents 4 0 R>>endobj\\n"
+       b"4 0 obj<</Length 0>>stream\\nendstream endobj\\n"
+       b"5 0 obj<</Type/XObject/Subtype/Image/Width 1/Height 1/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length "
+       + str(len(raw)).encode() + b">>stream\\n" + raw + b"\\nendstream endobj\\n"
+       b"trailer<</Root 1 0 R/Size 6>>\\n%%EOF\\n")
+open("photo.pdf", "wb").write(pdf)
+ams_download("photo.pdf")
+`, [], [[photo]]);
+  assert.equal(r.status, 'done', r.out);
+  assert.equal(r.out, 'picked cat.jpg 8\n');
+  assert.ok(r.produced, 'the program handed a file to the page');
+  assert.equal(r.produced.name, 'photo.pdf');
+  assert.equal(r.produced.mime, 'application/pdf');
+  const bytes = Buffer.from(r.produced.data, 'base64');
+  assert.ok(bytes.toString('latin1').startsWith('%PDF-1.4'));
+  assert.ok(bytes.includes(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 7, 7, 7, 7])), 'the image travels inside the PDF');
+});
+
+test('python: several files, a cancel, a path that cannot escape, and a clear missing-file error', async () => {
+  const jpg = { name: '../../etc/passwd.jpg', mime: 'image/jpeg', data: Buffer.from('one').toString('base64') };
+  const many = await runProgram(`
+paths = ams_pick_file("image/*", multiple=True)
+print(len(paths), [p.split("/")[-1] for p in paths])
+print(all(p.startswith("/home/pyodide/uploads/") for p in paths))
+`, [], [[jpg, { ...jpg, name: 'two.png', mime: 'image/png' }]]);
+  assert.equal(many.status, 'done', many.out);
+  assert.equal(many.out, "2 ['passwd.jpg', 'two.png']\nTrue\n", 'a name from the page cannot pick the directory');
+
+  const cancelled = await runProgram('p = ams_pick_file()\nprint("cancelled" if p is None else "got one")\n', [], [null]);
+  assert.equal(cancelled.out, 'cancelled\n');
+
+  const missing = await runProgram('ams_download("/nope.pdf")\n');
+  assert.equal(missing.status, 'error');
+  assert.match(missing.out, /FileNotFoundError: ams_download could not read \/nope\.pdf/);
+});
+
+test('the runner: the picker feeds the program, the result becomes a download, Cancel is an answer', async () => {
+  const { JSDOM } = await import('jsdom');
+  const page = pyapp.pythonRunnerPage();
+  const workerSource = JSON.parse(page.match(/,WORKER=("(?:[^"\\]|\\.)*");/)[1]);
+  const local = pathToFileURL(dirname(require.resolve('pyodide/package.json'))).href + '/';
+  const dom = new JSDOM(page, {
+    url: 'https://example.test/__pyapp/runner', runScripts: 'dangerously', pretendToBeVisual: true,
+    beforeParse(window) {
+      window.URL.createObjectURL = () => 'blob:made-file';
+      window.URL.revokeObjectURL = () => {};
+      window.Worker = class {
+        constructor() {
+          this.dead = false;
+          this.inner = {};
+          new Function('self', 'postMessage', workerSource)(this.inner, (m) => { if (!this.dead && this.onmessage) this.onmessage({ data: m }); });
+        }
+        postMessage(m) { this.inner.onmessage({ data: m.t === 'run' ? { ...m, base: local, index: fileURLToPath(local) } : m }); }
+        terminate() { this.dead = true; }
+      };
+    },
+  });
+  const { window } = dom;
+  const doc = window.document;
+  const until = async (check, what) => {
+    for (let i = 0; i < 900; i++) { if (check()) return; await new Promise((r) => setTimeout(r, 50)); }
+    throw new Error(`timed out waiting for ${what}: ${doc.getElementById('out').textContent}`);
+  };
+  const send = (data) => window.dispatchEvent(new window.MessageEvent('message', { data, source: window.parent }));
+  const program = `
+photo = ams_pick_file("image/*")
+if photo is None:
+    print("cancelled")
+else:
+    print("got", photo.split("/")[-1])
+    open("out.pdf", "wb").write(b"%PDF-1.4\\n")
+    ams_download("out.pdf")
+`;
+  send({ ams: 'pyapp', t: 'code', code: program, name: 'img2pdf.py' });
+  await until(() => doc.querySelector('.pick'), 'the file picker');
+  const row = doc.querySelector('.pick');
+  assert.equal(doc.getElementById('status').textContent, 'Waiting for you to choose a file');
+  assert.match(row.textContent, /The program needs a file \(image\/\*\)/);
+  const input = row.querySelector('input[type=file]');
+  assert.equal(input.accept, 'image/*');
+  const file = new window.File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9, 9])], 'cat.jpg', { type: 'image/jpeg' });
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  input.dispatchEvent(new window.Event('change'));
+
+  await until(() => doc.querySelector('#out .dl'), 'the download link');
+  const link = doc.querySelector('#out .dl');
+  assert.equal(link.getAttribute('download'), 'out.pdf');
+  assert.equal(link.getAttribute('href'), 'blob:made-file', 'the file is a blob, not a URL to somewhere');
+  assert.match(link.textContent, /Download out\.pdf · \d+ B/);
+  assert.equal(row.isConnected, false, 'the picker is gone once a file was chosen');
+  await until(() => /program finished/.test(doc.getElementById('out').textContent), 'the program to finish');
+  assert.match(doc.getElementById('out').textContent, /→ cat\.jpg\ngot cat\.jpg/);
+
+  // Cancel answers the same question with nothing.
+  doc.getElementById('restart').click();
+  await until(() => doc.querySelector('.pick'), 'the picker again');
+  doc.querySelector('.pick').querySelectorAll('button')[1].click();
+  await until(() => /program finished/.test(doc.getElementById('out').textContent), 'the cancelled program to finish');
+  assert.match(doc.getElementById('out').textContent, /→ no file chosen\s+cancelled/);
   window.close();
 });

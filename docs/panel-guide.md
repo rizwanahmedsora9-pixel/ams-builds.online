@@ -433,11 +433,35 @@ The editor's **Python app** button embeds a single-file `.py` program that runs 
 
 What to expect:
 
-- The program runs **in the visitor's browser** with [Pyodide](https://pyodide.org) (CPython as WebAssembly), loaded from `cdn.jsdelivr.net`. Nothing runs on your server, and the first run downloads about 10 MB.
+- The program runs **in the visitor's browser** with [Pyodide](https://pyodide.org) (CPython as WebAssembly), loaded from `cdn.jsdelivr.net`. Nothing runs on your server, and the first run downloads about 12 MB.
 - It runs inside a sandboxed frame (`/__pyapp/runner`) with no access to your site's cookies or panel, so authors without admin rights can use it too.
 - `print()` and `input()` work as written, including `input()` inside functions, methods and `__init__`. Popular scientific packages bundled with Pyodide (numpy, pandas, matplotlib…) are fetched when imported; `plt.show()` draws the figure into the terminal.
 - Desktop windows (tkinter, pygame, turtle), web servers (Flask, Django), threads and subprocesses cannot run in a web page. The dialog warns when it sees those imports.
 - With **Auto-start** off, visitors get a **Run** button and nothing is downloaded until they press it. With scripts disabled, the page shows the source as a code listing.
+
+### Files in and out
+
+Printing is not always enough, so a program can also take a file from the visitor and hand one back:
+
+- `ams_pick_file(accept="*/*", multiple=False)` asks the visitor to choose a file, writes it into the program's own filesystem and returns its path — a list of paths when `multiple=True`, or `None` if they press **Cancel**. Ordinary code then works as written: `Image.open(path)`, `pandas.read_csv(path)`, `open(path, "rb")`.
+- `ams_download(path, name=None)` hands a file the program made back to the visitor as a download link on the terminal.
+
+So an **image → PDF** post is one file — the visitor picks the pictures, the program makes the PDF, they click to save it:
+
+```python
+from PIL import Image
+
+paths = ams_pick_file("image/*", multiple=True)
+if not paths:
+    print("No image chosen.")
+else:
+    pages = [Image.open(p).convert("RGB") for p in paths]
+    pages[0].save("images.pdf", "PDF", save_all=True, append_images=pages[1:], resolution=120)
+    print(f"Made a PDF from {len(pages)} image(s).")
+    ams_download("images.pdf")
+```
+
+`PIL` (Pillow) is one of the packages bundled with Pyodide: the first visitor to run the app downloads it (a few MB) and the browser caches it afterwards. Both directions are limited to 20 MB per file, and the file the visitor chooses never touches your server — it goes from their disk into the page's memory.
 
 When an app does not run, the block itself says why:
 

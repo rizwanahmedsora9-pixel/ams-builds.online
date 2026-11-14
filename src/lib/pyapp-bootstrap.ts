@@ -12,11 +12,34 @@
  * tests/pyapp.test.mjs runs this exact string in a real Pyodide when the
  * optional "pyodide" package is installed.
  */
-export const PY_BOOTSTRAP = String.raw`import ast, builtins, inspect, linecache, sys, traceback
+export const PY_BOOTSTRAP = String.raw`import ast, base64, builtins, inspect, json, linecache, os, sys, traceback
 
 _BUILTINS = set(dir(builtins))
-_SEED = {'input'}
+# Callee names that must be awaited where they are called; the pass below then
+# turns every function that reaches one of them into a coroutine.
+_SEED = {'input', 'ams_pick_file'}
 _NO_ASYNC_DECOS = {'property', 'cached_property', 'setter', 'getter', 'contextmanager'}
+
+# Files cross postMessage as base64, so both directions are bounded.
+_MAX_FILE = 20 * 1024 * 1024
+_UPLOAD_DIR = '/home/pyodide/uploads'
+_MIME = {
+    'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+    'gif': 'image/gif', 'webp': 'image/webp', 'bmp': 'image/bmp', 'svg': 'image/svg+xml',
+    'csv': 'text/csv', 'txt': 'text/plain', 'md': 'text/markdown', 'json': 'application/json',
+    'html': 'text/html', 'zip': 'application/zip', 'mp3': 'audio/mpeg', 'mp4': 'video/mp4',
+}
+
+
+def _clean_name(name, fallback='file'):
+    """Just a file name: no directories, no control characters, no surprises."""
+    text = str(name or '').replace('\\', '/').split('/')[-1]
+    kept = ''.join(ch for ch in text if ch.isalnum() or ch in '._- ')
+    return kept.strip(' .')[:80] or fallback
+
+
+def _mime_for(name):
+    return _MIME.get(name.rsplit('.', 1)[-1].lower(), 'application/octet-stream') if '.' in name else 'application/octet-stream'
 
 
 def _callee(node):
@@ -265,8 +288,9 @@ def ams_transform(source, filename='app.py'):
     return tree
 
 
-async def ams_run(source, filename, send, read_line):
-    """Run one program: send(kind, text) prints, read_line() awaits a line."""
+async def ams_run(source, filename, send, read_line, read_file):
+    """Run one program: send(kind, value) prints, read_line() awaits a line,
+    read_file() awaits a file the visitor picked."""
     sys.stdout = _Out(send, 'out')
     sys.stderr = _Out(send, 'err')
 
@@ -278,12 +302,57 @@ async def ams_run(source, filename, send, read_line):
             raise EOFError('EOF when reading a line')
         return str(line)
 
+    async def __ams_pick_file__(accept='*/*', multiple=False):
+        """Put a file the visitor chose into the program's filesystem.
+
+        Returns its path (or a list of paths), so ordinary code works as
+        written: Image.open(path), open(path, 'rb'), pandas.read_csv(path).
+        """
+        raw = await read_file(json.dumps({'accept': str(accept or '*/*'), 'multiple': bool(multiple)}))
+        answers = json.loads(raw) if raw else None
+        if not answers:
+            return None
+        try:
+            os.makedirs(_UPLOAD_DIR, exist_ok=True)
+        except OSError:
+            pass
+        paths = []
+        for item in answers:
+            data = base64.b64decode(str(item.get('data') or ''))
+            if len(data) > _MAX_FILE:
+                raise RuntimeError('That file is larger than the 20 MB this terminal accepts.')
+            name = _clean_name(item.get('name'))
+            stem, ext = os.path.splitext(name)
+            path = os.path.join(_UPLOAD_DIR, name)
+            counter = 1
+            while os.path.exists(path):
+                path = os.path.join(_UPLOAD_DIR, '%s-%d%s' % (stem, counter, ext))
+                counter += 1
+            with open(path, 'wb') as handle:
+                handle.write(data)
+            paths.append(path)
+        return paths if multiple else paths[0]
+
+    def __ams_download__(path, name=None):
+        """Hand a file the program made to the visitor as a download link."""
+        target = str(path)
+        try:
+            with open(target, 'rb') as handle:
+                data = handle.read()
+        except OSError:
+            raise FileNotFoundError('ams_download could not read ' + target + ' - write the file first.')
+        if len(data) > _MAX_FILE:
+            raise RuntimeError('That file is larger than the 20 MB this terminal can hand back.')
+        label = _clean_name(name or os.path.basename(target))
+        send('file', json.dumps({'name': label, 'mime': _mime_for(label), 'data': base64.b64encode(data).decode('ascii')}))
+
     builtins.input = _sync_input
     linecache.cache[filename] = (len(source), None, source.splitlines(True), filename)
     scope = {
         '__name__': '__main__', '__file__': filename, '__builtins__': builtins,
         '__ams_input__': __ams_input__, '__ams_call__': __ams_call__,
         '__ams_superinit__': __ams_superinit__,
+        'ams_pick_file': __ams_pick_file__, 'ams_download': __ams_download__,
     }
     if 'matplotlib' in source:
         try:
