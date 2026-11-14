@@ -275,7 +275,7 @@ ${card({
     { "key": "accent", "type": "color", "label": "Accent", "default": "#b4552d" }
   ]
 }</pre>
-  <p class="hint">Only <b>base</b> is required (or a <b>parent</b> to inherit from). In a template: <code>{{post.title}}</code>, <code>{{{post.content}}}</code>, <code>{{#if post.comments_count gt 0}}</code>, <code>{{#each posts limit=3}}</code>, <code>{{> header}}</code>, <code>{{post.date | date "d MMM yyyy"}}</code>, <code>{{asset "logo.png"}}</code>, <code>{{{theme_css_url}}}</code>. Every new theme can be checked with <a href="${base}/themes/validate">Validate a theme</a> before it goes live.</p>
+  <p class="hint">Only <b>base</b> is required (or a <b>parent</b> to inherit from). In a template: <code>{{post.title}}</code>, <code>{{{post.content}}}</code>, <code>{{#each posts limit=3}}</code>, <code>{{> header}}</code>, <code>{{post.date | date "d MMM yyyy"}}</code>, <code>{{asset "logo.png"}}</code>, <code>{{{theme_css_url}}}</code>. Every new theme can be checked with <a href="${base}/themes/validate">Validate a theme</a> before it goes live.</p>
 </div>
 ${raw(`<script>document.querySelectorAll('[data-confirm]').forEach(function(f){f.addEventListener('submit',function(e){if(!confirm(f.getAttribute('data-confirm')))e.preventDefault()})});</script>`)}`, '/themes');
 });
@@ -799,9 +799,9 @@ async function renderReport(c: Ctx, buf: ArrayBuffer | null, installedSlug?: str
       for (const p of inspectTemplate(source).problems) problems.push({ where: `partial ${name}`, message: p, level: 'err' });
     }
     // 2. Values the theme leans on that the renderer must supply.
-    const known = new Set(['site', 'menu', 'pages', 'year', 'body_class', 'comments', 'comments_count', 'comments_open',
-      'comments_html', 'post', 'page', 'posts', 'archive', 'pagination', 'theme', 'content', 'head', 'footer',
-      'theme_css', 'theme_css_url', 'nonce', 'is_home', 'comment_notice', 'reply_to', 'block', 'tz', 'this', 'value']);
+    const known = new Set(['site', 'menu', 'pages', 'year', 'body_class',
+      'post', 'page', 'posts', 'archive', 'pagination', 'theme', 'content', 'head', 'footer',
+      'theme_css', 'theme_css_url', 'nonce', 'is_home', 'block', 'tz', 'this', 'value']);
     // Helper calls (`{{asset "x"}}`) are functions, not values: the first word is
     // the helper name, so it must not be reported as a missing value.
     const helpers = new Set(['asset', 'url', 'default', 'truncate', 'date', 'slug', 'escape', 'json', 'nl2br']);

@@ -85,11 +85,11 @@ shell.get('/search', async (c) => {
   }
 
   return layout(c, q ? `Search: ${q}` : 'Search', html`
-${pageHead({ title: 'Search', sub: total ? `${total} result${total === 1 ? '' : 's'} for “${q}”` : 'Search posts, pages, media, comments, categories, tags and people.' })}
+${pageHead({ title: 'Search', sub: total ? `${total} result${total === 1 ? '' : 's'} for “${q}”` : 'Search posts, pages, media, categories, tags and people.' })}
 <form method="get" action="${base}/search" class="card" role="search">
   <label for="q" style="margin-top:0">Search the whole site</label>
   <div class="row">
-    <input type="search" id="q" name="q" value="${q}" class="grow" autofocus maxlength="80" placeholder="Title, body, filename, comment, username…">
+    <input type="search" id="q" name="q" value="${q}" class="grow" autofocus maxlength="80" placeholder="Title, body, filename, username…">
     <button class="btn" type="submit">${icon('search', { cls: 'ico--sm' })}Search</button>
   </div>
   <p class="hint">Tip: press <kbd>Ctrl</kbd>+<kbd>K</kbd> (or <kbd>⌘</kbd>+<kbd>K</kbd>) anywhere in the panel to search without leaving the page.</p>

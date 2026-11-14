@@ -28,7 +28,7 @@ export const AUDIT_ACTIONS = [
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 /** Object families, so the viewer can filter without free text. */
-export const AUDIT_TYPES = ['content', 'theme', 'setting', 'user', 'comment', 'media', 'menu', 'term', 'plugin', 'system'] as const;
+export const AUDIT_TYPES = ['content', 'theme', 'setting', 'user', 'media', 'menu', 'term', 'plugin', 'system'] as const;
 export type AuditType = (typeof AUDIT_TYPES)[number];
 
 export type AuditEntry = {

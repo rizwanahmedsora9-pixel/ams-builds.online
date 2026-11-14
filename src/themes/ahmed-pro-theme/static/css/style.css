@@ -218,7 +218,7 @@ h1,h2,h3,h4{line-height:1.2;letter-spacing:-.02em}
 .page-children li a:hover{border-color:var(--accent);transform:translateY(-2px)}
 .widget-area{max-width:var(--starter-width);margin:auto;padding:1rem 1.5rem}
 
-/* Share, back link, comments */
+/* Share and back link */
 .share{display:none;align-items:center;flex-wrap:wrap;gap:.5rem;margin-top:2rem;padding-top:1.5rem;border-top:1px solid var(--line)}
 .js .share{display:flex}
 .share__label{display:inline-flex;align-items:center;gap:.4rem;margin-inline-end:.4rem;color:var(--muted);font-weight:650;font-size:.9rem}
@@ -226,10 +226,6 @@ h1,h2,h3,h4{line-height:1.2;letter-spacing:-.02em}
 .share__btn:hover{background:var(--accent);color:#fff;border-color:transparent;transform:translateY(-2px)}
 .share__btn.is-done{background:#16a34a;color:#fff;border-color:transparent}
 .back-link{margin:1.5rem 0 0}.back-link a{display:inline-flex;align-items:center;gap:.4rem;text-decoration:none;font-weight:650}
-.comments{margin-top:2.5rem}
-.comments:empty{display:none}
-.comments input:not([type="checkbox"]):not([type="radio"]),.comments textarea,.comments select{width:100%;padding:.7rem .85rem;border:1px solid var(--line);border-radius:.65rem;background:var(--card);color:var(--ink);font:inherit}
-.comments button,.comments input[type="submit"]{padding:.7rem 1.2rem;border:0;border-radius:.65rem;background:var(--accent);color:#fff;font:inherit;font-weight:650;cursor:pointer}
 
 /* Search */
 .search-form{max-width:40rem;margin:0 0 1.5rem}
@@ -330,7 +326,7 @@ h1,h2,h3,h4{line-height:1.2;letter-spacing:-.02em}
 }
 
 @media print{
-  .topbar,.site-header,.site-footer,.to-top,.share,.comments{display:none!important}
+  .topbar,.site-header,.site-footer,.to-top,.share{display:none!important}
   body{background:#fff;color:#000}
 }
 
@@ -339,7 +335,7 @@ h1,h2,h3,h4{line-height:1.2;letter-spacing:-.02em}
 .site-footer .social-links__button{display:inline-block;padding:.3rem .75rem;border:1px solid rgba(255,255,255,.22);border-radius:999px;color:var(--footer-ink);font-size:.85rem;text-decoration:none}
 .site-footer .social-links__button:hover{border-color:var(--accent);color:#fff}
 
-/* ---- CMS-rendered markup: editor blocks, comments, page posts, widgets ---- */
+/* ---- CMS-rendered markup: editor blocks, page posts, widgets ---- */
 /* Editor blocks: image placement and width, video embeds, print break */
 .prose::after{content:"";display:block;clear:both}
 .prose figure.image-block{margin:1.5em auto;max-width:100%}
@@ -355,27 +351,6 @@ h1,h2,h3,h4{line-height:1.2;letter-spacing:-.02em}
 @media (max-width:640px){
   .prose .align-left,.prose .align-right,.prose figure.image-block.align-left,.prose figure.image-block.align-right{float:none;margin:1.5em auto}
 }
-/* Comments */
-.comments h2{font-size:1.3rem;margin:0 0 .9rem}
-.comments h3{font-size:1rem;margin:1.2rem 0 .3rem}
-.comment-none,.comment-note,.comment-closed{color:var(--muted);font-size:.9rem}
-.comment-list,.comment-list .children{list-style:none;margin:0;padding:0}
-.comment-list .children{margin-top:.7rem;padding-inline-start:1rem;border-inline-start:2px solid var(--line)}
-.comment-list .comment{margin:0 0 .7rem;padding:.85rem 1rem;background:var(--card);border:1px solid var(--line);border-radius:.8rem}
-.comment-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:.5rem;margin-bottom:.3rem;color:var(--muted);font-size:.82rem}
-.comment-meta strong{color:var(--ink);font-size:.95rem}
-.comment-staff{padding:0 .4rem;border:1px solid currentColor;border-radius:999px;color:var(--link);font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-.comment-body{overflow-wrap:anywhere}
-.comment-body p{margin:.25rem 0}
-.comment-reply-link{display:inline-block;margin-top:.35rem;font-size:.8rem;text-decoration:none}
-.comment-notice{margin:0 0 .8rem;padding:.55rem .8rem;border:1px solid var(--line);border-radius:.5rem;font-size:.88rem}
-.comment-notice.ok{color:var(--link);border-color:currentColor}
-.comment-notice.err{color:#d64545;border-color:currentColor}
-.comment-form{margin-top:.8rem;padding:1rem;background:var(--card);border:1px solid var(--line);border-radius:.9rem}
-.comment-form p{margin:.55rem 0}
-.comment-form label{display:block;margin-bottom:.25rem;font-size:.84rem;font-weight:600}
-.comment-form textarea{min-height:7rem;resize:vertical}
-.comment-form .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 /* Posts assigned to a page */
 .page-posts{max-width:var(--starter-width);margin:2rem auto 0;padding:0 1.5rem 2rem}
 .page-posts h2{margin:0 0 1rem;font-size:1.35rem}

@@ -77,7 +77,7 @@ shipped in every page view. In a layout:
 | Assets | `{{asset "logo.png"}}`, `{{{theme_css_url}}}` |
 | Settings | `{{theme.accent}}`, `{{#if theme.show_tagline}}` |
 | Widgets | `{{{widgets.footer}}}` (an area the manifest declares), `{{#each widget_areas}}` |
-| Meta | `{{{head}}}`, `{{{footer}}}`, `{{{comments_html}}}`, `{{body_class}}`, `{{nonce}}` |
+| Meta | `{{{head}}}`, `{{{footer}}}`, `{{body_class}}`, `{{nonce}}` |
 
 Every helper is a pure function over the data the CMS supplies: a template cannot execute code. An unknown
 filter is a no-op, a missing value renders empty, and a broken template shows up in **Validate a theme**
@@ -90,7 +90,7 @@ slot) before it ever goes live.
 | `base` (or the layout) | `{{{head}}}`, `{{{theme_css}}}`, `{{{theme_css_url}}}`, `{{{content}}}`, `{{{footer}}}`, `{{{widgets.footer}}}`, `{{{widgets.sidebar}}}` |
 | `home` | `page` (the chosen home page, may be empty), `posts` (latest five), `page_posts` (posts assigned exclusively to the home page) |
 | `page` | `page.title`, `{{{page.content}}}`, `posts` / `page_posts` (posts assigned to this page; rendered automatically as cards when the template does not reference `posts` or `page_posts`) |
-| `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`), `post.pages` (assigned pages), `{{{comments_html}}}`, `comments_count`, `comments_open` |
+| `post` | `post.title`, `{{{post.content}}}`, `post.date`, `post.date_iso`, `post.author`, `post.featured_image`, `post.featured_alt`, `post.categories` and `post.tags` (lists of `name`, `url`), `post.pages` (assigned pages) |
 | `archive` | `archive.title`, `posts`, `pagination.prev`, `pagination.next` |
 | each item of `posts` | `title`, `url`, `excerpt`, `date`, `date_iso`, `featured_image`, `featured_alt` |
 

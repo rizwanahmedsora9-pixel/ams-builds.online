@@ -13,7 +13,7 @@
  *     "Show social links in the footer" option in Settings keeps working.
  *   - a post assigned to pages links back to them ("Back to <page>"), and the
  *     stylesheet ends with a section for markup the CMS itself renders (editor
- *     image/video blocks, comments, page posts, widget areas).
+ *     image/video blocks, page posts, widget areas).
  */
 import rawManifest from './theme.json';
 import settingsConfig from './config/settings.json';

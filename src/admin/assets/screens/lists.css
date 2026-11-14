@@ -67,7 +67,6 @@
 .list-table tbody tr:hover { background: var(--surface-2); }
 .list-table .list-check { width: 2.5rem; text-align: center; }
 .list-table .list-check input { width: 1rem; height: 1rem; accent-color: var(--accent); vertical-align: middle; }
-.list-table .list-comments { width: 6rem; }
 .list-table .list-date { width: 13rem; white-space: nowrap; }
 .th-sort { display: inline-flex; align-items: center; gap: var(--space-1); color: inherit; text-decoration: none; }
 .th-sort:hover { color: var(--fg); }
@@ -85,12 +84,6 @@
 .row-date { display: flex; flex-direction: column; gap: 0.1rem; }
 .row-date strong { font-weight: 500; font-size: var(--text-sm); }
 .row-date time { color: var(--muted); font-size: var(--text-sm); }
-.comment-count {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 1.6rem; height: 1.5rem; padding: 0 var(--space-1);
-  border-radius: var(--radius-sm); background: var(--surface-3); color: var(--muted);
-  font-size: var(--text-xs); font-weight: 650;
-}
 .table-empty { padding: 0 !important; }
 .table-empty .empty { padding: var(--space-10) var(--space-4); }
 
@@ -118,5 +111,4 @@
   }
   .list-table .col-hide-sm, .list-table .col-hide-md { display: none; }
   .row-actions { opacity: 1; }
-  .list-comments { width: auto; }
 }

@@ -19,8 +19,8 @@ import { t } from '../../lib/i18n';
 
 /**
  * Tools: redirects, import/export, backups, site health and cache.
- * Everything here is admin-only because exports contain every comment and
- * every post, and imports can overwrite content.
+ * Everything here is admin-only because exports contain the whole site and
+ * imports can overwrite content.
  */
 const tools = new Hono<AppEnv>();
 
@@ -48,7 +48,7 @@ async function exportData(c: Ctx): Promise<Record<string, unknown>> {
       return { results: [] };
     }
   };
-  const [content, terms, contentTerms, contentPages, menus, menuItems, redirects, comments, users, settings, site, themes, themeSettings, revisions] = await Promise.all([
+  const [content, terms, contentTerms, contentPages, menus, menuItems, redirects, users, settings, site, themes, themeSettings, revisions] = await Promise.all([
     query('SELECT * FROM content WHERE site_id=1 ORDER BY id'),
     query('SELECT * FROM terms WHERE site_id=1 ORDER BY id'),
     query('SELECT ct.* FROM content_terms ct JOIN content c ON c.id=ct.content_id WHERE c.site_id=1'),
@@ -56,7 +56,6 @@ async function exportData(c: Ctx): Promise<Record<string, unknown>> {
     query('SELECT * FROM menus WHERE site_id=1 ORDER BY id'),
     query('SELECT i.* FROM menu_items i JOIN menus m ON m.id=i.menu_id WHERE m.site_id=1 ORDER BY i.menu_id, i.position'),
     query('SELECT * FROM redirects WHERE site_id=1 ORDER BY id'),
-    query('SELECT id, content_id, parent_id, author_name, author_email, body, status, created_at FROM comments WHERE site_id=1 ORDER BY id'),
     query('SELECT id, username, email, role, created_at FROM users ORDER BY id'),
     query('SELECT key, value FROM settings WHERE site_id=1'),
     query('SELECT id, hostname, name FROM sites WHERE id=1'),
@@ -84,7 +83,6 @@ async function exportData(c: Ctx): Promise<Record<string, unknown>> {
     menus: menus.results,
     menu_items: menuItems.results,
     redirects: redirects.results,
-    comments: comments.results,
     themes: themes.results,
     theme_settings: themeSettings.results,
     content_revisions: revisions.results,
@@ -103,10 +101,9 @@ const jsonResponse = (data: unknown, filename: string): Response => new Response
 /* ------------------------------------------------------------------ overview */
 tools.get('/tools', async (c) => {
   const base = c.var.base;
-  const [redirects, backups, comments] = await Promise.all([
+  const [redirects, backups] = await Promise.all([
     c.env.DB.prepare('SELECT COUNT(*) AS n FROM redirects WHERE site_id=1').first<{ n: number }>().catch(() => null),
     c.env.DB.prepare('SELECT COUNT(*) AS n FROM backups').first<{ n: number }>().catch(() => null),
-    c.env.DB.prepare("SELECT COUNT(*) AS n FROM comments WHERE site_id=1 AND status='pending'").first<{ n: number }>().catch(() => null),
   ]);
   return layout(c, 'Tools', html`
 <h1>Tools</h1>
@@ -116,8 +113,7 @@ tools.get('/tools', async (c) => {
   <a class="tile" href="${base}/tools/backups"><b>Backups</b><span>${backups?.n ?? 0} stored snapshots you can download.</span></a>
   <a class="tile" href="${base}/tools/health"><b>Site Health</b><span>Database, storage, versions, counts and the performance budgets.</span></a>
   <a class="tile" href="${base}/tools/audit"><b>${t('audit.title')}</b><span>Every change made in the panel, who made it and when.</span></a>
-  <a class="tile" href="${base}/comments"><b>Comments</b><span>${comments?.n ?? 0} waiting for moderation.</span></a>
-  <a class="tile" href="${base}/settings"><b>Settings</b><span>Site title, reading, discussion, domains.</span></a>
+  <a class="tile" href="${base}/settings"><b>Settings</b><span>Site title, reading, domains.</span></a>
 </div>
 <div class="card" style="margin-top:1rem">
   <h2>Danger zone</h2>
@@ -190,13 +186,13 @@ tools.get('/tools/export', async (c) => {
 <div class="row between" style="margin-bottom:1rem"><h1 style="margin:0">Import / Export</h1><a href="${base}/tools">&larr; Tools</a></div>
 <div class="card">
   <h2>Export</h2>
-  <p class="hint" style="margin-top:0">One JSON file with your pages, posts, categories, tags, menus, comments, redirects, settings, installed themes with their templates and stylesheets, per-theme settings, content revisions and the user list (without passwords). Theme image and font assets stay in the file store; the export names them. Keep it somewhere safe.</p>
+  <p class="hint" style="margin-top:0">One JSON file with your pages, posts, categories, tags, menus, redirects, settings, installed themes with their templates and stylesheets, per-theme settings, content revisions and the user list (without passwords). Theme image and font assets stay in the file store; the export names them. Keep it somewhere safe.</p>
   <p style="margin:0"><a class="btn" href="${base}/tools/export/download">Download export</a></p>
 </div>
 <form method="post" action="${base}/tools/import" enctype="multipart/form-data" class="card">
   ${csrfField(c)}
   <h2>Import</h2>
-  <p class="hint" style="margin-top:0">Upload a file made by Export. Content is merged by type and slug: existing pages and posts are updated, new ones are created. Categories, tags, menus, redirects and comments are added; themes in the file are installed or updated. Users and settings are not imported.</p>
+  <p class="hint" style="margin-top:0">Upload a file made by Export. Content is merged by type and slug: existing pages and posts are updated, new ones are created. Categories, tags, menus and redirects are added; themes in the file are installed or updated. Users and settings are not imported.</p>
   <label for="file">Backup file (.json)</label>
   <input type="file" id="file" name="file" accept=".json,application/json" required>
   <p class="hint">Up to 5 MB.</p>
@@ -209,11 +205,11 @@ tools.get('/tools/export/download', async (c) => {
   return jsonResponse(await exportData(c), `edge-cms-export-${stamp}.json`);
 });
 
-type ImportResult = { content: number; terms: number; menus: number; redirects: number; comments: number; themes: number };
+type ImportResult = { content: number; terms: number; menus: number; redirects: number; themes: number };
 
 async function importData(c: Ctx, payload: any): Promise<ImportResult> {
   const db = c.env.DB;
-  const out: ImportResult = { content: 0, terms: 0, menus: 0, redirects: 0, comments: 0, themes: 0 };
+  const out: ImportResult = { content: 0, terms: 0, menus: 0, redirects: 0, themes: 0 };
   const str = (v: unknown, max: number) => String(v ?? '').slice(0, max);
   const now = new Date().toISOString();
   const contentMap = new Map<number, number>();
@@ -363,24 +359,6 @@ async function importData(c: Ctx, payload: any): Promise<ImportResult> {
     out.redirects++;
   }
 
-  for (const row of Array.isArray(payload.comments) ? payload.comments.slice(0, 20000) : []) {
-    const contentId = contentMap.get(Number(row?.content_id));
-    if (!contentId) continue;
-    const status = ['pending', 'approved', 'spam', 'trash'].includes(row?.status) ? row.status : 'pending';
-    const author = str(row?.author_name, 80) || 'Anonymous';
-    const email = str(row?.author_email, 160);
-    const body = str(row?.body, 4000);
-    if (!body) continue;
-    // Importing the same file twice must not duplicate comments.
-    const dup = await db.prepare('SELECT 1 AS x FROM comments WHERE content_id=? AND author_name=? AND body=? LIMIT 1')
-      .bind(contentId, author, body).first();
-    if (dup) continue;
-    await db.prepare(
-      'INSERT INTO comments (site_id,content_id,parent_id,author_name,author_email,body,status,created_at,updated_at) VALUES (1,?,NULL,?,?,?,?,?,?)',
-    ).bind(contentId, author, email, body, status, row?.created_at ? String(row.created_at) : now, now).run();
-    out.comments++;
-  }
-
   // Themes: an export carries them, so a restore puts the look back too. Each
   // one is validated by the same manifest parser an upload uses, and a bad one
   // is skipped rather than failing the whole import.
@@ -404,7 +382,7 @@ async function importData(c: Ctx, payload: any): Promise<ImportResult> {
     }
   }
   if (out.themes) await bumpCache(c.env, c.var.cfg);
-  await audit(c, 'imported', 'system', `Imported ${out.content} items, ${out.comments} comments and ${out.themes} themes`);
+  await audit(c, 'imported', 'system', `Imported ${out.content} items and ${out.themes} themes`);
   return out;
 }
 
@@ -423,7 +401,7 @@ tools.post('/tools/import', async (c) => {
     const res = await importData(c, payload);
     await bumpCache(c.env, c.var.cfg);
     return go(c, '/tools/export', {
-      ok: `Imported ${res.content} pages/posts, ${res.terms} terms, ${res.menus} menus, ${res.redirects} redirects, ${res.comments} comments and ${res.themes} theme${res.themes === 1 ? '' : 's'}.`,
+      ok: `Imported ${res.content} pages/posts, ${res.terms} terms, ${res.menus} menus, ${res.redirects} redirects and ${res.themes} theme${res.themes === 1 ? '' : 's'}.`,
     });
   } catch (err) {
     console.error(err);
@@ -522,13 +500,12 @@ tools.get('/tools/health', async (c) => {
   checks.push({ name: 'Media storage', ok: mediaOk, detail: mediaOk ? (c.env.FILES ? 'Files are on disk (data/media).' : 'Files are in KV.') : 'Media storage did not answer.' });
 
   const count = async (sql: string) => Number((await c.env.DB.prepare(sql).first<{ n: number }>().catch(() => null))?.n || 0);
-  const [pages, posts, drafts, media, usersCount, commentCount, redirects, hooks, backups, settings] = await Promise.all([
+  const [pages, posts, drafts, media, usersCount, redirects, hooks, backups, settings] = await Promise.all([
     count("SELECT COUNT(*) AS n FROM content WHERE site_id=1 AND type='page'"),
     count("SELECT COUNT(*) AS n FROM content WHERE site_id=1 AND type='post' AND status='published'"),
     count("SELECT COUNT(*) AS n FROM content WHERE site_id=1 AND status<>'published'"),
     count('SELECT COUNT(*) AS n FROM media WHERE site_id=1'),
     count('SELECT COUNT(*) AS n FROM users'),
-    count('SELECT COUNT(*) AS n FROM comments WHERE site_id=1'),
     count('SELECT COUNT(*) AS n FROM redirects WHERE site_id=1'),
     count('SELECT COUNT(*) AS n FROM hooks WHERE site_id=1'),
     count('SELECT COUNT(*) AS n FROM backups'),
@@ -572,7 +549,6 @@ tools.get('/tools/health', async (c) => {
     <dt>Drafts and scheduled</dt><dd>${drafts}</dd>
     <dt>Media files</dt><dd>${media}</dd>
     <dt>Users</dt><dd>${usersCount}</dd>
-    <dt>Comments</dt><dd>${commentCount}</dd>
     <dt>Redirects</dt><dd>${redirects}</dd>
     <dt>Plugins</dt><dd>${hooks}</dd>
     <dt>Backups</dt><dd>${backups}</dd>
