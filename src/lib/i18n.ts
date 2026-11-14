@@ -53,7 +53,6 @@ export const en: Catalogue = {
   // Capabilities
   'caps.manage_themes': 'Themes and the theme store',
   'caps.manage_appearance': 'Customizer, Identity and Templates',
-  'caps.moderate_comments': 'Moderate comments',
   'caps.edit_others_posts': "Edit everyone's posts",
   'caps.manage_pages': 'Create and edit pages',
   'caps.manage_users': 'Users and roles',
@@ -91,7 +90,6 @@ export const en: Catalogue = {
   'reset.count_pages': 'Pages',
   'reset.count_posts': 'Posts',
   'reset.count_media': 'Media files',
-  'reset.count_comments': 'Comments',
   'reset.count_users': 'Panel accounts, including yours',
   'reset.count_themes': 'Themes and their settings',
   'reset.count_menus': 'Menus',

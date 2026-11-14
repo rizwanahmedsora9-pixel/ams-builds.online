@@ -4,7 +4,7 @@
  * Roles used to be checked with `can(user, 'editor')`, which meant every screen
  * had its own idea of what "editor" implies and a new role required editing
  * every route. A capability is a named permission; a role is a bundle of them.
- * Screens ask `can(user, 'moderate_comments')`, and the role → capability map
+ * Screens ask `can(user, 'manage_pages')`, and the role → capability map
  * below is the only place that decides which role gets what.
  *
  * The defaults are exactly the permissions the roles had before this file
@@ -19,7 +19,6 @@ export const CAPABILITIES = [
   'write_posts',          // create and edit own posts
   'edit_others_posts',    // edit anyone's posts
   'manage_pages',         // pages, not just posts
-  'moderate_comments',
   'manage_terms',         // categories and tags
   'manage_media',         // every file, not only one's own
   'manage_menus',
@@ -37,13 +36,13 @@ export type Capability = (typeof CAPABILITIES)[number];
 
 /**
  * What each role may do by default. Author writes posts; editor also looks
- * after everyone's posts, pages, comments, categories, menus and media; admin
+ * after everyone's posts, pages, categories, menus and media; admin
  * is everything, including the things that change the site itself.
  */
 export const ROLE_CAPS: Record<Role, Capability[]> = {
   author: ['read', 'write_posts', 'manage_terms'],
   editor: [
-    'read', 'write_posts', 'edit_others_posts', 'manage_pages', 'moderate_comments',
+    'read', 'write_posts', 'edit_others_posts', 'manage_pages',
     'manage_terms', 'manage_media', 'manage_menus',
   ],
   admin: [...CAPABILITIES],
@@ -64,7 +63,7 @@ export function roleSummary(role: Role): string {
   if (caps.length === CAPABILITIES.length) return 'Everything, including themes, settings and users.';
   const labels: Partial<Record<Capability, string>> = {
     write_posts: 'writes posts', edit_others_posts: "edits everyone's posts", manage_pages: 'manages pages',
-    moderate_comments: 'moderates comments', manage_terms: 'manages categories', manage_media: 'manages the media library',
+    manage_terms: 'manages categories', manage_media: 'manages the media library',
     manage_menus: 'manages menus',
   };
   return caps.map((c) => labels[c]).filter(Boolean).join(', ') + '.';

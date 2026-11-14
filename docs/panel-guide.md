@@ -10,10 +10,9 @@ next. The plan behind the panel is in [the roadmap](panel-overhaul-roadmap.md).
 
 ## Getting around
 
-The sidebar mirrors WordPress: Dashboard, Updates, Posts, Media, Pages, Comments,
+The sidebar mirrors WordPress: Dashboard, Updates, Posts, Media, Pages,
 Appearance, Plugins, Users, Tools and Settings, with a **Collapse Menu** control at
-the bottom (remembered in the browser). Sub-menus appear for the section you are in,
-and the pending-comment count is shown as a badge.
+the bottom (remembered in the browser). Sub-menus appear for the section you are in.
 
 The panel is one shell built from a small component kit (`src/admin/components.ts`):
 page headers, cards, tables, tabs, badges, notices, empty states, pagination and
@@ -36,7 +35,7 @@ behave the same and a change lands everywhere at once.
   a bundle grows past its budget.
 
 - **Command palette** - `Ctrl`/`⌘`+`K` (or `/` when not typing) opens a search-and-command
-  launcher from anywhere in the panel: type to search every post, page, file, comment,
+  launcher from anywhere in the panel: type to search every post, page, file,
   category, tag and user you are allowed to see, or pick a command (`Add post`, `Settings`,
   `Media`…). Results are fetched as a fragment from `GET /{admin}/search?q=`; with JavaScript
   off, the same box submits to the full search page. The same query is available as a plain
@@ -45,12 +44,12 @@ behave the same and a change lands everywhere at once.
   toolbar, sortable columns (`aria-sort`), one bulk-action bar that activates on selection, and
   an empty state that offers the next step. Below 700 px each row becomes a card with its
   column labels, so the panel is usable on a phone without sideways scrolling.
-- **Dashboard** - opens with a greeting, the site name and a **Needs attention** list: comments
-  waiting, spam to check, scheduled posts that are overdue, posts untouched for 60 days, images
+- **Dashboard** - opens with a greeting, the site name and a **Needs attention** list: scheduled
+  posts that are overdue, posts untouched for 60 days, images
   without alt text, media records with no file, pending database updates and idle author
   accounts. Items are ordered by severity, each one links to the screen that fixes it, and each
   check fails quietly if the data is not there yet. Below it: site totals, recently edited
-  content, latest comments and version/schema/theme at a glance.
+  content and version/schema/theme at a glance.
 
 ## The editor: writing, formatting and placing images
 
@@ -150,24 +149,23 @@ blank 500.
 
 | Section | What it does |
 | --- | --- |
-| Dashboard | Greeting, **Needs attention** checklist (each item links to the fix), site totals, recently edited content, latest comments, version, schema and theme |
+| Dashboard | Greeting, **Needs attention** checklist (each item links to the fix), site totals, recently edited content, version, schema and theme |
 | Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
 | Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; the full editor (formatting bar, links, images with caption/alt/link, page breaks, word count), excerpt, featured image, SEO, draft/published/scheduled |
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). Images are compressed to WebP in the browser before upload, in every common format (JPG/JFIF, PNG/APNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, JXL, ICO, SVG). The editor's media picker uses the same library and has two tabs: **Library** and **Upload from device** |
 | Pages | Same list pattern as Posts, plus a **Page hierarchy** tree, **Parent page** selector and **Page order** panel; published children become linked cards with breadcrumbs; status/date filters and bulk publish/draft/delete; a tick adds a page to the header menu |
-| Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
 | Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes**, **Templates**, **Menus**, **Widgets** (the areas the theme declares), **Identity** (logo, favicon, social image) |
 | Plugins | Built-in XML sitemap, robots.txt and RSS feed can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects (301/302), JSON import/export, server-stored backups, site health, page-cache reset |
 | Landing page | Two Yes/No switches: *Show the landing page* and *Show the play button on the landing page*, with a preview that works even while the screen is off |
-| Settings | Site identity and favicon (the title follows the domain until you rename it), reading, the landing soundtrack (an ordered looping playlist uploaded one track at a time), discussion, domains and the admin URL |
+| Settings | Site identity and favicon (the title follows the domain until you rename it), reading, the landing soundtrack (an ordered looping playlist uploaded one track at a time), domains and the admin URL |
 
 ## Who changed what
 
 **Tools → Audit log** lists every change made in the panel — content saved, published or deleted, themes
 installed, activated, edited and rolled back, settings and appearance changed, users added or re-roled,
-comments moderated, imports and exports. Each row says **who** (name and username), **what** (a sentence
+imports and exports. Each row says **who** (name and username), **what** (a sentence
 naming the object, not its id), **where** (the area), **when** (date and time in the site's timezone) and the
 IP address. Newest first.
 
@@ -193,11 +191,10 @@ Each account has a role, and each role is a bundle of capabilities:
 | `read` | open the panel at all |
 | `write_posts`, `edit_own_posts`, `edit_others_posts` | write, and whose posts you may change |
 | `manage_pages`, `manage_terms`, `manage_media`, `manage_menus` | pages, categories/tags, the media library, menus |
-| `moderate_comments` | approve, spam, trash and reply |
 | `manage_themes`, `manage_plugins`, `manage_settings`, `manage_users`, `manage_tools`, `manage_updates` | each admin area |
 
 The three roles keep the permissions they always had — **author** writes their own posts and media,
-**editor** looks after all content, media, menus and comments, **admin** has everything — but the check
+**editor** looks after all content, media and menus, **admin** has everything — but the check
 everywhere in the code is `can(user, 'manage_pages')`, never `role === 'admin'`. The sidebar is built from
 the same map, so a role never sees a link to a screen it will be refused (refused with a styled 403 that says
 which capability was missing). The Users screen describes each role by asking the map, so the description
@@ -332,7 +329,7 @@ same behaviour: admin-only, added verbatim to every page, stamped with the page'
 | Screen | What it does |
 | --- | --- |
 | Redirects | path → target, 301 or 302, applied before the page cache |
-| Import / Export | one JSON file (format version 2) with content, terms, menus, comments, redirects, settings, themes with their templates and stylesheets, per-theme settings, revisions, and users without passwords |
+| Import / Export | one JSON file (format version 2) with content, terms, menus, redirects, settings, themes with their templates and stylesheets, per-theme settings, revisions, and users without passwords |
 | Backups | the same file stored server-side, downloadable, deletable |
 | Site Health | database, KV, media, versions, schema, cache, content counts, whether the database is password-protected, and the performance budgets |
 | Audit log | who changed what, for 90 days |
@@ -352,7 +349,7 @@ back to the moment before the installer ran, without a restart and without shell
 access.
 
 The screen is deliberately slow. It counts what it is about to destroy - pages,
-posts, media files, comments, panel accounts, themes, menus, redirects and server
+posts, media files, panel accounts, themes, menus, redirects and server
 backups - and lists what has no count: the audit log, every setting, the admin URL,
 the secret that keeps people signed in, the cached pages and the database password.
 It offers the export first, because that JSON file is the only way to get anything

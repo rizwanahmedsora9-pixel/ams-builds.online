@@ -11,7 +11,7 @@ import { csrfField, errorPage, go, html, layout, raw } from '../../lib/ui';
  * Users and roles. Admins manage every account; everyone can edit their own
  * profile (name, email, password) under Profile.
  *
- * Roles: admin (everything), editor (all content, media, menus, comments),
+ * Roles: admin (everything), editor (all content, media and menus),
  * author (own posts and media only).
  */
 const users = new Hono<AppEnv>();
@@ -188,7 +188,6 @@ users.post('/users/:id{[0-9]+}/delete', async (c) => {
   }
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE content SET author_id=? WHERE author_id=?').bind(c.var.user.id, id),
-    c.env.DB.prepare('UPDATE comments SET user_id=NULL WHERE user_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM users WHERE id=?').bind(id),
   ]);
   await audit(c, 'deleted', 'user', `Deleted user “${row.username}” (${row.role})`, id);

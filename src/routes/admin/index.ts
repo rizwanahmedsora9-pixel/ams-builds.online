@@ -17,7 +17,6 @@ import settings from './settings';
 import landing from './landing';
 import menus from './menus';
 import themes from './themes';
-import comments from './comments';
 import users from './users';
 import plugins from './plugins';
 import tools from './tools';
@@ -135,7 +134,7 @@ admin.post('/logout', (c) => {
 });
 
 /* --------------------------------------------------------------- dashboard */
-const EMPTY_STATS = { pages: 0, posts: 0, media: 0, users: 0, pending: 0, approved: 0 };
+const EMPTY_STATS = { pages: 0, posts: 0, media: 0, users: 0 };
 type Stats = typeof EMPTY_STATS;
 
 async function dashboardStats(c: Ctx): Promise<Stats> {
@@ -144,52 +143,30 @@ async function dashboardStats(c: Ctx): Promise<Stats> {
       `SELECT (SELECT COUNT(*) FROM content WHERE site_id=1 AND type='page') AS pages,
               (SELECT COUNT(*) FROM content WHERE site_id=1 AND type='post') AS posts,
               (SELECT COUNT(*) FROM media WHERE site_id=1) AS media,
-              (SELECT COUNT(*) FROM users) AS users,
-              (SELECT COUNT(*) FROM comments WHERE site_id=1 AND status='pending') AS pending,
-              (SELECT COUNT(*) FROM comments WHERE site_id=1 AND status='approved') AS approved`,
+              (SELECT COUNT(*) FROM users) AS users`,
     ).first<Stats>();
-    return row ?? EMPTY_STATS;
+    return { ...EMPTY_STATS, ...row };
   } catch {
-    // A database that has not run the comments migration yet.
-    try {
-      const row = await c.env.DB.prepare(
-        `SELECT (SELECT COUNT(*) FROM content WHERE site_id=1 AND type='page') AS pages,
-                (SELECT COUNT(*) FROM content WHERE site_id=1 AND type='post') AS posts,
-                (SELECT COUNT(*) FROM media WHERE site_id=1) AS media,
-                (SELECT COUNT(*) FROM users) AS users`,
-      ).first<Stats>();
-      return { ...EMPTY_STATS, ...row };
-    } catch {
-      return EMPTY_STATS;
-    }
+    return EMPTY_STATS;
   }
 }
 
 admin.get('/', async (c) => {
   const base = c.var.base;
   const user = c.var.user;
-  const [counts, recent, recentComments, settingsMap, theme, schema, attention] = await Promise.all([
+  const [counts, recent, settingsMap, theme, schema, attention] = await Promise.all([
     dashboardStats(c),
     c.env.DB.prepare(
       `SELECT c.id, c.type, c.title, c.status, c.updated_at, u.username AS author
        FROM content c LEFT JOIN users u ON u.id=c.author_id WHERE c.site_id=1
        ORDER BY c.updated_at DESC, c.id DESC LIMIT 6`,
     ).all<{ id: number; type: string; title: string; status: string; updated_at: string; author: string | null }>(),
-    can(user, 'moderate_comments')
-      ? c.env.DB.prepare(
-        `SELECT cm.id, cm.author_name, cm.body, cm.status, cm.created_at, c.title AS post
-         FROM comments cm JOIN content c ON c.id=cm.content_id WHERE cm.site_id=1
-         ORDER BY cm.created_at DESC, cm.id DESC LIMIT 4`,
-      ).all<{ id: number; author_name: string; body: string; status: string; created_at: string; post: string }>()
-        .catch(() => ({ results: [] as { id: number; author_name: string; body: string; status: string; created_at: string; post: string }[] }))
-      : Promise.resolve({ results: [] as { id: number; author_name: string; body: string; status: string; created_at: string; post: string }[] }),
     getSettings(c.env),
     c.env.DB.prepare('SELECT name, version FROM themes WHERE active=1 LIMIT 1').first<{ name: string; version: string }>().catch(() => null),
     installedSchemaVersion(c.env).catch(() => 1),
     needsAttention(c, base).catch(() => ({ items: [] as AttentionItem[], checked: 0 })),
   ]);
   const pendingUpdates = pendingMigrations(schema).length;
-  const moderated = settingsMap.comments_enabled !== '0' && settingsMap.comments_require_approval !== '0';
   const urgent = attention.items.filter((item) => item.tone === 'danger');
   const siteName = settingsMap.site_title || 'your site';
 
@@ -272,24 +249,8 @@ admin.get('/', async (c) => {
           <dt>Version</dt><dd>${APP_VERSION}</dd>
           <dt>Schema</dt><dd>${schema}${pendingUpdates ? html` · <a href="${base}/updates">${pendingUpdates} update${pendingUpdates === 1 ? '' : 's'} ready</a>` : ' · up to date'}</dd>
           <dt>Theme</dt><dd>${theme ? `${theme.name} v${theme.version}` : BUNDLED_THEME_NAME}</dd>
-          <dt>Comments</dt><dd>${counts.pending} pending · ${counts.approved} approved</dd>
-          <dt>Moderation</dt><dd>${moderated ? 'New comments wait for you' : 'Comments appear immediately'}</dd>
         </dl>`,
       })}
-      ${can(user, 'moderate_comments') ? card({
-        title: 'Latest comments',
-        actions: html`<a class="btn ghost small" href="${base}/comments">All</a>`,
-        flush: true,
-        body: recentComments.results.length
-          ? html`<ul class="list list--rows">
-            ${recentComments.results.map((cm) => html`<li class="wrap">
-              <div class="t"><b>${cm.author_name}</b> <small>on ${cm.post}</small>
-                <div class="comment-body-preview">${cm.body.slice(0, 120)}</div></div>
-              <span class="badge ${cm.status}">${cm.status}</span>
-            </li>`)}
-          </ul>`
-          : html`<div class="card__pad"><p class="muted">No comments yet. They will show up here for you to approve.</p></div>`,
-      }) : ''}
     </aside>
   </div>
 </section>`, '');
@@ -335,7 +296,6 @@ admin.route('/', settings);
 admin.route('/', landing);
 admin.route('/', menus);
 admin.route('/', themes);
-admin.route('/', comments);
 admin.route('/', users);
 admin.route('/', plugins);
 admin.route('/', tools);

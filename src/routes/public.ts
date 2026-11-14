@@ -5,7 +5,6 @@ import { SESSION_COOKIE, sessionUser } from '../lib/auth';
 import { bumpCache, cfgFor, getConfig, getSettings, type Settings } from '../lib/config';
 import { findContent, listPosts, mediaUrl, permalinkStyle, postAssignedPages, postUrl, searchContent, toViews, type ContentView } from '../lib/content';
 import { hasTable } from '../lib/schema';
-import { commentsEnabled, commentsModerated, validCommentToken } from '../lib/comments';
 import { getFile } from '../lib/files';
 import { pluginOn } from '../lib/plugins';
 import { PAGE_CACHE_TTL, activeTheme, cacheKey, renderTheme, themeBySlug, type PageMeta } from '../lib/render';
@@ -13,7 +12,7 @@ import { resolveSettings } from '../lib/theme-manifest';
 import { previewFor } from '../lib/preview';
 import { can } from '../lib/capabilities';
 import type { ThemeBundle } from '../lib/theme-manifest';
-import { clientIp, cspFor, nonceFor, rateCount, rateHit, safeUrl, sameOrigin, stripTags, type CspMode } from '../lib/security';
+import { cspFor, nonceFor, safeUrl, stripTags, type CspMode } from '../lib/security';
 import { landingEnabled, landingPlayShown, landingScreenMarkup, parseLandingAudioIds, type LandingAudioTrack } from '../lib/landing';
 import { readTokens, schemeMeta } from '../lib/tokens';
 import { titleFor } from '../lib/origin';
@@ -254,61 +253,6 @@ const notFound = (siteTitle: string): Resolved => ({
   status: 404, template: '404', meta: { title: `Page not found – ${siteTitle}`, noindex: true }, data: {},
 });
 
-/* --------------------------------------------------------------- comments */
-// Public comment form. Protected by a signed form token, an origin check, a
-// honeypot field and a per-IP rate limit; new comments wait for moderation
-// unless an admin turns that off in Settings -> Discussion.
-site.post('/comments', async (c) => {
-  if (!sameOrigin(c.req.raw)) return c.text('Bad origin', 403);
-  let form: FormData;
-  try {
-    form = await c.req.formData();
-  } catch {
-    return c.text('Bad request', 400);
-  }
-  const settings = await getSettings(c.env);
-  const id = Number(form.get('content_id')) || 0;
-  const post = id ? await findContent(c.env, { type: 'post', id }) : null;
-  if (!post) return c.text('That post no longer accepts comments.', 404);
-  const style = permalinkStyle(settings);
-  const back = (code: string) => c.redirect(`${postUrl(post, style)}?comment=${code}#comments`, 303);
-
-  if (!commentsEnabled(settings)) return back('closed');
-  if (String(form.get('website') ?? '').trim()) return back('failed'); // honeypot
-  if (!(await validCommentToken(c.var.cfg.secret, post.id, String(form.get('token') ?? '')))) return back('failed');
-
-  const ip = clientIp(c.req.raw);
-  const rlKey = 'comment:' + ip;
-  if ((await rateCount(c.env, rlKey)) >= 5) return back('rate');
-
-  const name = String(form.get('name') ?? '').trim().slice(0, 80);
-  const email = String(form.get('email') ?? '').trim().slice(0, 160);
-  const body = String(form.get('body') ?? '').trim().slice(0, 4000);
-  if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || body.length < 2) return back('invalid');
-
-  // Replies only attach to an approved comment on the same post.
-  let parentId: number | null = null;
-  const wantedParent = Number(form.get('parent_id')) || 0;
-  if (wantedParent) {
-    const parent = await c.env.DB.prepare("SELECT id FROM comments WHERE id=? AND site_id=1 AND content_id=? AND status='approved'")
-      .bind(wantedParent, post.id).first<{ id: number }>();
-    if (parent) parentId = parent.id;
-  }
-
-  const status = commentsModerated(settings) ? 'pending' : 'approved';
-  const now = new Date().toISOString();
-  try {
-    await c.env.DB.prepare(
-      'INSERT INTO comments (site_id,content_id,parent_id,author_name,author_email,body,status,ip,user_agent,created_at,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?,?)',
-    ).bind(post.id, parentId, name, email, body, status, ip, (c.req.header('user-agent') || '').slice(0, 200), now, now).run();
-  } catch {
-    return back('failed');
-  }
-  await rateHit(c.env, rlKey, 10 * 60);
-  if (status === 'approved') await bumpCache(c.env, c.var.cfg);
-  return back(status === 'approved' ? 'published' : 'pending');
-});
-
 /* ---------------------------------------------- sitemap, robots, RSS feed */
 const xmlEsc = (v: unknown): string =>
   String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[ch]!);
@@ -430,7 +374,7 @@ site.get('*', async (c) => {
   // must render per request: the page cache is keyed by path, not by query, and a
   // cached home response would answer the preview with the stripped-down page.
   const previewLanding = url.searchParams.get('landing') === '1';
-  const cacheable = !hasSession && path.length <= 200 && path !== '/search' && !previewLanding && !url.searchParams.has('comment') && !url.searchParams.has('reply_to');
+  const cacheable = !hasSession && path.length <= 200 && path !== '/search' && !previewLanding;
   const key = cacheKey(c.var.cfg, url);
   const headers = { 'Cache-Control': hasSession ? 'private, no-store' : 'public, max-age=0, must-revalidate' };
 
@@ -473,11 +417,7 @@ site.get('*', async (c) => {
     tokenOverrides: unsaved?.tokens,
     pageHierarchy: result.pageHierarchy,
     pagePosts: result.pagePosts,
-    data: {
-      ...result.data,
-      comment_notice: url.searchParams.get('comment') || undefined,
-      reply_to: url.searchParams.get('reply_to') || undefined,
-    },
+    data: result.data,
   });
 
   // The fixed landing screen is a first-visit layer over the existing home

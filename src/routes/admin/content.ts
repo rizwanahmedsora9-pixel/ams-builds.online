@@ -44,7 +44,7 @@ async function guard(c: Ctx, next: () => Promise<void>) {
 const mayEdit = (c: Ctx, row: { author_id: number | null }) => can(c.var.user, 'edit_others_posts') || row.author_id === c.var.user.id;
 
 type PostStatusFilter = 'all' | 'published' | 'draft' | 'scheduled';
-type PostSort = 'title' | 'author' | 'comments' | 'date' | 'order';
+type PostSort = 'title' | 'author' | 'date' | 'order';
 type PostListState = {
   status: PostStatusFilter;
   q: string;
@@ -68,7 +68,6 @@ type PostListRow = {
   categories: string | null;
   tags: string | null;
   assigned_pages: string | null;
-  comment_count: number;
   pinned: number;
   thumb_key: string | null;
 };
@@ -89,7 +88,7 @@ function postListState(c: Ctx): PostListState {
     month: /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : '',
     category: /^\d+$/.test(rawCategory) && Number.isSafeInteger(categoryId) && categoryId > 0 ? rawCategory : '',
     page: rawTargetPage === 'blog' || (/^\d+$/.test(rawTargetPage) && Number.isSafeInteger(targetPageId) && targetPageId > 0) ? rawTargetPage : '',
-    sort: ['title', 'author', 'comments', 'date', 'order'].includes(rawSort) ? rawSort as PostSort : 'date',
+    sort: ['title', 'author', 'date', 'order'].includes(rawSort) ? rawSort as PostSort : 'date',
     dir: rawDir === 'asc' ? 'asc' : 'desc',
     p: Math.min(100_000, Math.max(1, Math.trunc(rawPage) || 1)),
   };
@@ -219,12 +218,11 @@ async function postsList(c: Ctx): Promise<Response> {
   const sortSql: Record<PostSort, string> = {
     title: 'c.title COLLATE NOCASE',
     author: "COALESCE(u.username,'') COLLATE NOCASE",
-    comments: 'comment_count',
     date: 'COALESCE(c.published_at,c.created_at)',
     order: 'c.menu_order',
   };
   const direction = state.dir === 'asc' ? 'ASC' : 'DESC';
-  const queryRows = (withComments: boolean, withPostPages: boolean) => {
+  const queryRows = (withPostPages: boolean) => {
     const assignedPagesSql = withPostPages
       ? `(SELECT group_concat(p.title, ', ') FROM content_pages cp JOIN content p ON p.id=cp.page_id
           WHERE cp.content_id=c.id AND p.site_id=1 AND p.type='page')`
@@ -236,8 +234,7 @@ async function postsList(c: Ctx): Promise<Response> {
                WHERE ct.content_id=c.id AND t.site_id=1 AND t.taxonomy='category') AS categories,
               (SELECT group_concat(t.name, ', ') FROM content_terms ct JOIN terms t ON t.id=ct.term_id
                WHERE ct.content_id=c.id AND t.site_id=1 AND t.taxonomy='tag') AS tags,
-              ${assignedPagesSql} AS assigned_pages,
-              ${withComments ? "(SELECT COUNT(*) FROM comments cm WHERE cm.site_id=1 AND cm.content_id=c.id AND cm.status IN ('approved','pending'))" : '0'} AS comment_count
+              ${assignedPagesSql} AS assigned_pages
        FROM content c LEFT JOIN users u ON u.id=c.author_id LEFT JOIN media m ON m.id=c.featured_media_id
        WHERE ${whereSql} ORDER BY c.pinned DESC, ${sortSql[state.sort]} ${direction}, c.id DESC LIMIT ? OFFSET ?`,
     ).bind(...args, per + 1, (state.p - 1) * per).all<PostListRow>();
@@ -245,12 +242,12 @@ async function postsList(c: Ctx): Promise<Response> {
 
   let listResult;
   try {
-    listResult = await queryRows(true, hasPostPages);
+    listResult = await queryRows(hasPostPages);
   } catch (error) {
     // Older installations may be between schema migrations; fall back cleanly.
     const msg = String(error).toLowerCase();
-    if (!msg.includes('comments') && !msg.includes('content_pages')) throw error;
-    listResult = await queryRows(!msg.includes('comments'), hasPostPages && !msg.includes('content_pages'));
+    if (!msg.includes('content_pages')) throw error;
+    listResult = await queryRows(false);
   }
   const totalRow = await c.env.DB.prepare(
     `SELECT COUNT(*) AS n FROM content c LEFT JOIN users u ON u.id=c.author_id WHERE ${whereSql}`,
@@ -346,7 +343,6 @@ async function postsList(c: Ctx): Promise<Response> {
         sortCol('Author', 'author', 'asc', (change) => postListHref(state, change), 'col-hide-sm'),
         { label: 'Categories', cls: 'col-hide-md' },
         { label: 'Tags', cls: 'col-hide-md' },
-        { ...sortCol('Comments', 'comments', 'desc', (change) => postListHref(state, change), 'list-comments'), align: 'center' as const },
         sortCol('Date', 'date', 'desc', (change) => postListHref(state, change), 'list-date'),
       ],
       rows: rows.map((row) => {
@@ -367,12 +363,11 @@ async function postsList(c: Ctx): Promise<Response> {
           row.author || '—',
           row.categories || '—',
           row.tags || '—',
-          html`<span class="comment-count" aria-label="${row.comment_count} comments">${row.comment_count}</span>`,
           html`<span class="row-date"><strong>${dateLabel}</strong><time datetime="${date}">${formatPostDate(date, timezone)}</time></span>`,
         ];
       }),
     })
-    : emptyRow(7, {
+    : emptyRow(6, {
       title: 'No posts match',
       body: state.q || state.month || state.category || state.page || state.status !== 'all'
         ? 'Try a different search or clear the filters.'
@@ -408,7 +403,6 @@ type PageListRow = {
   created_at: string;
   updated_at: string;
   author: string | null;
-  comment_count: number;
   pinned: number;
 };
 
@@ -468,7 +462,7 @@ function pageListState(c: Ctx): PageListState {
     status: ['all', 'published', 'draft'].includes(rawStatus) ? rawStatus as PageStatusFilter : 'all',
     q: (c.req.query('q') || '').trim().slice(0, 120),
     month: /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : '',
-    sort: ['title', 'author', 'comments', 'date', 'order'].includes(rawSort) ? rawSort as PostSort : 'date',
+    sort: ['title', 'author', 'date', 'order'].includes(rawSort) ? rawSort as PostSort : 'date',
     dir: c.req.query('dir') === 'asc' ? 'asc' : 'desc',
     p: Math.min(100_000, Math.max(1, Math.trunc(rawPage) || 1)),
   };
@@ -523,22 +517,15 @@ async function pagesList(c: Ctx): Promise<Response> {
   const direction = state.dir === 'asc' ? 'ASC' : 'DESC';
   const sortSql: Record<PostSort, string> = {
     title: 'c.title COLLATE NOCASE', author: "COALESCE(u.username,'') COLLATE NOCASE",
-    comments: 'comment_count', date: 'COALESCE(c.published_at,c.created_at)',
+    date: 'COALESCE(c.published_at,c.created_at)',
     order: 'c.menu_order',
   };
-  const queryRows = (withComments: boolean) => c.env.DB.prepare(
-    `SELECT c.id, c.title, c.slug, c.status, c.published_at, c.created_at, c.updated_at, c.pinned, u.username AS author,
-            ${withComments ? "(SELECT COUNT(*) FROM comments cm WHERE cm.site_id=1 AND cm.content_id=c.id AND cm.status IN ('approved','pending'))" : '0'} AS comment_count
+  const queryRows = () => c.env.DB.prepare(
+    `SELECT c.id, c.title, c.slug, c.status, c.published_at, c.created_at, c.updated_at, c.pinned, u.username AS author
      FROM content c LEFT JOIN users u ON u.id=c.author_id LEFT JOIN media m ON m.id=c.featured_media_id
      WHERE ${whereSql} ORDER BY c.pinned DESC, ${sortSql[state.sort]} ${direction}, c.id DESC LIMIT ? OFFSET ?`,
   ).bind(...args, per + 1, (state.p - 1) * per).all<PageListRow>();
-  let listResult;
-  try {
-    listResult = await queryRows(true);
-  } catch (error) {
-    if (!String(error).toLowerCase().includes('comments')) throw error;
-    listResult = await queryRows(false);
-  }
+  const listResult = await queryRows();
   const totalRow = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM content c WHERE ${whereSql}`).bind(...args).first<{ n: number }>();
   const total = Number(totalRow?.n || 0);
   const rows = listResult.results.slice(0, per);
@@ -621,7 +608,6 @@ async function pagesList(c: Ctx): Promise<Response> {
         { label: html`<input type="checkbox" data-select-all aria-label="Select all pages">`, cls: 'list-check' },
         sortCol('Title', 'title', 'asc', (change) => pageListHref(state, change)),
         sortCol('Author', 'author', 'asc', (change) => pageListHref(state, change), 'col-hide-sm'),
-        { ...sortCol('Comments', 'comments', 'desc', (change) => pageListHref(state, change), 'list-comments'), align: 'center' as const },
         sortCol('Date', 'date', 'desc', (change) => pageListHref(state, change), 'list-date'),
       ],
       rows: rows.map((row) => {
@@ -640,12 +626,11 @@ async function pagesList(c: Ctx): Promise<Response> {
               </div>
             </div>`,
           row.author || '—',
-          html`<span class="comment-count" aria-label="${row.comment_count} comments">${row.comment_count}</span>`,
           html`<span class="row-date"><strong>${dateLabel}</strong><time datetime="${date}">${formatPostDate(date, timezone)}</time></span>`,
         ];
       }),
     })
-    : emptyRow(5, {
+    : emptyRow(4, {
       title: 'No pages match',
       body: state.q || state.month || state.status !== 'all' ? 'Try a different search or clear the filters.' : 'Add an about page or a landing page.',
       action: html`<a class="btn" href="${base}/pages/new">Add a page</a>`,
@@ -713,7 +698,6 @@ content.post('/pages/bulk', async (c) => {
     await db.batch(rows.flatMap((row) => [
       db.prepare('DELETE FROM content_terms WHERE content_id=?').bind(row.id),
       ...(postPagesReady ? [db.prepare('DELETE FROM content_pages WHERE page_id=?').bind(row.id)] : []),
-      db.prepare('DELETE FROM comments WHERE content_id=?').bind(row.id),
       db.prepare("DELETE FROM content WHERE id=? AND site_id=1 AND type='page'").bind(row.id),
       db.prepare("DELETE FROM settings WHERE site_id=1 AND key='home_page_id' AND value=?").bind(String(row.id)),
     ]));
@@ -769,7 +753,6 @@ content.post('/posts/bulk', async (c) => {
     const statements = validIds.flatMap((id) => [
       db.prepare('DELETE FROM content_terms WHERE content_id=?').bind(id),
       ...(postPagesReady ? [db.prepare('DELETE FROM content_pages WHERE content_id=?').bind(id)] : []),
-      db.prepare('DELETE FROM comments WHERE content_id=?').bind(id),
       db.prepare("DELETE FROM content WHERE id=? AND site_id=1 AND type='post'").bind(id),
     ]);
     await db.batch(statements);
@@ -1090,7 +1073,7 @@ async function editor(c: Ctx, kind: Kind, row: ContentRow | null): Promise<Respo
 
   const status = row?.status ?? 'draft';
   // Templates the active theme offers. The kind's own template is the default;
-  // `page` is not offered to a post (it would drop its date, author and comments).
+  // `page` is not offered to a post (it would drop its date and author).
   const templateOptions = (await activeThemeTemplates(c.env)).templates
     .filter((t) => !['home', 'archive', '404', type, ...(type === 'post' ? ['page'] : [])].includes(t));
   const hierarchyAvailable = type === 'page' && await hasColumn(c.env, 'content', 'parent_id');
@@ -1904,7 +1887,6 @@ content.post('/:kind{(?:pages|posts)}/:id{[0-9]+}/delete', async (c) => {
         : c.env.DB.prepare('DELETE FROM content_pages WHERE content_id=?').bind(id),
     ] : []),
     c.env.DB.prepare('DELETE FROM content_lock WHERE content_id=?').bind(id),
-    c.env.DB.prepare('DELETE FROM comments WHERE content_id=?').bind(id),
     c.env.DB.prepare('DELETE FROM content WHERE id=?').bind(id),
     c.env.DB.prepare("DELETE FROM settings WHERE site_id=1 AND key='home_page_id' AND value=?").bind(String(id)),
   ]);

@@ -11,7 +11,7 @@ A professional, fully responsive theme for Edge CMS. Phones, tablets and desktop
 - **Header:** optional top bar (tagline, phone, email, social icons), sticky main bar, logo or built-in mark, dropdown sub-menus, search icon, dark-mode button, mobile slide-down menu.
 - **Home:** hero (headline, sub-headline, two buttons), page tiles, featured posts, latest posts (first post is a wide feature card).
 - **Pages:** title banner, readable typography, styled breadcrumbs and child-page blocks rendered by the CMS.
-- **Posts:** category chips, date/author, featured image, tag chips, share buttons (Facebook, X, WhatsApp, LinkedIn, copy link), comments styling.
+- **Posts:** category chips, date/author, featured image, tag chips, share buttons (Facebook, X, WhatsApp, LinkedIn, copy link).
 - **Archive / Search / 404:** card grids, pagination, search form, friendly 404.
 - **Footer:** about + contact column, footer menu, pages list, social icons, back-to-top button.
 - **Extras:** inline SVG icons (no external requests), RTL-friendly CSS, reduced-motion support, print styles, skip link.

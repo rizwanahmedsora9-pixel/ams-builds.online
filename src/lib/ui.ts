@@ -6,7 +6,6 @@ import { icon, iconSprite, pageIcons, PAGE_ICONS } from '../admin/icons';
 import { commandsFor } from '../admin/search';
 import { PALETTE_JS, paletteConfig } from '../admin/palette';
 import { can } from './auth';
-import { pendingComments } from './comments';
 import { getSettings } from './config';
 import { readPrefs } from './prefs';
 import { esc } from './security';
@@ -75,7 +74,6 @@ const ADMIN_SECTIONS: Record<string, string> = {
   '/posts': 'posts',
   '/media': 'media',
   '/pages': 'pages',
-  '/comments': 'comments',
   '/terms': 'posts',
   '/themes': 'appearance',
   '/menus': 'appearance',
@@ -93,7 +91,7 @@ const ADMIN_SECTIONS: Record<string, string> = {
 const PREFS_PREFIX = '/preferences';
 
 /** The sidebar definition, kept separate so tests and the command palette can read it. */
-export function navGroups(user: { role: string }, pending: number): NavGroup[] {
+export function navGroups(user: { role: string }): NavGroup[] {
   const admin = can(user as Ctx['var']['user'], 'manage_settings');
   const editor = can(user as Ctx['var']['user'], 'edit_others_posts');
   return [
@@ -117,15 +115,6 @@ export function navGroups(user: { role: string }, pending: number): NavGroup[] {
       key: 'pages', path: '/pages', label: 'Pages', icon: 'file', show: editor, children: [
         { path: '/pages', label: 'All Pages' },
         { path: '/pages/new', label: 'Add New' },
-      ],
-    },
-    {
-      key: 'comments', path: '/comments', label: 'Comments', icon: 'message', show: editor, badge: pending, children: [
-        { path: '/comments', label: 'All Comments' },
-        { path: '/comments?status=pending', label: 'Pending' },
-        { path: '/comments?status=approved', label: 'Approved' },
-        { path: '/comments?status=spam', label: 'Spam' },
-        { path: '/comments?status=trash', label: 'Trash' },
       ],
     },
     {
@@ -172,7 +161,6 @@ export function navGroups(user: { role: string }, pending: number): NavGroup[] {
         { path: '/settings', label: 'General' },
         { path: '/settings#reading', label: 'Reading' },
         { path: '/settings#landing', label: 'Landing soundtrack' },
-        { path: '/settings#discussion', label: 'Discussion' },
         { path: '/settings#domains', label: 'Domains & URL' },
       ],
     },
@@ -303,21 +291,12 @@ export async function layout(c: Ctx, title: string, body: Raw, _active = '', opt
   const search = new URL(c.req.url).search;
   const prefs = readPrefs(c);
 
-  let pending = 0;
-  if (can(user, 'moderate_comments')) {
-    try {
-      pending = await pendingComments(c.env);
-    } catch {
-      /* comments table not migrated yet */
-    }
-  }
-
   const activeKey = path === '/' ? 'home'
     : path === '/profile' ? 'profile'
       : path.startsWith(PREFS_PREFIX) ? 'preferences'
         : (Object.entries(ADMIN_SECTIONS).find(([p]) => path === p || path.startsWith(p + '/'))?.[1] ?? '');
 
-  const groups = navGroups(user, pending);
+  const groups = navGroups(user);
   let siteTitle = '';
   try {
     const settings = await getSettings(c.env);

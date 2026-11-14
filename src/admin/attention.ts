@@ -3,9 +3,8 @@
  * the dashboard, in priority order: things that are broken or overdue first,
  * then things waiting for a decision, then work in progress.
  *
- * Every check is independent and fails soft: on an old database (no comments
- * table yet) or a missing media bucket the item simply disappears instead of
- * taking the dashboard down. Each item carries the link that fixes it, so the
+ * Every check is independent and fails soft: on an old database or a missing
+ * media bucket the item simply disappears instead of taking the dashboard down. Each item carries the link that fixes it, so the
  * dashboard is a to-do list, not a report.
  */
 import type { Ctx, User } from '../types';
@@ -18,7 +17,7 @@ export type AttentionItem = {
   /** Stable key, used for the DOM id and for tests. */
   key: string;
   tone: AttentionTone;
-  /** Short, count-shaped title, e.g. "3 comments waiting". */
+  /** Short, count-shaped title, e.g. "2 drafts to finish". */
   title: string;
   /** One sentence: why it matters or what happens when it is ignored. */
   body: string;
@@ -46,23 +45,14 @@ async function tryFirst<T extends Row>(c: Ctx, sql: string, ...args: (string | n
 
 /**
  * Collect the dashboard items for this user. Role-scoped: an author is never
- * told about comments they cannot see, users or database updates.
+ * told about users or database updates they cannot see.
  */
 export async function needsAttention(c: Ctx, base: string): Promise<{ items: AttentionItem[]; checked: number }> {
   const user: User = c.var.user;
-  const editor = can(user, 'moderate_comments');
   const admin = can(user, 'manage_tools');
   const items: AttentionItem[] = [];
 
-  const [pending, failed, scheduled, stale, unindexed, unreadable, migrations, authors] = await Promise.all([
-    // Comments waiting for moderation.
-    editor
-      ? tryFirst<Row>(c, "SELECT COUNT(*) AS n FROM comments WHERE site_id=1 AND status='pending'")
-      : Promise.resolve(null),
-    // Comments a spam filter rejected: usually a false positive worth a look.
-    editor
-      ? tryFirst<Row>(c, "SELECT COUNT(*) AS n FROM comments WHERE site_id=1 AND status='spam'")
-      : Promise.resolve(null),
+  const [scheduled, stale, unindexed, unreadable, migrations, authors] = await Promise.all([
     // Posts whose scheduled time has already passed.
     tryFirst<Row>(
       c,
@@ -87,26 +77,6 @@ export async function needsAttention(c: Ctx, base: string): Promise<{ items: Att
       ? tryFirst<Row>(c, "SELECT COUNT(*) AS n FROM users WHERE role='author' AND id NOT IN (SELECT COALESCE(author_id,0) FROM content)")
       : Promise.resolve(null),
   ]);
-
-  const pendingN = n(pending, 'n');
-  if (pendingN) {
-    items.push({
-      key: 'comments-pending', tone: 'warn', count: pendingN,
-      title: `${pendingN} comment${pendingN === 1 ? '' : 's'} waiting`,
-      body: 'Readers are waiting for a reply to appear. Approve, reply or mark as spam.',
-      href: `${base}/comments?status=pending`, cta: 'Review comments',
-    });
-  }
-
-  const failedN = n(failed, 'n');
-  if (failedN) {
-    items.push({
-      key: 'comments-spam', tone: 'info', count: failedN,
-      title: `${failedN} comment${failedN === 1 ? '' : 's'} marked spam`,
-      body: 'Filters hide these from readers. Check them for false positives, then delete.',
-      href: `${base}/comments?status=spam`, cta: 'Check spam',
-    });
-  }
 
   const missedN = n(scheduled, 'n');
   if (missedN) {

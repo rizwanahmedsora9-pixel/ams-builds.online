@@ -265,7 +265,7 @@ test('6. pages: create, publish, edit, cache is invalidated', async () => {
   assert.match(editor.text, /window\.addEventListener\('pointermove',move\)/, 'anchor drags are tracked on the window, not just the handle');
 
   const pageList = await get(`${admin}/pages`);
-  for (const label of ['Add Page', 'All', 'Published', 'Draft', 'Search Pages', 'Bulk actions', 'Comments', 'Date']) {
+  for (const label of ['Add Page', 'All', 'Published', 'Draft', 'Search Pages', 'Bulk actions', 'Date']) {
     assert.ok(pageList.text.includes(label), `pages list includes ${label}`);
   }
   assert.match(pageList.text, /class="table list-table"/);
@@ -372,7 +372,7 @@ test('8. posts: categories, tags, featured image, archives and JSON API', async 
 
 test('8a. posts list searches, filters and applies bulk actions', async () => {
   const all = await get(`${admin}/posts`);
-  for (const label of ['Add Post', 'All', 'Published', 'Categories', 'Tags', 'Comments', 'Date', 'Bulk actions']) {
+  for (const label of ['Add Post', 'All', 'Published', 'Categories', 'Tags', 'Date', 'Bulk actions']) {
     assert.ok(all.text.includes(label), `posts list includes ${label}`);
   }
   assert.match(all.text, /class="table list-table"/);
@@ -913,8 +913,7 @@ test('12a1. pages: parent/child hierarchy, hidden header children, and public br
     domains: savedSettings.domains || settingsDump.site.hostname, admin_slug: admin.slice(1),
     home_page_id: String(hollywoodId), favicon: savedSettings.favicon || '',
     permalink_style: savedSettings.permalink_style, posts_per_page: savedSettings.posts_per_page,
-    default_editor: savedSettings.default_editor, comments_enabled: savedSettings.comments_enabled,
-    comments_require_approval: savedSettings.comments_require_approval, csp: savedSettings.csp,
+    default_editor: savedSettings.default_editor, csp: savedSettings.csp,
     landing_audio_ids: JSON.parse(savedSettings.landing_audio_ids || '[]'),
   };
   assert.match((await adminPost('/settings', settingsFields)).location, /ok=/);
@@ -1148,61 +1147,20 @@ test('12c. theme store: one bundled theme, and it installs with one click', asyn
   log('the store lists one theme; it reinstalls, activates, and renders every page from one shell');
 });
 
-test('12d. comments: public form, moderation, approval, replies, spam and delete', async () => {
-  const saved = await adminPost('/settings', { ...SITE_SETTINGS, comments_enabled: 1, comments_require_approval: 1 });
-  assert.match(saved.location, /Settings saved/);
-
+test('12d. comments are gone: no form on a post, no admin screen, and posting is refused', async () => {
   const url = currentPostUrl();
   const page = await anon(url);
-  assert.match(page.text, /class="comment-form"/, 'the form is on the post');
-  assert.match(page.text, /id="comments"/);
-  const token = fieldValue(page.text, 'token');
-  const contentId = fieldValue(page.text, 'content_id');
+  assert.doesNotMatch(page.text, /class="comment-form"/, 'a post has no comment form');
+  assert.doesNotMatch(page.text, /id="comments"/, 'a post has no comment section');
+  assert.doesNotMatch(page.text, /Post comment/);
 
-  // A wrong token is refused and stores nothing.
-  const forged = await anonPost('/comments', { content_id: contentId, token: '1.bad', name: 'Bot', email: 'bot@example.com', body: 'spam' });
-  assert.match(forged.location, /comment=failed/);
-  // The honeypot is refused too.
-  const honey = await anonPost('/comments', { content_id: contentId, token, name: 'Bot', email: 'bot@example.com', body: 'spam', website: 'http://spam.example' });
-  assert.match(honey.location, /comment=failed/);
-
-  const sent = await anonPost('/comments', {
-    content_id: contentId, token, name: 'Visitor One', email: 'visitor@example.com',
-    body: 'Great post! <b>not html</b>', website: '',
-  });
-  assert.match(sent.location, /comment=pending/, 'comments wait for moderation');
-  assert.doesNotMatch((await anon(url)).text, /Great post!/, 'a pending comment is not public');
-
-  const dash = await get(admin);
-  assert.match(dash.text, /class="rail__bubble" title="1 pending"/, 'sidebar shows the pending count');
-
-  const panel = await get(`${admin}/comments?status=pending`);
-  assert.match(panel.text, /Visitor One/);
-  assert.match(panel.text, /Great post!/);
-  const commentId = Number(panel.text.match(/comments\/(\d+)\/status/)[1]);
-
-  const approved = await adminPost(`/comments/${commentId}/status`, { status: 'approved', from: 'pending' });
-  assert.match(approved.location, /ok=Comment[+ ]Approved/);
-  const live = await anon(url);
-  assert.match(live.text, /Great post!/, 'approved comments are public');
-  assert.match(live.text, /&lt;b&gt;not html&lt;\/b&gt;/, 'comment text is escaped');
-  assert.doesNotMatch(live.text, /<b>not html<\/b>/);
-
-  const reply = await adminPost(`/comments/${commentId}/reply`, { body: 'Thanks for reading!', from: 'all' });
-  assert.match(reply.location, /ok=Reply/);
-  const withReply = await anon(url);
-  assert.match(withReply.text, /Thanks for reading!/);
-  assert.match(withReply.text, /comment-staff/);
-  assert.match(withReply.text, /<ol class="children">/);
-
-  await adminPost(`/comments/${commentId}/status`, { status: 'spam', from: 'all' });
-  assert.doesNotMatch((await anon(url)).text, /Great post!/, 'spam is hidden');
-  await adminPost(`/comments/${commentId}/status`, { status: 'approved', from: 'spam' });
-  assert.match((await anon(url)).text, /Great post!/);
-
-  assert.equal((await adminPost(`/comments/${commentId}/delete`, {})).status, 303);
-  assert.doesNotMatch((await anon(url)).text, /Great post!/, 'deleted comments disappear');
-  log(`comment #${commentId} submitted anonymously, held for review, approved, replied to, marked spam and deleted`);
+  // The route is gone with the feature, so a stray POST cannot store anything.
+  const posted = await anonPost('/comments', { content_id: '1', name: 'Bot', email: 'bot@example.com', body: 'spam' });
+  assert.notEqual(posted.status, 303, 'nothing accepts a comment');
+  assert.equal((await get(`${admin}/comments`)).status, 404, 'the Comments screen is gone');
+  assert.doesNotMatch((await get(admin)).text, /href="[^"]*\/comments"/, 'the sidebar has no Comments entry');
+  assert.doesNotMatch((await get(`${admin}/settings`)).text, /comments/i, 'Settings has no Discussion card');
+  log('comment form, comment route and Comments screen are removed; posts render without them');
 });
 
 test('12e. users: create an author, role limits, switch roles and delete', async () => {
@@ -1352,9 +1310,6 @@ test('12g. tools: redirects, export/import, backups, health and cache', async ()
   assert.match(homeEditor.text, /name="parent_id" value=""[^]*home page stays at the top level/i, 'the configured home page has no parent control');
   assert.doesNotMatch((await anon('/')).text, /class="page-breadcrumbs"/, 'import keeps the configured home page top-level');
   assert.match((await anon('/import-hierarchy-child')).text, /class="page-breadcrumbs"[^]*Import Hierarchy Parent[^]*Import Hierarchy Child/);
-  const postText = (await anon(currentPostUrl())).text;
-  assert.equal((postText.match(/Thanks for reading!/g) || []).length, 1, 'importing twice does not duplicate comments');
-
   assert.match((await adminPost('/tools/backups/create', {})).location, /ok=Backup/);
   const backupsPage = await get(`${admin}/tools/backups`);
   const backupId = Number(backupsPage.text.match(/backups\/(\d+)\/download/)[1]);
@@ -1395,7 +1350,7 @@ test('12h. updates and taxonomy management: version page, run updates, categorie
 
 test('12i. the sidebar has every admin section, its sub-menus and the collapse control', async () => {
   const dash = await get(admin);
-  for (const path of ['/updates', '/posts', '/media', '/pages', '/comments', '/appearance', '/plugins', '/users', '/tools', '/settings', '/profile']) {
+  for (const path of ['/updates', '/posts', '/media', '/pages', '/appearance', '/plugins', '/users', '/tools', '/settings', '/profile']) {
     assert.ok(dash.text.includes(`href="${admin}${path}"`), `sidebar links to ${path}`);
   }
   assert.match(dash.text, /Collapse Menu/);
@@ -1419,12 +1374,12 @@ test('12i. the sidebar has every admin section, its sub-menus and the collapse c
     assert.ok(tools.text.includes(`href="${admin}${path}"`), `Tools sub-menu links to ${path}`);
   }
   const settingsPage = await get(`${admin}/settings`);
-  for (const hash of ['#reading', '#discussion', '#domains']) {
+  for (const hash of ['#reading', '#domains']) {
     assert.ok(settingsPage.text.includes(`href="${admin}/settings${hash}"`), `Settings sub-menu links to ${hash}`);
   }
   assert.match((await get(`${admin}/media`)).text, /id="upload"/);
 
-  for (const path of ['/updates', '/comments', '/appearance', '/plugins', '/users', '/tools', '/settings', '/widgets', '/terms?taxonomy=tag']) {
+  for (const path of ['/updates', '/appearance', '/plugins', '/users', '/tools', '/settings', '/widgets', '/terms?taxonomy=tag']) {
     assert.equal((await get(`${admin}${path}`)).status, 200, path);
   }
   log('11 sections and Profile are linked, sub-menus appear for the open section, every page opens');

@@ -1,7 +1,6 @@
 import { SOCIAL_PROFILES, socialUrl } from './social';
 import type { Config, Env } from '../types';
 import type { Settings } from './config';
-import { commentToken, commentsEnabled, approvedComments, renderCommentsHtml, type CommentRow } from './comments';
 import { esc, safeUrl } from './security';
 import { listPages, type ContentView } from './content';
 import { publicPageIcon } from '../admin/icons';
@@ -322,27 +321,6 @@ export async function renderTheme(
     loadMenus(env, url.pathname), loadHooks(env), listPages(env, { limit: 100 }),
   ]);
 
-  // Comments: rendered for posts that have them, in any theme.
-  let commentRows: CommentRow[] = [];
-  let commentsHtml = '';
-  const post = opts.template === 'post' ? (opts.data.post as { id: number } | undefined) : undefined;
-  if (post) {
-    commentRows = await approvedComments(env, post.id);
-    const open = commentsEnabled(settings);
-    if (commentRows.length || open) {
-      commentsHtml = renderCommentsHtml({
-        comments: commentRows,
-        count: commentRows.length,
-        tz: settings.timezone || 'UTC',
-        contentId: post.id,
-        token: open ? await commentToken(opts.cfg.secret, post.id) : '',
-        open,
-        notice: opts.data.comment_notice as string | undefined,
-        replyTo: Number(opts.data.reply_to) || 0,
-      });
-    }
-  }
-
   const assetUrl = (path: string): string => themeAssetUrl(theme.slug, path.replace(/^\.?\//, ''));
   // Themes installed in the panel have their stylesheet stored as an asset, so a
   // v2 layout can link it (`{{{theme_css_url}}}`) instead of inlining it. The
@@ -410,20 +388,12 @@ export async function renderTheme(
     nav_pages: buildNavTree(pageRows, settings, url.pathname),
     year: new Date().getUTCFullYear(),
     body_class: `tpl-${opts.template}`,
-    comments: commentRows.map((c) => ({ id: c.id, name: c.author_name, body: c.body, date: c.created_at })),
-    comments_count: commentRows.length,
-    comments_open: commentsEnabled(settings),
-    comments_html: commentsHtml,
     nonce,
     ...opts.data,
   };
   let inner = '';
   try {
     inner = renderWithTheme(theme, source, shared, renderOpts);
-    // A theme that does not use {{{comments_html}}} still gets its comments, after the content.
-    if (commentsHtml && !/\{\{\{?\s*comments_html\s*\}?\}\}/.test(source)) {
-      inner += `\n<div class="comments-fallback">${commentsHtml}</div>`;
-    }
     const pageContent = `${hierarchyMarkup.before}${inner}${hierarchyMarkup.after}`;
     return withPythonApps(applyLayout(theme, opts.template, pageContent, {
       ...shared,

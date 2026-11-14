@@ -6,7 +6,7 @@ import { resetSchemaCache } from '../../lib/schema';
  * by the installer; each entry here upgrades an already-installed database.
  * Append new entries with the next version number - never edit old ones.
  */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 /**
  * A migration statement that must not take the whole batch down.
@@ -18,27 +18,6 @@ export const SCHEMA_VERSION = 11;
  */
 const tolerant = (statement: string): string => `-- +ams-ignore duplicate column name
 ${statement}`;
-
-const COMMENTS = [
-  `CREATE TABLE IF NOT EXISTS comments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    site_id INTEGER NOT NULL DEFAULT 1,
-    content_id INTEGER NOT NULL,
-    parent_id INTEGER,
-    author_name TEXT NOT NULL DEFAULT '',
-    author_email TEXT NOT NULL DEFAULT '',
-    author_url TEXT NOT NULL DEFAULT '',
-    body TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','spam','trash')),
-    user_id INTEGER,
-    ip TEXT NOT NULL DEFAULT '',
-    user_agent TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`,
-  'CREATE INDEX IF NOT EXISTS idx_comments_list ON comments (site_id, status, created_at)',
-  'CREATE INDEX IF NOT EXISTS idx_comments_content ON comments (content_id, status)',
-];
 
 /**
  * Phase 2 tables plus the content columns the workflow needs. `ADD COLUMN` has
@@ -181,7 +160,6 @@ const POST_PAGES = [
 type Migration = { version: number; name: string; statements: string[]; run?: (env: Env) => Promise<void> };
 
 export const migrations: Migration[] = [
-  { version: 2, name: 'Comments', statements: COMMENTS },
   { version: 3, name: 'Revisions, edit locks and page ordering', statements: EDITOR_WORKFLOW },
   { version: 4, name: 'Page ordering default', statements: WORKFLOW_FIXES },
   { version: 5, name: 'Theme platform: assets, partials, versions', statements: THEME_PLATFORM },
@@ -204,6 +182,20 @@ export const migrations: Migration[] = [
       const cfg = await getConfig(env);
       if (cfg) await bumpCache(env, cfg);
     },
+  },
+  {
+    // Version 2 used to create the comments table. Comments are gone from the
+    // app entirely: no form, no admin screen and no capability. A site upgrading
+    // from before version 2 skips it, and an older install that still carries
+    // the table loses it here, along with the two settings that ran the form.
+    version: 12,
+    name: 'Remove comments',
+    statements: [
+      'DROP INDEX IF EXISTS idx_comments_list',
+      'DROP INDEX IF EXISTS idx_comments_content',
+      'DROP TABLE IF EXISTS comments',
+      "DELETE FROM settings WHERE site_id=1 AND key IN ('comments_enabled','comments_require_approval')",
+    ],
   },
 ];
 

@@ -40,7 +40,6 @@ system.get('/tools/reset', async (c) => {
     { label: t('reset.count_pages'), count: counts.pages },
     { label: t('reset.count_posts'), count: counts.posts },
     { label: t('reset.count_media'), count: counts.media },
-    { label: t('reset.count_comments'), count: counts.comments },
     { label: t('reset.count_users'), count: counts.users },
     { label: t('reset.count_themes'), count: counts.themes },
     { label: t('reset.count_menus'), count: counts.menus },

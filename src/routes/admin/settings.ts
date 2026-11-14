@@ -121,12 +121,6 @@ settings.get('/settings', async (c) => {
     </fieldset>
   </div>
   ${raw(LANDING_UPLOAD_JS)}
-  <div class="card" id="discussion">
-    <h2>Discussion</h2>
-    <label class="check" style="margin-top:0"><input type="checkbox" name="comments_enabled" value="1"${s.comments_enabled !== '0' ? raw(' checked') : ''}> Allow comments on posts</label>
-    <label class="check"><input type="checkbox" name="comments_require_approval" value="1"${s.comments_require_approval !== '0' ? raw(' checked') : ''}> Hold new comments for moderation</label>
-    <p class="hint">Visitors can comment with a name and email; the email is never published. Moderate everything under <a href="${c.var.base}/comments">Comments</a>.</p>
-  </div>
   <div class="card" id="security">
     <h2>Content security policy</h2>
     <label for="csp">Policy for your public pages</label>
@@ -318,8 +312,6 @@ settings.post('/settings', async (c) => {
     permalink_style: style,
     domains: domains.join('\n'),
     default_editor: ['classic', 'modern'].includes(str('default_editor')) ? str('default_editor') : 'ask',
-    comments_enabled: str('comments_enabled') === '1' ? '1' : '0',
-    comments_require_approval: str('comments_require_approval') === '1' ? '1' : '0',
     csp: ['off', 'report', 'enforce'].includes(str('csp')) ? str('csp') : 'report',
   });
   // Older installs may still carry the old "choose a Page" pointer. The fixed

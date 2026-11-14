@@ -72,7 +72,7 @@ test('panel chrome: controls sit where their CSS expects, tokens resolve, nothin
 });
 
 test('every page is reachable and every one renders the shell', async () => {
-  for (const path of ['', '/posts', '/pages', '/media', '/comments', '/terms', '/themes', '/menus', '/widgets',
+  for (const path of ['', '/posts', '/pages', '/media', '/terms', '/themes', '/menus', '/widgets',
     '/appearance', '/plugins', '/users', '/tools', '/tools/redirects', '/tools/export', '/tools/backups',
     '/tools/health', '/settings', '/updates', '/profile', '/preferences']) {
     const page = await panel.get(panel.admin + path);
@@ -240,8 +240,8 @@ test('list screens share one pattern: tabs, toolbar, bulk bar, sortable heads, c
 });
 
 test('the dashboard answers what needs attention, in priority order', async () => {
-  // A comment awaiting moderation and an image with no alt text are both
-  // detectable without any traffic to the public site.
+  // The attention list and the totals are both readable without any traffic to
+  // the public site.
   await panel.adminPost('/terms/save', { taxonomy: 'category', name: 'Policy' }).catch(() => null);
   const page = await panel.get(panel.admin);
   assert.equal(page.status, 200);
@@ -283,7 +283,7 @@ test('accessibility floor: landmarks, focus styles, current page, reduced motion
 });
 
 test('rendered pages never nest forms (a browser would drop the inner one)', async () => {
-  for (const path of ['', '/posts', '/pages', '/media', '/comments', '/preferences', '/users', '/tools', '/settings']) {
+  for (const path of ['', '/posts', '/pages', '/media', '/preferences', '/users', '/tools', '/settings']) {
     const page = await panel.get(panel.admin + path);
     let depth = 0;
     for (const [tag] of page.text.matchAll(/<\/?form\b[^>]*>/g)) {
@@ -682,7 +682,7 @@ const journalTheme = () => ({
   'journal/post.html': '<article data-tpl="journal-post"><h1>{{post.title}}</h1>'
     + '<p class="date">{{post.date | date "Y-m-d"}}</p>'
     + '<img class="logo" src="{{asset "assets/logo.png"}}" alt="logo">'
-    + '{{#if post.comments_count gt 0}}<p class="has">comments</p>{{else}}<p class="none">no comments</p>{{/if}}'
+    + '{{#if post.tags}}<p class="has">tags</p>{{else}}<p class="none">no tags</p>{{/if}}'
     + '{{{post.content}}}</article>',
   'journal/partials/header.html': '<header class="journal-header"><a href="/" class="brand">{{site.title | upper}}</a></header>',
   'journal/style.css': 'body{font-family:serif}',
@@ -725,7 +725,7 @@ test('phase 3: a zip theme with partials, assets and settings installs and rende
   assert.match(post.text, /data-theme="journal"/, 'the new theme renders the page');
   assert.match(post.text, /class="journal-header"><a href="\/" class="brand">[A-Z]/, 'the partial renders and its filter ran');
   assert.match(post.text, /class="date">\d{4}-\d{2}-\d{2}</, 'the date filter honouring its pattern');
-  assert.match(post.text, /class="none">no comments</, 'a comparison against a number');
+  assert.match(post.text, /class="none">no tags</, 'a section test on an empty list');
   assert.match(post.text, /src="\/theme-assets\/journal\/assets\/logo\.png"/, '{{asset}} points at the served file');
   assert.match(post.text, /<link rel="stylesheet" href="\/theme-assets\/journal\/style\.css/, 'the stylesheet is linked, not inlined');
   assert.doesNotMatch(post.text, /font-family:serif/, 'the CSS is not in the HTML any more');
@@ -1329,7 +1329,7 @@ test('phase 6: capabilities decide what a role can do, in one place', async () =
   assert.equal(can({ role: 'author' }, 'write_posts'), true);
   assert.equal(can({ role: 'author' }, 'manage_pages'), false);
   assert.equal(can({ role: 'author' }, 'manage_themes'), false);
-  assert.equal(can({ role: 'editor' }, 'moderate_comments'), true);
+  assert.equal(can({ role: 'editor' }, 'manage_media'), true);
   assert.equal(can({ role: 'editor' }, 'edit_others_posts'), true);
   assert.equal(can({ role: 'editor' }, 'manage_users'), false);
   assert.equal(can(null, 'read'), false);
@@ -1528,7 +1528,7 @@ test('an upgraded site adopts the bundled theme, and the retired bundled themes 
 
   const updates = await panel.get(`${panel.admin}/updates`);
   assert.match(updates.text, /Default theme: Ahmed Pro Theme/, 'the pending migration is named');
-  assert.match((await panel.adminPost('/updates/run', {})).location, /schema version 11/);
+  assert.match((await panel.adminPost('/updates/run', {})).location, /schema version 12/);
 
   const check = new DatabaseSync(`${panel.dataDir}/cms.sqlite`);
   const rows = check.prepare('SELECT slug, active FROM themes ORDER BY slug').all().map((r) => `${r.slug}:${r.active}`);

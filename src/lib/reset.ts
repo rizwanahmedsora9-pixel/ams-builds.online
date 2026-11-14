@@ -119,7 +119,6 @@ export type ResetCounts = {
   pages: number;
   posts: number;
   media: number;
-  comments: number;
   users: number;
   themes: number;
   menus: number;
@@ -144,7 +143,6 @@ export async function resetCounts(env: Env): Promise<ResetCounts> {
     count('pages', "SELECT COUNT(*) AS n FROM content WHERE site_id=1 AND type='page'"),
     count('posts', "SELECT COUNT(*) AS n FROM content WHERE site_id=1 AND type='post'"),
     count('media', 'SELECT COUNT(*) AS n FROM media WHERE site_id=1'),
-    count('comments', 'SELECT COUNT(*) AS n FROM comments WHERE site_id=1'),
     count('users', 'SELECT COUNT(*) AS n FROM users'),
     count('themes', 'SELECT COUNT(*) AS n FROM themes'),
     count('menus', 'SELECT COUNT(*) AS n FROM menus'),

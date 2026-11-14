@@ -29,7 +29,6 @@ export function commandsFor(base: string, user: User): Command[] {
     { label: 'All posts', href: `${base}/posts`, icon: 'pin', keys: ['posts', 'list', 'blog'], group: 'Go to' },
     { label: 'All pages', href: `${base}/pages`, icon: 'file', keys: ['pages'], group: 'Go to' },
     { label: 'Media library', href: `${base}/media`, icon: 'image', keys: ['media', 'library', 'files'], group: 'Go to' },
-    { label: 'Comments', href: `${base}/comments`, icon: 'message', keys: ['comments', 'moderate', 'spam'], group: 'Go to' },
     { label: 'Categories', href: `${base}/terms?taxonomy=category`, icon: 'list', keys: ['categories', 'terms', 'taxonomy'], group: 'Go to' },
     { label: 'Tags', href: `${base}/terms?taxonomy=tag`, icon: 'list', keys: ['tags', 'terms', 'taxonomy'], group: 'Go to' },
     { label: 'Preferences', href: `${base}/preferences`, icon: 'settings', keys: ['preferences', 'theme', 'dark', 'density', 'appearance'], group: 'Go to' },
@@ -68,8 +67,8 @@ const oneLine = (text: string, max = 90): string => {
 };
 
 /**
- * Searches content, media, comments, terms and users. Every query is scoped to
- * what the signed-in role may see: authors only find their own posts.
+ * Searches content, media, terms and users. Every query is scoped to what the
+ * signed-in role may see: authors only find their own posts.
  */
 export async function searchSite(env: Env, user: User, rawQuery: string): Promise<Group[]> {
   const q = rawQuery.trim().slice(0, SEARCH_MAX);
@@ -120,30 +119,6 @@ export async function searchSite(env: Env, user: User, rawQuery: string): Promis
         icon: row.mime.startsWith('image/') ? 'image' : 'file',
       })),
     });
-  }
-
-  // Comments (moderators and above) -----------------------------------------
-  if (editor) {
-    try {
-      const commentRows = (await env.DB.prepare(
-        `SELECT cm.id, cm.author_name, cm.body, cm.status, c.title AS post
-         FROM comments cm LEFT JOIN content c ON c.id=cm.content_id
-         WHERE cm.site_id=1 AND (lower(cm.body) LIKE ? ESCAPE '\\' OR lower(cm.author_name) LIKE ? ESCAPE '\\')
-         ORDER BY cm.created_at DESC LIMIT 4`,
-      ).bind(pattern, pattern).all<{ id: number; author_name: string; body: string; status: string; post: string }>()).results;
-      if (commentRows.length) {
-        groups.push({
-          title: 'Comments',
-          hits: commentRows.map((row) => ({
-            label: `${row.author_name || 'Visitor'}: ${oneLine(row.body, 60)}`,
-            sub: row.post ? `on ${row.post}` : undefined,
-            href: `comments?status=${row.status}#comment-${row.id}`,
-            icon: 'message',
-            badge: row.status,
-          })),
-        });
-      }
-    } catch { /* comments table missing on an old database */ }
   }
 
   // Terms -------------------------------------------------------------------
