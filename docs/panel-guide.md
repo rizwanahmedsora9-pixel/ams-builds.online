@@ -433,7 +433,7 @@ The editor's **Python app** button embeds a single-file `.py` program that runs 
 
 What to expect:
 
-- The program runs **in the visitor's browser** with [Pyodide](https://pyodide.org) (CPython as WebAssembly), loaded from `cdn.jsdelivr.net`. Nothing runs on your server, and the first run downloads about 12 MB.
+- The program runs **in the visitor's browser** with [Pyodide](https://pyodide.org) (CPython as WebAssembly), loaded from `cdn.jsdelivr.net`. Nothing runs on your server, and the first run downloads about 12 MB. Interpreter/package assets are fetched from allow-listed sources during startup; the runner disables normal network APIs before executing Python code.
 - It runs inside a sandboxed frame (`/__pyapp/runner`) with no access to your site's cookies or panel, so authors without admin rights can use it too.
 - `print()` and `input()` work as written, including `input()` inside functions, methods and `__init__`. Popular scientific packages bundled with Pyodide (numpy, pandas, matplotlib…) are fetched when imported; `plt.show()` draws the figure into the terminal.
 - Desktop windows (tkinter, pygame, turtle), web servers (Flask, Django), threads and subprocesses cannot run in a web page. The dialog warns when it sees those imports.
@@ -446,7 +446,7 @@ Printing is not always enough, so a program can also take a file from the visito
 - `ams_pick_file(accept="*/*", multiple=False)` asks the visitor to choose a file, writes it into the program's own filesystem and returns its path — a list of paths when `multiple=True`, or `None` if they press **Cancel**. Ordinary code then works as written: `Image.open(path)`, `pandas.read_csv(path)`, `open(path, "rb")`.
 - `ams_download(path, name=None)` hands a file the program made back to the visitor as a download link on the terminal.
 
-Ready-made programs ship with the editor: the **Python app** dialog has a **Start from a sample** list (`hello`, `calculator`, `chart`, `matplotlib`, `notes-to-pdf`, `image-to-pdf`, `csv-report`, `quiz`). Choosing one puts its code in the box, where it can be edited before inserting. The same files are in `samples/python/` in the source tree, and the test suite runs every one of them in a real interpreter.
+Ready-made programs ship with the editor: the **Python app** dialog has a **Start from a sample** list (`hello`, `calculator`, `chart`, `matplotlib`, `notes-to-pdf`, `image-to-pdf`, `csv-report`, `quiz`, `image-compressor`, `qr-code-maker`). Choosing one puts its code in the box, where it can be edited before inserting. The same files are in `samples/python/` in the source tree, and the test suite runs every one of them in a real interpreter. The image compressor and image-to-PDF sample use files selected in the browser; the QR maker creates an SVG from text. None posts visitor files to the CMS.
 
 The smallest working program — something to try first, because it shows that the terminal itself is fine:
 
@@ -473,7 +473,7 @@ else:
     ams_download("images.pdf")
 ```
 
-`PIL` (Pillow) is one of the packages bundled with Pyodide: the first visitor to run the app downloads it (a few MB) and the browser caches it afterwards. Both directions are limited to 20 MB per file, and the file the visitor chooses never touches your server — it goes from their disk into the page's memory.
+`PIL` (Pillow) is one of the packages bundled with Pyodide: the first visitor to run the app downloads it (a few MB) and the browser caches it afterwards. Both directions are limited to 20 MB per file, and the file the visitor chooses never touches your CMS server — it goes from their device into the page's memory, then into a browser-local worker. The QR sample automatically downloads its small `qrcode` package on first run; this is app code, not visitor data. The built-in image and QR samples do not upload the visitor's file or entered text.
 
 When an app does not run, the block itself says why:
 
