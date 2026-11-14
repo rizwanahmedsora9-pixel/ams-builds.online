@@ -4,7 +4,6 @@ import { can } from '../../lib/auth';
 import { bumpCache, getSettings } from '../../lib/config';
 import { SCHEMA_VERSION, installedSchemaVersion, migrate, pendingMigrations } from '../../db/migrations';
 import { BUILTIN_PLUGINS, pluginOn } from '../../lib/plugins';
-import { storeThemes } from '../../themes';
 import { csrfField, errorPage, go, html, layout } from '../../lib/ui';
 import { APP_NAME, APP_VERSION } from '../../lib/version';
 
@@ -12,7 +11,7 @@ import { APP_NAME, APP_VERSION } from '../../lib/version';
  * Updates: one page that answers "is everything current?".
  *  - the CMS version and how to deploy a new one;
  *  - database migrations that have not run yet (and a button to run them now);
- *  - theme updates available in the built-in store;
+ *  - which theme is active (the app ships none, so a site without one is told);
  *  - plugin states and the last backup.
  */
 const updates = new Hono<AppEnv>();
@@ -35,11 +34,6 @@ updates.get('/updates', async (c) => {
     c.env.DB.prepare('SELECT created_at FROM backups ORDER BY id DESC LIMIT 1').first<{ created_at: string }>().catch(() => null),
   ]);
   const pending = pendingMigrations(schema);
-  const installed = new Map(themes.results.map((t) => [t.slug, t]));
-  const themeUpdates = storeThemes
-    .map((st) => ({ store: st, have: installed.get(st.slug) }))
-    .filter(({ store, have }) => have && have.version !== store.version);
-  const themeNew = storeThemes.filter((st) => !installed.has(st.slug));
   const activeTheme = themes.results.find((t) => t.active);
   const lastChecked = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
@@ -49,7 +43,7 @@ updates.get('/updates', async (c) => {
   <div class="stat"><b>${APP_VERSION}</b><span>${APP_NAME}</span></div>
   <div class="stat"><b>${schema}</b><span>Database schema</span></div>
   <div class="stat"><b>${pending.length}</b><span>Pending updates</span></div>
-  <div class="stat"><b>${themeUpdates.length}</b><span>Theme updates</span></div>
+  <div class="stat"><b>${themes.results.length}</b><span>Themes installed</span></div>
 </div>
 
 <div class="card">
@@ -60,7 +54,7 @@ updates.get('/updates', async (c) => {
   <dl class="kv" style="margin-top:.8rem">
     <dt>Installed version</dt><dd>${APP_VERSION}</dd>
     <dt>Database schema</dt><dd>${schema} of ${SCHEMA_VERSION}</dd>
-    <dt>Active theme</dt><dd>${activeTheme ? `${activeTheme.name} v${activeTheme.version}` : `${storeThemes[0].name} (bundled)`}</dd>
+    <dt>Active theme</dt><dd>${activeTheme ? `${activeTheme.name} v${activeTheme.version}` : 'None — the site renders bare, unstyled HTML'}</dd>
     <dt>Last checked</dt><dd>${lastChecked} UTC</dd>
   </dl>
   ${pending.length ? html`
@@ -82,16 +76,11 @@ updates.get('/updates', async (c) => {
 
 <div class="card">
   <h2>Themes</h2>
-  ${themeUpdates.length || themeNew.length ? html`<ul class="list">
-    ${themeUpdates.map(({ store, have }) => html`<li>
-      <div class="t"><b>${store.name}</b><small>Installed v${have!.version} · store has v${store.version}</small></div>
-      <form method="post" action="${base}/themes/store/${store.slug}/install" class="inline">${csrfField(c)}<button class="btn small" type="submit">Update theme</button></form>
-    </li>`)}
-    ${themeNew.map((store) => html`<li>
-      <div class="t"><b>${store.name}</b><small>New in the theme store · v${store.version}</small></div>
-      <form method="post" action="${base}/themes/store/${store.slug}/install" class="inline">${csrfField(c)}<button class="btn ghost small" type="submit">Install</button></form>
-    </li>`)}
-  </ul>` : html`<p class="hint" style="margin-bottom:0">Every installed theme is at its newest version. <a href="${base}/themes">Browse all themes</a>.</p>`}
+  ${activeTheme ? html`
+    <p class="hint" style="margin:0">Active: <b>${activeTheme.name}</b> v${activeTheme.version}. The app ships no themes of its own, so whatever is installed here is yours.</p>
+    <p style="margin:.8rem 0 0"><a class="btn ghost small" href="${base}/themes">Manage themes</a></p>` : html`
+    <p class="notice" style="margin:0">No theme is active. The site renders bare, unstyled HTML — a clean slate — until you upload a theme and activate it.</p>
+    <p style="margin:.8rem 0 0"><a class="btn small" href="${base}/themes">Upload a theme</a></p>`}
 </div>
 
 <div class="card">

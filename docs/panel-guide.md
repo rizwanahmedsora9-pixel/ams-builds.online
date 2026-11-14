@@ -150,7 +150,7 @@ blank 500.
 | Section | What it does |
 | --- | --- |
 | Dashboard | Greeting, **Needs attention** checklist (each item links to the fix), site totals, recently edited content, version, schema and theme |
-| Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
+| Updates | CMS version, database schema, pending migrations (with a button), plugin states and the last backup |
 | Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; the full editor (formatting bar, links, images with caption/alt/link, page breaks, word count), excerpt, featured image, SEO, draft/published/scheduled |
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). Static images are compressed to WebP in the browser until they fit a size target — **100 KB per image by default**, even from a 10 MB source — in every common format (JPG/JFIF, PNG/APNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, JXL, ICO, SVG). GIF/APNG animation, animated WebP and SVG are preserved. The editor's media picker uses the same library and has two tabs: **Library** and **Upload from device** |
 | Pages | Same list pattern as Posts, plus a **Page hierarchy** tree, **Parent page** selector and **Page order** panel; published children become linked cards with breadcrumbs; status/date filters and bulk publish/draft/delete; a tick adds a page to the header menu |
@@ -202,18 +202,23 @@ cannot drift from the behaviour. Adding a fourth role later is one entry in `src
 
 ## Themes in the panel
 
-**Appearance → Themes** is three screens in one:
+**The app ships no themes.** A fresh install — and a reinstall after a panel reset — has no theme at all:
+the public site answers with bare, unstyled HTML (the content in semantic tags, nothing else) until you
+upload a package and activate it. There is no store, nothing offered for one-click install, and no fallback
+design dressing your pages in the meantime, so what a visitor sees is exactly what your theme draws.
 
-1. **Store** — a card per bundled theme with its screenshot, author, version and tags. **Preview** opens the
-   real site in an iframe with that theme loaded, before anything is installed; **Install** and
-   **Install and activate** are one click each and show progress while they run. A theme you already have
-   shows **Update available v1.0 → v1.2** with its changelog when the store ships a newer version.
-2. **Installed** — the active theme first, then the rest. Each row opens the theme's screen: version,
-   settings, a history list (**Roll back** to any snapshot), **Download** as a zip, **Delete**, and **Edit**.
-3. **Authoring** — **Edit** is a file tree and a textarea: layout, each page template, each partial, the
+**Appearance → Themes** is two screens in one:
+
+1. **Installed** — the active theme first, then the rest; with none, an empty state that says the site is a
+   clean slate and points at the upload form. Each row opens the theme's screen: version, author, assets,
+   settings, a history list (**Roll back** to any snapshot), **Preview** (the real site in an iframe wearing
+   that theme, at a choice of device widths), **Download** as a zip, **Delete** and **Edit**.
+2. **Authoring** — **Edit** is a file tree and a textarea: layout, each page template, each partial, the
    stylesheet. Save one file at a time; the theme is validated first and a syntax error is refused by name
-   rather than saved. **New theme from a template** starts a blank theme or a child of an existing one;
-   **Upload** takes a zip exported from any site.
+   rather than saved. **Make your own** starts a blank theme, a child of an installed one or a copy of one
+   you have; **Upload** takes a zip exported from any site, or a single `theme.json`. Uploading over a theme
+   you edited in the panel snapshots your version first (*Before uploading v…* in its history), so nothing
+   you wrote is replaced silently.
 
 **Appearance → Customize** is where the look is decided: brand colour and other design tokens, the active
 theme's own settings (generated from the theme's manifest, so a new theme needs no code), custom code, and a
@@ -227,7 +232,7 @@ Everything about how the site looks is under one sidebar section:
 ```
 Appearance
 ├── Customize   tokens · live preview · the theme's own settings · custom code
-├── Themes      store · installed · upload · editor · revisions
+├── Themes      installed · upload · preview · editor · revisions
 ├── Templates   what the active theme offers, and which pages override it
 ├── Menus       header and footer links
 ├── Widgets     the areas the active theme declares
@@ -379,7 +384,7 @@ What the reset does (`src/lib/reset.ts`):
 
 You are signed out and redirected to `/install`. From there the site is installed
 again exactly as it was the first time: new admin account, site title, domain and
-admin URL, one sample home page, the default theme, empty library. On Cloudflare,
+admin URL, one sample home page and no theme at all, empty library. On Cloudflare,
 key-value deletion is eventually consistent, so the installer can take a few
 seconds to appear in every region.
 
@@ -417,11 +422,10 @@ shows the selected icon; themes can access the saved name as `pages[].icon`
 
 Under **Settings → Social profiles**, enter complete HTTP or HTTPS profile
 URLs and enable **Show social links in the footer**. Save settings to publish
-them. Blank profiles are omitted. Bundled themes render the links in their
-footer; custom themes can use `site.social` (a list of `name`, `label`, and
-`url` objects) and `site.social_footer` to respect the footer toggle. Existing installed
-themes keep their customizations; reinstall or update a bundled theme to pick up
-the new footer partial.
+them. Blank profiles are omitted. The CMS draws no social links of its own: a
+theme renders them where it wants them, from `site.social` (a list of `name`,
+`label`, and `url` objects) and `site.social_footer`, which carries the footer
+toggle. A theme that ignores both simply shows none.
 
 ## Python apps in a post or page
 

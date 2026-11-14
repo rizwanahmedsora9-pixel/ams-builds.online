@@ -23,8 +23,7 @@ export { render as renderTemplateHooks } from './template';
 
 /* -------------------------------------------------------------------- theme */
 
-/** The active theme, merged with its parent; the bundled theme when there is none. */
-/** The active theme, or the bundled one: see theme-store's activeThemeFor. */
+/** The active theme, or the blank fallback when a site has none: see theme-store's activeThemeFor. */
 export const activeTheme = activeThemeFor;
 
 type MenuItem = { label: string; url: string; active: boolean };
@@ -322,10 +321,9 @@ export async function renderTheme(
   ]);
 
   const assetUrl = (path: string): string => themeAssetUrl(theme.slug, path.replace(/^\.?\//, ''));
-  // Themes installed in the panel have their stylesheet stored as an asset, so a
-  // v2 layout can link it (`{{{theme_css_url}}}`) instead of inlining it. The
-  // bundled default theme is linked the same way: the asset route serves its
-  // files from the app when the file store has no copy.
+  // A theme's stylesheet is stored as one of its assets, so a layout can link it
+  // (`{{{theme_css_url}}}`) instead of inlining it. The blank fallback links
+  // nothing: it has no stylesheet to serve.
   const cssUrl = `${assetUrl('style.css')}?v=${encodeURIComponent(theme.version)}`;
   // A per-item template (content.template) is resolved by the caller into
   // `opts.template`; when the current theme has no such template the default
@@ -407,13 +405,12 @@ export async function renderTheme(
       footer: buildFooter(settings, theme, hooks.footer.join('\n'), nonce),
     }, renderOpts), nonce);
   } catch (err) {
-    // A theme that throws must not take the site down: render the bundled theme
-    // and tell the admins (the banner is rendered by the panel, not here).
+    // A theme that throws must not take the site down: render the blank
+    // fallback and tell the admins (the banner is rendered by the panel, not here).
     console.error('theme render failed', theme.slug, err);
     markThemeFailure(theme.slug, err);
-    // The fallback is the bundled theme, so its stylesheet, script and settings
-    // are the bundled theme's own (the asset route serves them even when that
-    // theme is not installed) — never the failed theme's.
+    // The fallback is the blank theme: no stylesheet, no script and no settings
+    // of its own, and never the failed theme's.
     const fallbackAsset = (path: string): string => themeAssetUrl(defaultTheme.slug, path.replace(/^\.?\//, ''));
     const fallbackOpts = { settings, assetUrl: fallbackAsset };
     const fallbackCss = defaultTheme.css.replace(/<\/style/gi, '<\\/style');
@@ -436,7 +433,7 @@ export async function renderTheme(
 
 /**
  * Rendering failures are remembered per isolate so the Themes screen can show
- * "this theme failed, the site is falling back to the bundled theme".
+ * "this theme failed, the site is falling back to the blank theme".
  */
 const themeFailures = new Map<string, { at: string; message: string }>();
 export function markThemeFailure(slug: string, err: unknown): void {

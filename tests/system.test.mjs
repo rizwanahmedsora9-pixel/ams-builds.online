@@ -140,12 +140,12 @@ test('the site can be installed again from zero', async () => {
 
   const fresh = (await anon('/')).text;
   assert.match(fresh, /Welcome to Fresh Start/, 'the sample home page is the only content');
-  // A fresh install is the default theme: it ships a layout for every page,
-  // and its navigation and footer come with it.
-  assert.match(fresh, /class="site-header"/, 'the bundled theme is the theme a new site starts with');
-  assert.match(fresh, /href="\/theme-assets\/ahmed-pro-theme\/style\.css/, 'and it is Ahmed Pro Theme');
-  assert.match(fresh, /class="site-footer__inner"/, 'with its footer columns');
-  assert.equal((await anon('/theme-assets/ahmed-pro-theme/static/js/theme.js')).status, 200, 'and its script was written again');
+  // A fresh install has no theme: the app ships none, so the site is a clean
+  // slate — bare, unstyled HTML — until its owner uploads one and activates it.
+  assert.doesNotMatch(fresh, /<link rel="stylesheet"/, 'no stylesheet is linked');
+  assert.doesNotMatch(fresh, /theme-assets\//, 'no theme file is requested');
+  assert.match(fresh, /<main>[^]*Welcome to Fresh Start/, 'the sample page still renders, unstyled');
+  assert.equal((await anon('/theme-assets/ahmed-pro-theme/static/js/theme.js')).status, 404, 'a retired bundled theme has no files left to serve');
   assert.equal((await anon('/legacy-page')).status, 404, 'the old page did not come back');
   assert.equal((await anon('/old')).status, 404, 'the old redirect did not come back');
   assert.equal((await anon('/admin-panel')).status, 404, 'the old admin URL is not the panel any more');
@@ -165,7 +165,7 @@ test('the site can be installed again from zero', async () => {
   assert.match((await anon('/')).text, /data-mine="yes"/, 'the uploaded theme can be activated');
   assert.match((await get('/fresh-panel/media')).text, /No media items found/, 'the library is empty');
   assert.match((await get('/fresh-panel/tools')).text, /0 rules/, 'so are the redirects');
-  log('reinstalled under a new admin URL: one sample page, empty library, no redirects');
+  log('reinstalled under a new admin URL: one sample page, no theme, empty library, no redirects');
 });
 
 /* ----------------------------------------------------- database password */

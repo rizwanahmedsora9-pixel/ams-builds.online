@@ -7,14 +7,14 @@ A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) ser
 | Phase | Scope | State |
 | --- | --- | --- |
 | 1 | Installer, login, dashboard, pages, posts (categories, tags, featured image, scheduling), media, settings, default theme, page cache | **done** |
-| 2 | Menus, themes and the theme store | **done** |
+| 2 | Menus and themes: upload, preview, edit, export, roll back | **done** |
 | 2 | Comments and moderation, users and roles, custom code, redirects, sitemap.xml, robots.txt, RSS | **done** |
 | 3 | Backups, plugins and hooks, import/export, updates and site health | **done** |
 | 3 | Multi-site | later |
 | 4 | Panel overhaul: design system, lists, dashboard (Phase 0–2 of `docs/panel-overhaul-roadmap.md`) — revisions, autosave, edit locks, media picker, page order | **done (0.5.0)** |
 | 5 | Theme platform: theme packages with assets, template engine v2, manifest v2, inheritance, theme versions and CSP (Phase 3 of the roadmap) | **done (0.6.0)** |
 | 6 | Appearance hub and live Customizer: design tokens, signed-cookie preview, per-theme settings, widget areas, per-page templates, Identity (Phase 4 of the roadmap) | **done (0.7.0)** |
-| 7 | Theme store & lifecycle: screenshots, live preview, in-panel file editor, zip export, rollback (Phase 5 of the roadmap) | **done (0.8.0)** |
+| 7 | Theme lifecycle: live preview, in-panel file editor, zip export, rollback (Phase 5 of the roadmap) | **done (0.8.0)** |
 | 8 | Governance and performance: audit log, capabilities instead of hard-coded roles, enforced performance budgets, panel strings in one catalogue, export v2 (Phase 6 of the roadmap) | **done (0.8.0)** |
 | 9 | The writer's editor: a full formatting bar with shortcuts, a link dialog, image blocks with caption/alt/link, drag anchors and paste-or-drop upload, paste-as-text, page breaks, live word count and slug preview, mark-up tidying on save | **done (0.9.0)** |
 
@@ -218,11 +218,13 @@ manifest that needed no code, widget areas rendering where the theme draws them 
 a page rendering its own template on the public site and falling back when the template is gone, Identity
 writing the favicon and `og:image`, and the Customizer still saving without JavaScript.
 
-The Phase 5 cases do the whole lifecycle in the panel: install **AMS Journal** from the store, watch its
-screenshot become a real `background-image` only once installed, preview **AMS Portfolio** in an iframe,
-edit a partial and a stylesheet in the textarea editor (the public site changes at once), validate, roll
-back to the snapshot taken before the edit, export the theme as a zip and upload that same zip back, and
-start a new theme from a blank and from a child template.
+The Phase 5 cases do the whole lifecycle in the panel: check that nothing is offered to install (the app
+ships no themes), upload a package and watch the site change the moment it is activated, preview it in an
+iframe, edit a partial and a stylesheet in the textarea editor (the public site changes at once), validate,
+roll back to the snapshot taken before an upload replaced the edit, export the theme as a zip and upload
+that same zip back, and start a new theme from a blank and from a child template. Two more cases prove the
+upgrade path: a site installed by an earlier release loses its bundled themes and renders bare until its
+owner activates one of their own, and a theme that throws while rendering never takes the site down.
 
 The Phase 6 cases read the audit log from the outside: a save, two theme activations and a delete each
 produce a readable entry, filters are linkable GET parameters, and the log is newest-first. A second
@@ -249,12 +251,12 @@ autosaved and versioned, and no screen needs JavaScript to work.
 | Section | What it does |
 | --- | --- |
 | Dashboard | Greeting, **Needs attention** checklist (each item links to the fix), site totals, recently edited content, latest comments, version, schema and theme |
-| Updates | CMS version, database schema, pending migrations (with a button), theme updates, plugin states and the last backup |
+| Updates | CMS version, database schema, pending migrations (with a button), plugin states and the last backup |
 | Posts | Shared list pattern with thumbnails and a row menu (edit, quick edit, duplicate, history, pin, preview in theme); status tabs, search, date/category filters, sortable columns, bulk publish/draft/delete, card layout on phones; add new, **Categories** and **Tags**; editor, excerpt, featured image, SEO, draft/published/scheduled |
 | Media | Searchable grid/list library with type and date filters, bulk delete, copy URLs, alt-text editing and uploads (images, PDF, audio, video, fonts) to KV (Cloudflare) or `data/media/` (Node). **Browser-side size-targeted WebP compression** before upload — 100 KB per static image by default, even from a 10 MB source — every common image format (JPG/JFIF, PNG/APNG, GIF, WebP, AVIF, BMP, TIFF, HEIC, JXL, ICO, SVG), and a two-tab picker in the editor: already-uploaded images, or upload straight from the device |
 | Pages | Same list pattern as Posts, plus a **Page hierarchy** tree, **Parent page** selector and **Page order** panel; published children become linked cards with breadcrumbs; status/date filters and bulk publish/draft/delete; a tick adds a page to the header menu |
 | Comments | Moderate with All / Pending / Approved / Spam / Trash filters, approve, unapprove, spam, trash, delete and reply as yourself |
-| Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes** (store, installed, editor), **Templates**, **Menus**, **Widgets**, **Identity** |
+| Appearance | **Customize** (design tokens, the theme's own settings, custom code, live preview), **Themes** (installed, upload, preview, editor), **Templates**, **Menus**, **Widgets**, **Identity** |
 | Plugins | Built-in XML sitemap, robots.txt, RSS feed and **Search Console Verification** (paste Google/Bing/Yandex meta tag → live in `<head>`) can be switched off; add your own snippet to `<head>` or before `</body>` |
 | Users | Add, edit, re-role and delete accounts; Profile changes your own email and password |
 | Tools | Redirects, JSON import/export (v2, includes themes), server-stored backups, site health with performance budgets, audit log, page-cache reset |
@@ -364,7 +366,7 @@ In the Text tab, click any image to select it:
 - four **corner anchors** to drag, and a bar with **S 25% / M 50% / L 75% / Full 100%**
   presets and a width slider;
 - **Left / Center / Right** alignment (a floated image is cleared on narrow screens by
-  every bundled theme);
+  the active theme's stylesheet);
 - **Alt** — the description a screen reader reads, editable here rather than only in
   the media library;
 - **Caption** — the words under the picture, add/edit/remove in place;
@@ -383,7 +385,7 @@ refuses a width it cannot honour (250%) instead of shipping a broken layout.
   Remove unwraps it. A `javascript:` address is refused before anything is saved.
 - **Page break** inserts a `<hr class="page-break">`. It shows as a labelled dashed
   rule while you write and forces a page break when the post is printed — usable for
-  invoices, scripts and handouts. Every bundled theme styles it.
+  invoices, scripts and handouts. A theme styles `.page-break` however it likes.
 - **Divider** inserts a plain `<hr>`, which every theme draws as a rule.
 - **HTML block** and **YouTube** open a dialog with a live error. YouTube accepts
   watch, share (`youtu.be`), Shorts, live and embed URLs, and embeds the
@@ -440,7 +442,7 @@ entirely, in **Settings → Discussion**. Moderators can reply as themselves (th
 reply is labelled *staff*), mark spam or move a comment to the trash. Approved
 comments are part of the cached page, so moderating bumps the cache.
 
-Themes get `{{{comments_html}}}` on posts (the bundled themes already include it).
+Themes get `{{{comments_html}}}` on posts.
 A theme without that tag still shows comments: they are appended after the post
 content. Comment bodies are stored as plain text and escaped on output.
 
@@ -484,9 +486,8 @@ under [Appearance](#appearance).
 - **Audit log** — every change made in the panel: who, what, where, when. Filters
   by person, action, area and free text are GET parameters, so a view is a link.
   Entries are kept 90 days and pruned by the cron trigger.
-- **Updates** — the CMS version, the database schema and pending migrations, theme
-  updates from the store, plugin states, and buttons to run migrations or install a
-  theme update.
+- **Updates** — the CMS version, the database schema and pending migrations, plugin
+  states, and a button to run the migrations. It also says when no theme is active.
 - **Reset the panel** — the factory reset, under *Danger zone* on the Tools overview
   and in the command palette. It counts what it is about to destroy, offers the
   export first, and then asks for your panel password and the typed word `RESET`
@@ -505,7 +506,7 @@ Everything about how the site looks lives under one sidebar section:
 ```
 Appearance
 ├── Customize   tokens · live preview · the theme's own settings · custom code
-├── Themes      store · installed · upload · editor · revisions
+├── Themes      installed · upload · preview · editor · revisions
 ├── Templates   what the active theme offers, and which pages override it
 ├── Menus       header and footer links
 ├── Widgets     the areas the active theme declares
@@ -530,42 +531,47 @@ becomes controls with no code — are in the [Panel Guide](docs/panel-guide.md#a
 
 ## Themes
 
+**The app ships no themes.** A fresh install — and a reinstall after a panel reset — is a clean slate: the
+site answers with bare, unstyled HTML (the content in semantic tags, and nothing else) until you upload a
+theme and activate it. No bundled design sits in the way, no fallback theme dresses your pages, and there is
+nothing to uninstall first: what a visitor sees is exactly what your theme draws. The installer creates one
+starter Home page and no posts, so there is no demo content to clear out before you start either.
+
 **Themes** in the admin panel has a manager for installed themes, an uploader and a
 validator. A theme package can ship templates, partials, a stylesheet and binary assets (logo, fonts, one
 `theme.js`), and a theme can inherit from another one.
 
-**Fresh installs and reinstalls after a panel reset have no installed themes or demo posts.** Upload and activate your own theme in the panel. A starter Home page is created; sites with no active theme, or a theme that throws while rendering, use the bundled Ahmed Pro fallback.
-
-| Store theme | Look |
+| Where a theme comes from | What you get |
 | --- | --- |
-| **Ahmed Pro Theme** | **The default theme.** Optional top bar (tagline, phone, email, social icons), sticky header with dropdown sub-menus, search icon and a light/dark button, a homepage hero with two buttons, page tiles and post cards, title banners on pages and posts, category and tag chips, share buttons, styled comments, and a footer with contact details, the footer menu and a pages list. Templates for home, page, post, archive, search and 404. 22 theme settings under **Appearance → Customize**: accent colour, content width, three toggles (search, light/dark button, top bar), hero copy and buttons, contact details, a footer note and seven social links. |
+| **Upload** a package | A zip or a lone `theme.json`: templates, partials, `style.css`, assets. Validated as it arrives, activated when you say so. |
+| **New theme from a template** | A blank theme to write in the panel's editor, a child theme that inherits another theme's templates and overrides only the files you edit, or a copy of a theme you already have. |
+| **Import** an export | Any package exported from another site round-trips byte-for-byte. |
 
-It uses system fonts and inline SVG icons, loads nothing from other servers, and follows the visitor's light
-or dark setting until they press its toggle. Its `screenshot.png` is the store card. The theme lives in
-`src/themes/ahmed-pro-theme/` as a theme package (the same layout as a ZIP upload: `theme.json`,
-`templates/`, `partials/`, `static/`, `config/`); `src/themes/default.ts` names it as the default, and
-`src/themes/index.ts` is the store list.
+The unstyled skeleton a theme-less site renders with is internal (`src/themes/blank.ts`): it is never
+listed, installed, previewed or stored in the database, and it is not a starting point for a design — **New
+theme from a template** is. A theme that throws while rendering falls back to that same bare skeleton rather
+than to someone else's design, so the site stays up and the failure is visible: **Appearance → Themes** names
+the theme that broke and quotes the error.
 
-Upgrading a site that was installed with an earlier bundled theme (AMS Nova, AMS 1, …) runs one migration —
-automatically, or from **Updates → Run updates** — that installs and activates Ahmed Pro Theme and removes
-the retired bundled themes with their settings and files. Themes you uploaded yourself stay installed,
-switched off, and can be activated again or deleted from **Appearance → Themes**.
+Upgrading a site that was installed by an earlier release runs one migration — automatically, or from
+**Updates → Run updates** — that removes every theme the app used to bundle (Ahmed Pro Theme, Example 1, AMS
+Nova, AMS 1, …) with its settings, snapshots and files. Themes you uploaded yourself stay installed, switched
+off, and can be activated again or deleted; a child of a removed theme keeps its own files and simply stops
+inheriting.
 
 ### Install, preview, customise, roll back
 
-Everything happens in the panel: **Appearance → Themes** lists the store with screenshots, author, version
-and tags; **Preview** opens the real site in an iframe with that theme, before it is installed; one click
-installs and activates. Every install, update and save writes a row to the theme's **history**, so
-**Update available vX → vY** appears with the changelog, and **Roll back** restores any earlier snapshot of
-the templates, partials and stylesheet. Editing an installed theme in the panel (a file tree plus a plain
-textarea, per-file save, validation on save) is snapshotted first, so nothing is lost. Local edits to a
-theme that the store also ships prompt: keep my changes, replace with the store version, or save mine as a
-copy.
+Everything happens in the panel: **Appearance → Themes** lists what is installed with its version, author,
+asset count and history; **Preview** opens the real site in an iframe wearing that theme; **Activate** makes
+it the site. Every upload, activation and save writes a row to the theme's **history**, and **Roll back**
+restores any earlier snapshot of the templates, partials and stylesheet. Editing an installed theme in the
+panel (a file tree plus a plain textarea, per-file save, validation on save) is snapshotted first, so nothing
+is lost — not even when you upload a newer package over your own edits.
 
 **Export** downloads the theme as a zip (`theme.json` naming its files, `*.html`, `partials/*.html`,
 `style.css`, assets); the **Import** box accepts that zip back, or `theme.json` on its own. Templates and CSS
-round-trip byte-for-byte. **New theme from a template** starts from a blank theme or a child of an existing
-one. The full reference is in the [Theme Developer Guide](docs/theme-developer-guide.md).
+round-trip byte-for-byte. The full reference is in the [Theme Developer Guide](docs/theme-developer-guide.md)
+and the package format in the [Theme Package Spec](docs/theme-package-spec.md).
 
 ### Who can change what
 
@@ -652,13 +658,13 @@ src/
       media.ts             media library
       settings.ts
       menus.ts               menu editor
-      themes.ts              store, preview, editor, install, zip export
+      themes.ts              list, upload, preview, editor, new theme, zip export
       comments.ts            comment moderation and replies
       users.ts               accounts and roles
       plugins.ts             built-in plugins and code snippets
       tools.ts               redirects, import/export v2, backups, health, audit log
       system.ts              the factory reset screen (Tools -> Danger zone)
-      updates.ts             versions, migrations, theme updates
+      updates.ts             versions, migrations, run updates
       appearance.ts          customize (CSS/code) and footer widgets
       terms.ts               categories and tags
   node/
@@ -670,7 +676,7 @@ src/
     schema.sql
     index.ts               schema runner
     migrations/index.ts    forward-only migrations (v3 revisions, v4 order, v5 theme assets,
-                           v6 theme versions, v7 audit log)
+                           v6 theme versions, v7 audit log, … v13 no bundled themes)
   lib/
     auth.ts                passwords, sessions, CSRF, roles
     security.ts            escaping, sanitizer, rate limiting
@@ -689,7 +695,7 @@ src/
     template.ts            template engine v2: expressions, filters, partials, layouts
     theme-manifest.ts      theme.json v2: validation, zip reading, inheritance, settings
     theme-store.ts         theme rows, assets, version snapshots, layout rendering
-    bundled-theme.ts       the default theme as stored data: install, asset fallback, upgrade adoption
+    retired-themes.ts      the themes the app no longer ships, removed on upgrade
     capabilities.ts        the capability list, role defaults and can(user, cap)
     audit.ts               audit_log: one helper, filters, 90-day retention
     i18n.ts                panel strings: t(key, vars) and the en catalogue
@@ -698,8 +704,6 @@ src/
     time.ts                timezone helpers
     ui.ts                  admin HTML helpers and CSS
   themes/
-    index.ts               theme store list
-    default.ts             which theme is the default (one line)
-    ahmed-pro-theme/       Ahmed Pro Theme, as a theme package (the default, and the only bundled theme)
-    partials/social.html   the shared partial for the site-wide social profiles
+    blank.ts               the unstyled fallback a site renders with until a theme is activated
+    default.ts             names that fallback for the renderer (one line)
 ```

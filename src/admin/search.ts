@@ -43,7 +43,7 @@ export function commandsFor(base: string, user: User): Command[] {
   }
   if (admin) {
     list.push(
-      { label: 'Themes', href: `${base}/themes`, icon: 'palette', keys: ['themes', 'theme', 'design', 'store'], group: 'Go to' },
+      { label: 'Themes', href: `${base}/themes`, icon: 'palette', keys: ['themes', 'theme', 'design', 'upload'], group: 'Go to' },
       { label: 'Widgets', href: `${base}/widgets`, icon: 'grid', keys: ['widgets', 'footer'], group: 'Go to' },
       { label: 'Plugins', href: `${base}/plugins`, icon: 'plug', keys: ['plugins', 'snippets', 'code'], group: 'Go to' },
       { label: 'Users', href: `${base}/users`, icon: 'users', keys: ['users', 'accounts', 'roles', 'people'], group: 'Go to' },

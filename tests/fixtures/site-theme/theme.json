@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Example 1",
-  "slug": "example1",
+  "name": "Site Theme",
+  "slug": "site-theme",
   "version": "1.0.0",
-  "author": "Edge CMS",
-  "description": "A complete, editable example theme for learning how a website theme works.",
+  "author": "Test suite",
+  "description": "The theme the test suite uploads: a complete package (templates, partials, stylesheet, script, settings) used to exercise the theme engine end to end. The app itself ships no themes.",
   "cms_compatibility": {
     "min": "0.9.0",
     "max": "0.9.x"
@@ -14,7 +14,7 @@
     "#0f1a2c",
     "#2457d6"
   ],
-  "screenshot": "screenshot.png",
+  "screenshot": "",
   "required_templates": [
     "base",
     "home",
@@ -59,14 +59,13 @@
     ]
   },
   "assets": [
-    "static/js/theme.js",
-    "screenshot.png"
+    "static/js/theme.js"
   ],
   "settings_schema": "config/settings.json",
   "changelog": [
     {
       "version": "1.0.0",
-      "notes": "Example theme for learning and customization."
+      "notes": "Test fixture: the package the suite installs, previews and edits."
     }
   ]
 }

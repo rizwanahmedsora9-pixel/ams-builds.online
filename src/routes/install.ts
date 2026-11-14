@@ -51,7 +51,7 @@ function wizard(v: Values, errors: string[] = []): string {
     </section>
     <section data-step>
       <h2>3. Install</h2>
-      <p>This creates the database tables and a starter home page, then locks the installer. You can upload your own theme and create your own posts.</p>
+      <p>This creates the database tables and a starter home page, then locks the installer. No theme is installed: the site renders plain, unstyled HTML until you upload a theme of your own in the panel.</p>
       <p class="hint">Built the site wrong later? An admin can reopen this wizard with <b>Tools &rarr; Danger zone &rarr; Reset the panel</b>, which deletes everything first.</p>
       <button class="btn" type="submit" style="width:100%">Install</button>
     </section>

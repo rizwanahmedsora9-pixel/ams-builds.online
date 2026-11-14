@@ -256,7 +256,7 @@ const lengthVar = (css: string, names: string[]): string => {
   return LENGTH.test(value) ? value : '';
 };
 
-/** The variables each idea is called in the bundled themes and everywhere else. */
+/** The variables each idea is called in, across themes and their stylesheets. */
 const NAMES = {
   bg: ['--bg', '--background', '--page', '--paper', '--surface-page', '--j-bg', '--p-bg', '--starter-paper'],
   fg: ['--text', '--fg', '--ink', '--body', '--j-ink', '--p-ink', '--starter-ink'],
