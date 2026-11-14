@@ -1,0 +1,227 @@
+diff --git a/docs/panel-guide.md b/docs/panel-guide.md
+index 4a18a77..dd5fb1c 100644
+--- a/docs/panel-guide.md
++++ b/docs/panel-guide.md
+@@ -433,7 +433,7 @@ The editor's **Python app** button embeds a single-file `.py` program that runs
+ 
+ What to expect:
+ 
+-- The program runs **in the visitor's browser** with [Pyodide](https://pyodide.org) (CPython as WebAssembly), loaded from `cdn.jsdelivr.net`. Nothing runs on your server, and the first run downloads about 12 MB.
++- The program runs **in the visitor's browser** with [Pyodide](https://pyodide.org) (CPython as WebAssembly), loaded from `cdn.jsdelivr.net`. Nothing runs on your server, and the first run downloads about 12 MB. Interpreter/package assets are fetched from allow-listed sources during startup; the runner disables normal network APIs before executing Python code.
+ - It runs inside a sandboxed frame (`/__pyapp/runner`) with no access to your site's cookies or panel, so authors without admin rights can use it too.
+ - `print()` and `input()` work as written, including `input()` inside functions, methods and `__init__`. Popular scientific packages bundled with Pyodide (numpy, pandas, matplotlib…) are fetched when imported; `plt.show()` draws the figure into the terminal.
+ - Desktop windows (tkinter, pygame, turtle), web servers (Flask, Django), threads and subprocesses cannot run in a web page. The dialog warns when it sees those imports.
+@@ -446,7 +446,7 @@ Printing is not always enough, so a program can also take a file from the visito
+ - `ams_pick_file(accept="*/*", multiple=False)` asks the visitor to choose a file, writes it into the program's own filesystem and returns its path — a list of paths when `multiple=True`, or `None` if they press **Cancel**. Ordinary code then works as written: `Image.open(path)`, `pandas.read_csv(path)`, `open(path, "rb")`.
+ - `ams_download(path, name=None)` hands a file the program made back to the visitor as a download link on the terminal.
+ 
+-Ready-made programs ship with the editor: the **Python app** dialog has a **Start from a sample** list (`hello`, `calculator`, `chart`, `matplotlib`, `notes-to-pdf`, `image-to-pdf`, `csv-report`, `quiz`). Choosing one puts its code in the box, where it can be edited before inserting. The same files are in `samples/python/` in the source tree, and the test suite runs every one of them in a real interpreter.
++Ready-made programs ship with the editor: the **Python app** dialog has a **Start from a sample** list (`hello`, `calculator`, `chart`, `matplotlib`, `notes-to-pdf`, `image-to-pdf`, `csv-report`, `quiz`, `image-compressor`, `qr-code-maker`). Choosing one puts its code in the box, where it can be edited before inserting. The same files are in `samples/python/` in the source tree, and the test suite runs every one of them in a real interpreter. The image compressor and image-to-PDF sample use files selected in the browser; the QR maker creates an SVG from text. None posts visitor files to the CMS.
+ 
+ The smallest working program — something to try first, because it shows that the terminal itself is fine:
+ 
+@@ -473,7 +473,7 @@ else:
+     ams_download("images.pdf")
+ ```
+ 
+-`PIL` (Pillow) is one of the packages bundled with Pyodide: the first visitor to run the app downloads it (a few MB) and the browser caches it afterwards. Both directions are limited to 20 MB per file, and the file the visitor chooses never touches your server — it goes from their disk into the page's memory.
++`PIL` (Pillow) is one of the packages bundled with Pyodide: the first visitor to run the app downloads it (a few MB) and the browser caches it afterwards. Both directions are limited to 20 MB per file, and the file the visitor chooses never touches your CMS server — it goes from their device into the page's memory, then into a browser-local worker. The QR sample automatically downloads its small `qrcode` package on first run; this is app code, not visitor data. The built-in image and QR samples do not upload the visitor's file or entered text.
+ 
+ When an app does not run, the block itself says why:
+ 
+diff --git a/samples/python/09-image-compressor.py b/samples/python/09-image-compressor.py
+new file mode 100644
+index 0000000..969ae59
+--- /dev/null
++++ b/samples/python/09-image-compressor.py
+@@ -0,0 +1,35 @@
++# Compress an image in the visitor's browser, then download the smaller JPEG.
++# Pillow (PIL) is bundled with Pyodide; no Python install or server upload.
++from PIL import Image
++from io import BytesIO
++
++source = ams_pick_file("image/*")
++if not source:
++    print("No image chosen.")
++else:
++    image = Image.open(source)
++    original_size = image.width, image.height
++    original_bytes = len(open(source, "rb").read())
++
++    # Resize very large phone photos before encoding. Change this limit or the
++    # quality below to tune the balance between size and detail.
++    image.thumbnail((2000, 2000))
++    if image.mode in ("RGBA", "LA") or "transparency" in image.info:
++        rgba = image.convert("RGBA")
++        background = Image.new("RGB", rgba.size, "white")
++        background.paste(rgba, mask=rgba.getchannel("A"))
++        image = background
++    else:
++        image = image.convert("RGB")
++
++    result = BytesIO()
++    image.save(result, format="JPEG", quality=78, optimize=True)
++    output = "compressed-image.jpg"
++    with open(output, "wb") as handle:
++        handle.write(result.getvalue())
++
++    saved = max(0, original_bytes - len(result.getvalue()))
++    print(f"Original: {original_size[0]} × {original_size[1]} px, {original_bytes:,} bytes")
++    print(f"Compressed: {image.width} × {image.height} px, {len(result.getvalue()):,} bytes")
++    print(f"Saved {saved:,} bytes. The original file never left your device.")
++    ams_download(output)
+diff --git a/samples/python/10-qr-code-maker.py b/samples/python/10-qr-code-maker.py
+new file mode 100644
+index 0000000..e3af9d0
+--- /dev/null
++++ b/samples/python/10-qr-code-maker.py
+@@ -0,0 +1,17 @@
++# Make a QR code from a short text or URL; download it as a crisp SVG.
++# The browser fetches this small pure-Python package automatically on first run.
++import micropip
++await micropip.install("qrcode==8.2")
++
++import qrcode
++from qrcode.image.svg import SvgPathImage
++
++text = input("Text or URL for the QR code: ").strip()
++if not text:
++    print("Enter some text or a URL and restart the app.")
++else:
++    image = qrcode.make(text, image_factory=SvgPathImage, box_size=8, border=4)
++    output = "qr-code.svg"
++    image.save(output)
++    print("QR code created. Download the SVG below.")
++    ams_download(output)
+diff --git a/src/admin/py-samples.ts b/src/admin/py-samples.ts
+index d944386..994296a 100644
+--- a/src/admin/py-samples.ts
++++ b/src/admin/py-samples.ts
+@@ -47,5 +47,15 @@ export const PYTHON_SAMPLES: PythonSample[] = [
+     "name": "quiz.py",
+     "title": "A quiz: a class, a loop, and a score. Good for testing input(), not ju",
+     "code": "# A quiz: a class, a loop, and a score. Good for testing input(), not just print().\nQUESTIONS = [\n    (\"What is 7 * 6?\", \"42\"),\n    (\"What is the capital of Pakistan?\", \"islamabad\"),\n    (\"Which language is this app written in?\", \"python\"),\n]\n\n\nclass Quiz:\n    def __init__(self, questions):\n        self.questions = questions\n        self.score = 0\n\n    def ask_all(self):\n        for number, (question, expected) in enumerate(self.questions, start=1):\n            answer = input(f\"{number}. {question} \")\n            self.check(answer, expected)\n\n    def check(self, answer, expected):\n        if answer.strip().lower() == expected:\n            self.score += 1\n            print(\"Correct.\")\n        else:\n            print(f\"Not quite. The answer is {expected}.\")\n\n    def finish(self):\n        total = len(self.questions)\n        print(f\"\\nScore: {self.score} of {total}\")\n        if self.score == total:\n            print(\"Perfect.\")\n\n\nquiz = Quiz(QUESTIONS)\nquiz.ask_all()\nquiz.finish()\n"
++  },
++  {
++    "name": "image-compressor.py",
++    "title": "Compress an image in the visitor's browser, then download the smaller ",
++    "code": "# Compress an image in the visitor's browser, then download the smaller JPEG.\n# Pillow (PIL) is bundled with Pyodide; no Python install or server upload.\nfrom PIL import Image\nfrom io import BytesIO\n\nsource = ams_pick_file(\"image/*\")\nif not source:\n    print(\"No image chosen.\")\nelse:\n    image = Image.open(source)\n    original_size = image.width, image.height\n    original_bytes = len(open(source, \"rb\").read())\n\n    # Resize very large phone photos before encoding. Change this limit or the\n    # quality below to tune the balance between size and detail.\n    image.thumbnail((2000, 2000))\n    if image.mode in (\"RGBA\", \"LA\") or \"transparency\" in image.info:\n        rgba = image.convert(\"RGBA\")\n        background = Image.new(\"RGB\", rgba.size, \"white\")\n        background.paste(rgba, mask=rgba.getchannel(\"A\"))\n        image = background\n    else:\n        image = image.convert(\"RGB\")\n\n    result = BytesIO()\n    image.save(result, format=\"JPEG\", quality=78, optimize=True)\n    output = \"compressed-image.jpg\"\n    with open(output, \"wb\") as handle:\n        handle.write(result.getvalue())\n\n    saved = max(0, original_bytes - len(result.getvalue()))\n    print(f\"Original: {original_size[0]} × {original_size[1]} px, {original_bytes:,} bytes\")\n    print(f\"Compressed: {image.width} × {image.height} px, {len(result.getvalue()):,} bytes\")\n    print(f\"Saved {saved:,} bytes. The original file never left your device.\")\n    ams_download(output)\n"
++  },
++  {
++    "name": "qr-code-maker.py",
++    "title": "Make a QR code from a short text or URL; download it as a crisp SVG.",
++    "code": "# Make a QR code from a short text or URL; download it as a crisp SVG.\n# The browser fetches this small pure-Python package automatically on first run.\nimport micropip\nawait micropip.install(\"qrcode==8.2\")\n\nimport qrcode\nfrom qrcode.image.svg import SvgPathImage\n\ntext = input(\"Text or URL for the QR code: \").strip()\nif not text:\n    print(\"Enter some text or a URL and restart the app.\")\nelse:\n    image = qrcode.make(text, image_factory=SvgPathImage, box_size=8, border=4)\n    output = \"qr-code.svg\"\n    image.save(output)\n    print(\"QR code created. Download the SVG below.\")\n    ams_download(output)\n"
+   }
+ ];
+diff --git a/src/lib/pyapp.ts b/src/lib/pyapp.ts
+index 87b6a0d..9b528ab 100644
+--- a/src/lib/pyapp.ts
++++ b/src/lib/pyapp.ts
+@@ -33,9 +33,10 @@ export const PYAPP_RUNNER_CSP = [
+   "worker-src blob:",
+   "style-src 'unsafe-inline'",
+   "img-src data: blob:",
+-  // jsdelivr sends wheels for cross-origin fetches; without this the interpreter
+-  // and its packages are refused.
+-  "connect-src https:",
++  // Only the pinned interpreter CDN and the QR sample's pinned package sources
++  // are reachable during startup. The worker disables network APIs before user
++  // code runs, so app code cannot send selected files to arbitrary hosts.
++  "connect-src https://cdn.jsdelivr.net https://pypi.org https://files.pythonhosted.org",
+   "frame-ancestors 'self'",
+   // `allow-downloads` lets a program hand the visitor a file it made (a PDF,
+   // a CSV); without it Chrome silently drops the click on that link.
+@@ -71,6 +72,23 @@ self.onmessage=function(e){
+       var py=await self.loadPyodide({indexURL:index});
+       postMessage({t:'status',s:'Preparing…'});
+       try{await py.loadPackagesFromImports(m.code,{messageCallback:function(){},errorCallback:function(){}})}catch(err){}
++      // The QR sample is the only PyPI package we fetch. Install it before
++      // locking down networking; its pinned, pure-Python wheel never receives
++      // visitor input or selected files.
++      if(/micropip\\.install\\s*\\(\\s*['\"]qrcode==8\\.2['\"]/.test(m.code)){
++        await py.runPythonAsync("import micropip; await micropip.install('qrcode==8.2')");
++      }
++      // File data is handed to this worker with postMessage, never by HTTP.
++      // Once Pyodide and its approved packages are ready, disable network and
++      // nested-worker APIs before running author-supplied Python.
++      var blocked=function(){return Promise.reject(new Error('Network access is disabled inside this Python app.'))};
++      self.fetch=blocked;
++      self.XMLHttpRequest=function(){throw new Error('Network access is disabled inside this Python app.')};
++      self.WebSocket=function(){throw new Error('Network access is disabled inside this Python app.')};
++      self.EventSource=function(){throw new Error('Network access is disabled inside this Python app.')};
++      self.Worker=function(){throw new Error('Nested workers are disabled inside this Python app.')};
++      self.SharedWorker=self.Worker;
++      self.importScripts=function(){throw new Error('Network access is disabled inside this Python app.')};
+       py.runPython(boot);
+       var run=py.globals.get('ams_run');
+       postMessage({t:'start'});
+diff --git a/tests/pyapp.test.mjs b/tests/pyapp.test.mjs
+index 8b7fd4e..2d690a9 100644
+--- a/tests/pyapp.test.mjs
++++ b/tests/pyapp.test.mjs
+@@ -316,6 +316,8 @@ test('the runner is a static, sandboxed document with its own policy', async ()
+   assert.doesNotMatch(csp, /allow-same-origin/);
+   assert.match(csp, /default-src 'none'/);
+   assert.match(csp, /frame-ancestors 'self'/);
++  assert.match(csp, /connect-src https:\/\/cdn\.jsdelivr\.net https:\/\/pypi\.org https:\/\/files\.pythonhosted\.org/);
++  assert.doesNotMatch(csp, /connect-src https:(?:\s|;)/, 'there is no unrestricted HTTPS egress');
+   assert.equal(res.headers.get('x-robots-tag'), 'noindex');
+   assert.ok(res.text.includes(pyapp.PYODIDE_BASE.replace(/\//g, '\\/')) || res.text.includes(pyapp.PYODIDE_BASE));
+   assert.match(res.text, /if\(e\.source!==window\.parent\)return/, 'it takes its program only from the page that frames it');
+@@ -328,6 +330,9 @@ test('the runner is a static, sandboxed document with its own policy', async ()
+   assert.match(res.text, /new Worker\(url\)/, 'a classic worker, not { type: "module" }');
+   assert.doesNotMatch(res.text, /\{type:'module'\}/, 'no module worker');
+   assert.match(res.text, /importScripts\(base\+'pyodide\.js'\)/);
++  assert.match(res.text, /self\.fetch=blocked/);
++  assert.match(res.text, /self\.importScripts=function/);
++  assert.match(res.text, /self\.Worker=function/);
+ });
+ 
+ /* ------------------------------------------------------- 4. real Python */
+@@ -671,28 +676,39 @@ test('every sample app in samples/python really runs', async () => {
+   const files = readdirSync(dir).filter((name) => name.endsWith('.py')).sort();
+   assert.ok(files.length >= 8, 'the samples are there');
+   const csv = 'name,total\nA,3\nB,5\nC,7\n';
+-  const png = { name: 'one.png', mime: 'image/png', data: Buffer.from('png bytes').toString('base64') };
++  // A real, tiny PNG: Pillow correctly rejects the old placeholder bytes.
++  const png = { name: 'one.png', mime: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAGElEQVR4nGNkYEiRY2DARCwMGgxYAT0kAOneAhSDT89FAAAAAElFTkSuQmCC' };
+ 
+   for (const file of files) {
+     const code = readFileSync(join(dir, file), 'utf8');
+     // Enough answers for every question each sample asks, and a file for the
+     // two that take one.
+     const answers = ['Zed', '12 * 3', 'q', 'first line', '', '42', 'Islamabad', 'Python', 'note'];
+-    const filesFor = file.includes('image-to-pdf') ? [[png]] : file.includes('csv-report') ? [[{ name: 'data.csv', mime: 'text/csv', data: Buffer.from(csv).toString('base64') }]] : [];
++    const filesFor = file.includes('image-to-pdf') || file.includes('image-compressor') ? [[png]] : file.includes('csv-report') ? [[{ name: 'data.csv', mime: 'text/csv', data: Buffer.from(csv).toString('base64') }]] : [];
+     const r = await runProgram(code, answers, filesFor);
+-    // matplotlib, Pillow and pandas are wheels that cannot be fetched here
+-    // (the CDN is blocked); the terminal says which one could not be loaded.
+-    const offline = /No module named '(matplotlib|PIL|pandas)'|Failed to load/.test(r.out);
++    // matplotlib, Pillow and pandas wheels, and the QR sample's small pure-Python
++    // PyPI dependency, may be unavailable in an offline test environment.
++    const offline = /No module named '(matplotlib|PIL|pandas|qrcode)'|Failed to load|NetworkError|fetch failed|Unable to fetch/i.test(r.out);
+     if (offline) {
+-      assert.match(file, /0[4-7]-/, `${file} needs a bundled package: ${r.out}`);
++      assert.match(file, /0[4-7]-|09-image-compressor|10-qr-code-maker/, `${file} needs a browser package: ${r.out}`);
+       continue;
+     }
+     assert.equal(r.status, 'done', `${file}: ${r.out}`);
+     assert.doesNotMatch(r.out, /Traceback/, `${file} ran cleanly: ${r.out}`);
+     assert.ok(r.out.trim().length > 0, `${file} printed something`);
+-    if (file.includes('notes-to-pdf') || file.includes('csv-report')) {
++    if (file.includes('notes-to-pdf') || file.includes('csv-report') || file.includes('image-to-pdf') || file.includes('image-compressor') || file.includes('qr-code-maker')) {
+       assert.ok(r.produced, `${file} handed a file back`);
+     }
++    if (file.includes('image-compressor')) {
++      const bytes = Buffer.from(r.produced.data, 'base64');
++      assert.equal(r.produced.mime, 'image/jpeg');
++      assert.deepEqual([...bytes.subarray(0, 2)], [0xff, 0xd8], 'the output is a real JPEG');
++    }
++    if (file.includes('qr-code-maker')) {
++      const svg = Buffer.from(r.produced.data, 'base64').toString('utf8');
++      assert.equal(r.produced.mime, 'image/svg+xml');
++      assert.match(svg, /<svg[\s>]/, 'the output is a real SVG QR code');
++    }
+     if (file.includes('matplotlib')) assert.ok(r.events.length > 0);
+   }
+ });
