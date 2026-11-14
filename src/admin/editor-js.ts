@@ -99,13 +99,13 @@ export const EDITOR_JS = `<script>
     var clone=visual.cloneNode(true);
     clone.querySelectorAll('.is-selected').forEach(function(el){el.classList.remove('is-selected')});
     clone.querySelectorAll('img[draggable]').forEach(function(el){el.removeAttribute('draggable')});
-    clone.querySelectorAll('figure.python-app').forEach(function(el){el.removeAttribute('contenteditable')});
+    clone.querySelectorAll('figure.python-app,figure.image-block').forEach(function(el){el.removeAttribute('contenteditable')});
     return clone.innerHTML;
   }
   // A Python app is one object in the visual editor: the caret can sit beside
   // it, never inside its code. The flag is editor-only and is not saved.
   function decorate(){
-    visual.querySelectorAll('figure.python-app').forEach(function(el){el.setAttribute('contenteditable','false')});
+    visual.querySelectorAll('figure.python-app,figure.image-block').forEach(function(el){el.setAttribute('contenteditable','false')});
   }
 
   /**
@@ -266,7 +266,7 @@ export const EDITOR_JS = `<script>
       btn.addEventListener('click',function(){
         var command=btn.dataset.exec;
         if(mode==='text'){visual.focus();restoreSelection()}
-        else{if(command==='removeFormat')return;ta.focus()}
+        else{if(command==='removeFormat'||command.indexOf('justify')===0)return;ta.focus()}
         document.execCommand(command,false,null);
         if(mode==='text'){rememberSelection();positionOverlay()}
         if(typeof markDirty==='function')markDirty();
@@ -301,7 +301,7 @@ export const EDITOR_JS = `<script>
     toolbar.querySelectorAll('[data-link-open]').forEach(function(btn){
       btn.setAttribute('aria-pressed',String(!!(inside&&closestLink(sel.anchorNode))));
     });
-    toolbar.querySelectorAll('[data-exec="removeFormat"]').forEach(function(btn){btn.disabled=!live});
+    toolbar.querySelectorAll('[data-exec="removeFormat"], [data-exec^="justify"]').forEach(function(btn){btn.disabled=!live});
   }
   if(document.addEventListener)document.addEventListener('selectionchange',syncToolbar);
   visual.addEventListener('keyup',rememberSelection);

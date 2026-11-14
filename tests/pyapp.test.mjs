@@ -399,6 +399,9 @@ function runProgram(code, answers = [], files = []) {
         const next = pendingFiles.length ? pendingFiles.shift() : null;
         setTimeout(() => self.onmessage({ data: { t: 'files', files: next } }), 0);
       }
+      else if (m.t === 'gui') {
+        setTimeout(() => self.onmessage({ data: { t: 'gui-result', result: {action: 'quit', values: {}} } }), 0);
+      }
       else if (m.t === 'ask') {
         if (!queue.length) { clearTimeout(timer); resolve({ out, events, status: 'waiting' }); return; }
         const line = queue.shift();
@@ -728,4 +731,52 @@ test('every sample app in samples/python really runs', async () => {
     }
     if (file.includes('matplotlib')) assert.ok(r.events.length > 0);
   }
+});
+
+test('GUI runner displays controls and returns a button and form values', async () => {
+  const { JSDOM } = await import('jsdom');
+  let worker;
+  const dom = new JSDOM(pyapp.pythonRunnerPage(), {
+    url:'https://example.test/__pyapp/runner', runScripts:'dangerously',
+    beforeParse(window) {
+      window.URL.createObjectURL=()=> 'blob:test'; window.URL.revokeObjectURL=()=>{};
+      window.Worker=class {
+        constructor(){worker=this}
+        postMessage(m){
+          if(m.t==='run') setTimeout(()=>this.onmessage({data:{t:'gui',s:JSON.stringify({title:'Test',display:'42',fields:[{name:'name',label:'Name',type:'text',value:'Ali'},{name:'ok',label:'Accept',type:'checkbox',value:true},{name:'choice',label:'Choice',type:'select',options:['One','Two'],value:'Two'}],buttons:[{id:'go',label:'Go'}]})}}),0);
+          if(m.t==='gui-result')this.result=m.result;
+        }
+        terminate(){}
+      };
+    }
+  });
+  const {window}=dom;window.dispatchEvent(new window.MessageEvent('message',{source:window.parent,data:{ams:'pyapp',t:'code',code:'print(1)',name:'app.py'}}));
+  await new Promise(r=>setTimeout(r,25));
+  const panel=window.document.querySelector('.ams-gui');assert.ok(panel);assert.equal(panel.querySelector('.ams-gui__display').textContent,'42');
+  panel.querySelector('button').click();
+  assert.equal(worker.result.action,'go');assert.equal(worker.result.values.name,'Ali');assert.equal(worker.result.values.ok,true);assert.equal(worker.result.values.choice,'Two');
+  dom.window.close();
+});
+
+test('GUI calculator runs in real Python and handles mouse clicks', async () => {
+  const {JSDOM}=await import('jsdom');
+  const page=pyapp.pythonRunnerPage();
+  const workerSource=JSON.parse(page.match(/,WORKER=("(?:[^"\\]|\\.)*");/)[1]);
+  const local=pathToFileURL(dirname(require.resolve('pyodide/package.json'))).href+'/';
+  const dom=new JSDOM(page,{url:'https://example.test/__pyapp/runner',runScripts:'dangerously',pretendToBeVisual:true,beforeParse(window){
+    window.URL.createObjectURL=()=> 'blob:test';window.URL.revokeObjectURL=()=>{};
+    window.Worker=class {constructor(){this.dead=false;this.inner=Object.create(window);const loader=pyodideScriptLoader(local,this.inner);new Function('self','postMessage','importScripts',workerSource)(this.inner,m=>{if(!this.dead&&this.onmessage)this.onmessage({data:m})},loader)} postMessage(m){this.inner.onmessage({data:{...m,base:local,index:fileURLToPath(local)}})} terminate(){this.dead=true}};
+  }});
+  const {window}=dom,doc=window.document;
+  async function until(check){for(let i=0;i<600;i++){if(check())return;await new Promise(r=>setTimeout(r,50))}throw Error('GUI timeout: '+doc.getElementById('out').textContent)}
+  const code=readFileSync(join(ROOT,'samples/python/11-gui-calculator.py'),'utf8');
+  window.dispatchEvent(new window.MessageEvent('message',{source:window.parent,data:{ams:'pyapp',t:'code',code,name:'calculator.py'}}));
+  await until(()=>doc.querySelector('.ams-gui'));
+  for(const label of ['7','+','8','=']){
+    const old=doc.querySelector('.ams-gui');const button=[...old.querySelectorAll('button')].find(b=>b.textContent===label);assert.ok(button,label);button.click();await until(()=>doc.querySelector('.ams-gui')&&doc.querySelector('.ams-gui')!==old);
+  }
+  assert.equal(doc.querySelector('.ams-gui__display').textContent,'15');
+  [...doc.querySelectorAll('.ams-gui button')].find(b=>b.textContent==='Close').click();
+  await until(()=>doc.getElementById('status').textContent==='Finished');
+  dom.window.close();
 });

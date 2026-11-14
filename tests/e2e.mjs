@@ -1099,11 +1099,11 @@ test('12b1. the bundled theme: hero home, clean pages, and settings that reach t
   assert.match((await anon('/')).text, /<div class="topbar">/, 'the defaults are back');
 });
 
-test('12c. theme store: one bundled theme, and it installs with one click', async () => {
+test('12c. theme store: bundled and example themes are offered', async () => {
   const store = await get(`${admin}/themes`);
   // `<h3>Name <small …` — the version suffix is not part of the name.
   const storeCards = (html) => [...html.matchAll(/<h3>([^<]+?)\s*<small/g)].map((m) => m[1]);
-  assert.deepEqual(storeCards(store.text), [BUNDLED.name], 'the bundled theme is the only store card');
+  assert.deepEqual(storeCards(store.text), [BUNDLED.name, 'Example 1'], 'both themes appear in the store');
   // It is already installed (the installer activates it), and its card shows the
   // screenshot the package ships.
   assert.match(store.text, new RegExp(`class="store-item__shot" style="background-image:url\\(/theme-assets/${BUNDLED.slug}/screenshot\\.png`));
@@ -1113,8 +1113,18 @@ test('12c. theme store: one bundled theme, and it installs with one click', asyn
   // Any install form on the page targets it only (an active theme shows no
   // install button of its own; the install route is exercised below).
   const installLinks = [...store.text.matchAll(/store\/([a-z0-9-]+)\/install/g)].map((m) => m[1]);
-  assert.ok(installLinks.every((slug) => slug === BUNDLED.slug), 'no other theme is offered');
+  assert.ok(installLinks.every((slug) => [BUNDLED.slug, 'example1'].includes(slug)), 'only the bundled and example themes are offered');
   assert.doesNotMatch(store.text, /AMS Nova|store\/nova\//, 'the previous bundled theme is gone');
+  // The optional study theme can be installed, activated and exported; the
+  // public site changes theme while the panel stays available.
+  await adminPost('/themes/store/example1/install', { activate: 1 });
+  const exampleHome = await anon('/');
+  assert.match(exampleHome.text, /<header class="site-header">/);
+  assert.match(exampleHome.text, /\/theme-assets\/example1\/style\.css/);
+  const installed = await get(`${admin}/themes`);
+  const exampleDownload = installed.text.match(/href="([^" ]*\/themes\/\d+\/download)"[^>]*>Download<\/a>[\s\S]*?/);
+  assert.ok(exampleDownload, 'installed theme has an export link');
+  assert.equal((await get(exampleDownload[1])).status, 200, 'theme zip can be downloaded');
 
   // Reinstalling keeps it the active theme.
   assert.match((await adminPost(`/themes/store/${BUNDLED.slug}/install`, { activate: 1 })).location, new RegExp(`${BUNDLED.name} is now your active theme`));

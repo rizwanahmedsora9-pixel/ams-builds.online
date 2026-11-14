@@ -68,7 +68,8 @@ export function mediaPicker(opts: {
       <div class="media-picker__options">
         <label for="media-picker-quality">Image quality</label>
         <select id="media-picker-quality" data-picker-quality>
-          <option value="0.7" selected>Tight — smallest WebP (recommended)</option>
+          <option value="0.55">Maximum compression — lower quality WebP</option>
+          <option value="0.7" selected>Tight — WebP (recommended)</option>
           <option value="0.8">Balanced</option>
           <option value="0.9">High</option>
           <option value="0">Keep originals, no conversion</option>
@@ -119,7 +120,7 @@ export const PICKER_JS = `${MEDIA_COMPRESS_JS}<script>
     var panels = Array.prototype.slice.call(dialog.querySelectorAll('[data-picker-panel]'));
     var live = document.getElementById('media-picker-status');
     var chosen = null, timer = null, onPick = null;
-    var sourceFiles = [], prepared = [], busy = false, autoSelect = null;
+    var sourceFiles = [], prepared = [], busy = false, autoSelect = null, previewUrls = [], prepareVersion = 0;
 
     function esc(value) {
       return String(value == null ? '' : value)
@@ -229,15 +230,42 @@ export const PICKER_JS = `${MEDIA_COMPRESS_JS}<script>
       return isNaN(value) ? 0.7 : value;
     }
     function queueRows(rows) {
-      queue.innerHTML = rows.map(function (row) {
-        var result = row.result;
-        var detail = result.note || '';
-        if (result.file && result.file.size) detail = (result.changed ? result.file.name + ' · ' : '') + fmt(result.file.size) + (detail ? ' · ' + detail : '');
-        return '<li class="media-picker__queue-item' + (result.failed ? ' is-warn' : '') + '">' +
-          '<b>' + esc(row.name) + '</b><span>' + esc(detail) + '</span></li>';
-      }).join('');
+      previewUrls.forEach(function (url) { URL.revokeObjectURL(url); });
+      previewUrls = [];
+      queue.textContent = '';
+      rows.forEach(function (row) {
+        var result = row.result, original = result.original, output = result.file;
+        var item = document.createElement('div');
+        item.className = 'media-picker__queue-item' + (result.failed ? ' is-warn' : '');
+        var title = document.createElement('b'); title.textContent = row.name; item.appendChild(title);
+        var details = document.createElement('span');
+        details.textContent = 'Original: ' + fmt(original.size) + ' (' + (original.type || 'unknown') + ') → Prepared: ' + fmt(output.size) + ' (' + (output.type || 'unknown') + ')' + (result.note ? ' · ' + result.note : '');
+        item.appendChild(details);
+        if (result.changed && !result.failed) {
+          var choice = document.createElement('label'), check = document.createElement('input');
+          check.type = 'checkbox'; check.checked = !!row.useOriginal;
+          check.addEventListener('change', function () { row.useOriginal = check.checked; });
+          choice.appendChild(check);choice.appendChild(document.createTextNode(' Upload original instead'));
+          item.appendChild(choice);
+        }
+        if (!result.failed && original.type.indexOf('image/') === 0 && original.type !== 'image/svg+xml') {
+          var previews = document.createElement('div');
+          previews.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;margin:8px 0';
+          [[original, 'Original'], [output, 'Prepared']].forEach(function (pair) {
+            var box = document.createElement('div'), label = document.createElement('span'), image = document.createElement('img');
+            label.textContent = pair[1]; label.style.cssText = 'display:block;font-size:12px';
+            var url = URL.createObjectURL(pair[0]); previewUrls.push(url); image.src = url; image.alt = pair[1] + ' preview of ' + row.name;
+            image.style.cssText = 'display:block;max-width:140px;max-height:110px;object-fit:contain;background:#ddd';
+            box.appendChild(label);box.appendChild(image);previews.appendChild(box);
+          });
+          item.appendChild(previews);
+        }
+        queue.appendChild(item);
+      });
     }
     function resetUpload() {
+      prepareVersion++;
+      previewUrls.forEach(function (url) { URL.revokeObjectURL(url); }); previewUrls = [];
       sourceFiles = [];
       prepared = [];
       busy = false;
@@ -247,6 +275,7 @@ export const PICKER_JS = `${MEDIA_COMPRESS_JS}<script>
       if (uploadStatus) uploadStatus.textContent = '';
     }
     function prepareFiles(files) {
+      var version = ++prepareVersion;
       sourceFiles = Array.prototype.slice.call(files || []).filter(function (file) { return file && file.size; });
       prepared = [];
       if (!sourceFiles.length) {
@@ -264,6 +293,7 @@ export const PICKER_JS = `${MEDIA_COMPRESS_JS}<script>
         return { name: file.name, result: { file: file, original: file, failed: false, changed: false, note: 'working…' } };
       }));
       var done = function (results) {
+        if (version !== prepareVersion) return;
         prepared = results.map(function (result, index) {
           return { name: (sourceFiles[index] || result.original).name, result: result };
         });
@@ -287,7 +317,7 @@ export const PICKER_JS = `${MEDIA_COMPRESS_JS}<script>
         }));
         return;
       }
-      window.amsCompressImages(sourceFiles, options).then(done).catch(function () { busy = false; uploadBtn.disabled = false; });
+      window.amsCompressImages(sourceFiles, options).then(done).catch(function () { if (version !== prepareVersion) return; busy = false; uploadBtn.disabled = true; uploadStatus.textContent = 'Could not prepare these files. Please try again.'; });
     }
     if (fileInput) fileInput.addEventListener('change', function () {
       prepareFiles(fileInput.files);
@@ -314,7 +344,8 @@ export const PICKER_JS = `${MEDIA_COMPRESS_JS}<script>
       var alt = altInput.value.trim();
       if (alt) body.set('alt', alt); else body.delete('alt');
       usable.forEach(function (row) {
-        body.append('files', row.result.file, row.result.file.name);
+        var chosenFile = row.useOriginal ? row.result.original : row.result.file;
+        body.append('files', chosenFile, chosenFile.name);
       });
       busy = true;
       uploadBtn.disabled = true;

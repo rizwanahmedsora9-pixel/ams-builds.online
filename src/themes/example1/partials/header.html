@@ -1,0 +1,27 @@
+{{#if theme.show_topbar}}<div class="topbar">
+  <div class="topbar__inner">
+    <div class="topbar__info">
+      {{#if site.tagline}}<span class="topbar__tagline">{{site.tagline}}</span>{{/if}}
+      {{#if theme.contact_phone}}<a href="tel:{{theme.contact_phone}}"><svg class="icon" aria-hidden="true"><use href="#i-phone"></use></svg><span>{{theme.contact_phone}}</span></a>{{/if}}
+      {{#if theme.contact_email}}<a href="mailto:{{theme.contact_email}}"><svg class="icon" aria-hidden="true"><use href="#i-mail"></use></svg><span>{{theme.contact_email}}</span></a>{{/if}}
+    </div>
+    <div class="social" aria-label="Social links">
+      {{#if theme.social_facebook}}<a class="social__link" href="{{theme.social_facebook}}" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><svg class="icon" aria-hidden="true"><use href="#i-facebook"></use></svg></a>{{/if}}
+      {{#if theme.social_instagram}}<a class="social__link" href="{{theme.social_instagram}}" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><svg class="icon" aria-hidden="true"><use href="#i-instagram"></use></svg></a>{{/if}}
+      {{#if theme.social_x}}<a class="social__link" href="{{theme.social_x}}" target="_blank" rel="noopener noreferrer" aria-label="X"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></a>{{/if}}
+      {{#if theme.social_youtube}}<a class="social__link" href="{{theme.social_youtube}}" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><svg class="icon" aria-hidden="true"><use href="#i-youtube"></use></svg></a>{{/if}}
+      {{#if theme.social_linkedin}}<a class="social__link" href="{{theme.social_linkedin}}" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn"><svg class="icon" aria-hidden="true"><use href="#i-linkedin"></use></svg></a>{{/if}}
+      {{#if theme.social_github}}<a class="social__link" href="{{theme.social_github}}" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><svg class="icon" aria-hidden="true"><use href="#i-github"></use></svg></a>{{/if}}
+      {{#if theme.social_whatsapp}}<a class="social__link" href="https://wa.me/{{theme.social_whatsapp}}" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp"><svg class="icon" aria-hidden="true"><use href="#i-whatsapp"></use></svg></a>{{/if}}
+    </div>
+  </div>
+</div>{{/if}}
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="/" aria-label="{{site.title}} home">
+      {{#if site.logo}}<img class="brand__logo" src="{{site.logo}}" alt="{{site.title}}">{{else}}<span class="brand__mark" aria-hidden="true"></span>{{/if}}
+      <span class="brand__text"><strong>{{site.title}}</strong>{{#if site.tagline}}<small>{{site.tagline}}</small>{{/if}}</span>
+    </a>
+    {{> navigation}}
+  </div>
+</header>

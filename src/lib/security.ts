@@ -110,8 +110,8 @@ const URL_ATTRS = new Set(['href', 'src']);
  * stored as inline style. Only those exact, value-checked declarations may
  * survive sanitizing — anything else in a style attribute is dropped whole.
  */
-const SAFE_STYLE_TAGS = new Set(['figure', 'img', 'div']);
-const SAFE_STYLE_VALUE = /^(\d{1,3}(?:\.\d+)?%|\d{1,4}px|auto|left|right|center|block|none)$/i;
+const SAFE_STYLE_TAGS = new Set(['figure', 'img', 'div', 'p', 'h2', 'h3', 'h4', 'blockquote']);
+const SAFE_STYLE_VALUE = /^(\d{1,3}(?:\.\d+)?%|\d{1,4}px|auto|left|right|center|justify|block|none)$/i;
 const SAFE_STYLE_PROPS = new Set(['width', 'height', 'max-width', 'margin-left', 'margin-right', 'float', 'display', 'text-align']);
 export function safeStyle(value: string): string {
   const kept: string[] = [];
@@ -182,7 +182,7 @@ export function sanitizeHtml(input: string): string {
         // Not in the allow-list above on purpose: handled here, value-checked,
         // and it must run before the allow-list check or it never runs at all.
         if (!SAFE_STYLE_TAGS.has(tag) || seen.has('style')) continue;
-        const clean = safeStyle(value);
+        const clean = safeStyle(value).split(';').filter((part) => !['p', 'h2', 'h3', 'h4', 'blockquote'].includes(tag) || part.startsWith('text-align:')).join(';');
         if (!clean) continue;
         seen.add('style');
         attrs += ` style="${esc(clean)}"`;
