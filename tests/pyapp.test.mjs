@@ -316,6 +316,8 @@ test('the runner is a static, sandboxed document with its own policy', async () 
   assert.doesNotMatch(csp, /allow-same-origin/);
   assert.match(csp, /default-src 'none'/);
   assert.match(csp, /frame-ancestors 'self'/);
+  assert.match(csp, /connect-src https:\/\/cdn\.jsdelivr\.net https:\/\/pypi\.org https:\/\/files\.pythonhosted\.org/);
+  assert.doesNotMatch(csp, /connect-src https:(?:\s|;)/, 'there is no unrestricted HTTPS egress');
   assert.equal(res.headers.get('x-robots-tag'), 'noindex');
   assert.ok(res.text.includes(pyapp.PYODIDE_BASE.replace(/\//g, '\\/')) || res.text.includes(pyapp.PYODIDE_BASE));
   assert.match(res.text, /if\(e\.source!==window\.parent\)return/, 'it takes its program only from the page that frames it');
@@ -328,6 +330,24 @@ test('the runner is a static, sandboxed document with its own policy', async () 
   assert.match(res.text, /new Worker\(url\)/, 'a classic worker, not { type: "module" }');
   assert.doesNotMatch(res.text, /\{type:'module'\}/, 'no module worker');
   assert.match(res.text, /importScripts\(base\+'pyodide\.js'\)/);
+  assert.match(res.text, /self\.fetch=blocked/);
+  assert.match(res.text, /self\.importScripts=function/);
+  assert.match(res.text, /self\.Worker=function/);
+  // The worker is itself a JSON string inside the page: check the cooked script,
+  // not the doubly escaped source, so template-literal mistakes cannot ship.
+  const worker = JSON.parse(res.text.match(/WORKER=("(?:[^"\\]|\\.)*");/)[1]);
+  assert.doesNotThrow(() => new Function('self', 'postMessage', 'importScripts', worker));
+  const qrCheck = worker.match(/if\((\/.*\/)\.test\(m\.code\)\)/)[1];
+  const isQrSample = new Function('code', `return ${qrCheck}.test(code);`);
+  const qrSample = readFileSync(join(ROOT, 'samples', 'python', '10-qr-code-maker.py'), 'utf8');
+  assert.equal(isQrSample(qrSample), true, 'the shipped QR sample triggers pre-install');
+  assert.equal(isQrSample(qrSample.replace('"qrcode==8.2"', "'qrcode==8.2'")), true, 'single quotes work too');
+  assert.equal(isQrSample(qrSample.replace('micropip.install(', 'micropip.install (')), true, 'whitespace works too');
+  assert.equal(isQrSample('await micropip.install("qrcode==8.1")'), false, 'only the pinned version is pre-installed');
+  assert.ok(worker.indexOf("await py.loadPackage('micropip')") < worker.indexOf('self.fetch=blocked'),
+    'micropip is loaded before networking is disabled');
+  assert.ok(worker.indexOf('self.fetch=blocked') < worker.indexOf('py.runPython(boot)'),
+    'networking is disabled before the Python bootstrap and author code run');
 });
 
 /* ------------------------------------------------------- 4. real Python */
@@ -671,27 +691,40 @@ test('every sample app in samples/python really runs', async () => {
   const files = readdirSync(dir).filter((name) => name.endsWith('.py')).sort();
   assert.ok(files.length >= 8, 'the samples are there');
   const csv = 'name,total\nA,3\nB,5\nC,7\n';
-  const png = { name: 'one.png', mime: 'image/png', data: Buffer.from('png bytes').toString('base64') };
+  // A real, tiny PNG: Pillow correctly rejects the old placeholder bytes.
+  const png = { name: 'one.png', mime: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAGElEQVR4nGNkYEiRY2DARCwMGgxYAT0kAOneAhSDT89FAAAAAElFTkSuQmCC' };
 
   for (const file of files) {
     const code = readFileSync(join(dir, file), 'utf8');
     // Enough answers for every question each sample asks, and a file for the
     // two that take one.
     const answers = ['Zed', '12 * 3', 'q', 'first line', '', '42', 'Islamabad', 'Python', 'note'];
-    const filesFor = file.includes('image-to-pdf') ? [[png]] : file.includes('csv-report') ? [[{ name: 'data.csv', mime: 'text/csv', data: Buffer.from(csv).toString('base64') }]] : [];
+    const filesFor = file.includes('image-to-pdf') || file.includes('image-compressor') ? [[png]] : file.includes('csv-report') ? [[{ name: 'data.csv', mime: 'text/csv', data: Buffer.from(csv).toString('base64') }]] : [];
     const r = await runProgram(code, answers, filesFor);
-    // matplotlib, Pillow and pandas are wheels that cannot be fetched here
-    // (the CDN is blocked); the terminal says which one could not be loaded.
-    const offline = /No module named '(matplotlib|PIL|pandas)'|Failed to load/.test(r.out);
+    // matplotlib, Pillow and pandas wheels, and the QR sample's small pure-Python
+    // PyPI dependency, may be unavailable in an offline test environment.
+    // Startup failures arrive in status rather than stdout, so inspect both.
+    const diagnostic = r.out + (r.status.startsWith('fail:') ? r.status.slice(5) : '');
+    const offline = /No module named '(matplotlib|PIL|pandas|qrcode|micropip)'|Failed to load|NetworkError|fetch failed|Unable to fetch/i.test(diagnostic);
     if (offline) {
-      assert.match(file, /0[4-7]-/, `${file} needs a bundled package: ${r.out}`);
+      assert.match(file, /0[4-7]-|09-image-compressor|10-qr-code-maker/, `${file} needs a browser package: ${r.out}`);
       continue;
     }
     assert.equal(r.status, 'done', `${file}: ${r.out}`);
     assert.doesNotMatch(r.out, /Traceback/, `${file} ran cleanly: ${r.out}`);
     assert.ok(r.out.trim().length > 0, `${file} printed something`);
-    if (file.includes('notes-to-pdf') || file.includes('csv-report')) {
+    if (file.includes('notes-to-pdf') || file.includes('csv-report') || file.includes('image-to-pdf') || file.includes('image-compressor') || file.includes('qr-code-maker')) {
       assert.ok(r.produced, `${file} handed a file back`);
+    }
+    if (file.includes('image-compressor')) {
+      const bytes = Buffer.from(r.produced.data, 'base64');
+      assert.equal(r.produced.mime, 'image/jpeg');
+      assert.deepEqual([...bytes.subarray(0, 2)], [0xff, 0xd8], 'the output is a real JPEG');
+    }
+    if (file.includes('qr-code-maker')) {
+      const svg = Buffer.from(r.produced.data, 'base64').toString('utf8');
+      assert.equal(r.produced.mime, 'image/svg+xml');
+      assert.match(svg, /<svg[\s>]/, 'the output is a real SVG QR code');
     }
     if (file.includes('matplotlib')) assert.ok(r.events.length > 0);
   }

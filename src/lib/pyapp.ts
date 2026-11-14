@@ -33,9 +33,10 @@ export const PYAPP_RUNNER_CSP = [
   "worker-src blob:",
   "style-src 'unsafe-inline'",
   "img-src data: blob:",
-  // jsdelivr sends wheels for cross-origin fetches; without this the interpreter
-  // and its packages are refused.
-  "connect-src https:",
+  // Only the pinned interpreter CDN and the QR sample's pinned package sources
+  // are reachable during startup. The worker disables network APIs before user
+  // code runs, so app code cannot send selected files to arbitrary hosts.
+  "connect-src https://cdn.jsdelivr.net https://pypi.org https://files.pythonhosted.org",
   "frame-ancestors 'self'",
   // `allow-downloads` lets a program hand the visitor a file it made (a PDF,
   // a CSV); without it Chrome silently drops the click on that link.
@@ -71,6 +72,24 @@ self.onmessage=function(e){
       var py=await self.loadPyodide({indexURL:index});
       postMessage({t:'status',s:'Preparing…'});
       try{await py.loadPackagesFromImports(m.code,{messageCallback:function(){},errorCallback:function(){}})}catch(err){}
+      // The QR sample is the only PyPI package we fetch. Install it before
+      // locking down networking; its pinned, pure-Python wheel never receives
+      // visitor input or selected files.
+      if(/micropip\\.install\\s*\\(\\s*['"]qrcode==8\\.2['"]/.test(m.code)){
+        await py.loadPackage('micropip');
+        await py.runPythonAsync("import micropip; await micropip.install('qrcode==8.2')");
+      }
+      // File data is handed to this worker with postMessage, never by HTTP.
+      // Once Pyodide and its approved packages are ready, disable network and
+      // nested-worker APIs before running author-supplied Python.
+      var blocked=function(){return Promise.reject(new Error('Network access is disabled inside this Python app.'))};
+      self.fetch=blocked;
+      self.XMLHttpRequest=function(){throw new Error('Network access is disabled inside this Python app.')};
+      self.WebSocket=function(){throw new Error('Network access is disabled inside this Python app.')};
+      self.EventSource=function(){throw new Error('Network access is disabled inside this Python app.')};
+      self.Worker=function(){throw new Error('Nested workers are disabled inside this Python app.')};
+      self.SharedWorker=self.Worker;
+      self.importScripts=function(){throw new Error('Network access is disabled inside this Python app.')};
       py.runPython(boot);
       var run=py.globals.get('ams_run');
       postMessage({t:'start'});
