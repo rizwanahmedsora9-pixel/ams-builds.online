@@ -24,13 +24,13 @@ type PostSeed = {
 
 const PAGES: PageSeed[] = [
   { title: 'About', slug: 'about', excerpt: 'Who we are and what we build.', menu_order: 1,
-    body: '<h2>About us</h2><p>We build websites, web apps and mobile software for small and mid-size businesses. This page and its sub-pages exist so you can see how the theme renders a full page hierarchy — breadcrumbs, sub-page cards and a sidebar that nests every page.</p><p>Edit or delete any of this from the admin panel\'s Pages screen.</p>' },
+    body: '<h2>About us</h2><p>We build websites, web apps and mobile software for small and mid-size businesses. This page and its sub-pages exist so you can see how the theme renders a full page hierarchy — breadcrumbs and sub-page cards, with the top-level pages listed in the header and footer.</p><p>Edit or delete any of this from the admin panel\'s Pages screen.</p>' },
   { title: 'Team', slug: 'team', parent: 'about', menu_order: 1,
-    body: '<h2>The team</h2><p>A small group of developers, designers and writers. This is a sub-page of About, shown nested under it in the sidebar navigation.</p>' },
+    body: '<h2>The team</h2><p>A small group of developers, designers and writers. This is a sub-page of About, linked from the About page as a sub-page card.</p>' },
   { title: 'History', slug: 'history', parent: 'about', menu_order: 2,
-    body: '<h2>Our history</h2><p>Founded to ship practical software fast, we have grown into a full-service build studio. Another sub-page, to show how the sidebar nests multiple children.</p>' },
+    body: '<h2>Our history</h2><p>Founded to ship practical software fast, we have grown into a full-service build studio. Another sub-page, to show a parent page with more than one child.</p>' },
   { title: 'Services', slug: 'services', excerpt: 'What we can build for you.', menu_order: 2,
-    body: '<h2>Services</h2><p>From a single landing page to a full product, we cover web, mobile and cloud. Each service below is a sub-page linked from the sidebar.</p>' },
+    body: '<h2>Services</h2><p>From a single landing page to a full product, we cover web, mobile and cloud. Each service below is a sub-page, linked from this page.</p>' },
   { title: 'Web Development', slug: 'web-development', parent: 'services', menu_order: 1,
     body: '<h2>Web development</h2><p>Responsive websites and web applications, built fast and kept maintainable. A sub-page of Services.</p>' },
   { title: 'Mobile Apps', slug: 'mobile-apps', parent: 'services', menu_order: 2,
@@ -38,7 +38,7 @@ const PAGES: PageSeed[] = [
   { title: 'Cloud & DevOps', slug: 'cloud-devops', parent: 'services', menu_order: 3,
     body: '<h2>Cloud &amp; DevOps</h2><p>Deployment, hosting and automation. The third Services sub-page, to show a parent with several children.</p>' },
   { title: 'Guides', slug: 'guides', excerpt: 'Step-by-step tutorials.', menu_order: 3,
-    body: '<h2>Guides</h2><p>Practical, written guides. Each is a sub-page so the sidebar shows a nested reading section.</p>' },
+    body: '<h2>Guides</h2><p>Practical, written guides. Each is a sub-page, so this section reads as a small library.</p>' },
   { title: 'Getting Started', slug: 'getting-started', parent: 'guides', menu_order: 1,
     body: '<h2>Getting started</h2><p>The fastest way to launch your first page and write your first post. A Guides sub-page.</p>' },
   { title: 'Advanced Topics', slug: 'advanced-topics', parent: 'guides', menu_order: 2,
@@ -54,28 +54,28 @@ const PAGES: PageSeed[] = [
 const POSTS: PostSeed[] = [
   { title: 'Welcome to the site', slug: 'welcome-to-the-site', category: 'News', tags: ['launch', 'news'],
     excerpt: 'A first post to show how the theme renders articles, categories and tags.',
-    body: '<p>This is the first demo post. It exists so you can see how the theme renders a full article: a title, a byline, a featured-image slot, body text, tags, comments and the AdSense-ready ad slots that appear only on posts.</p><p>Write your own posts from the admin panel and delete this one whenever you are ready.</p><h3>What you get</h3><p>Every post gets the same clean reading column, a category link and tag links. The sidebar navigation stays visible so readers can jump to any page without scrolling back to the top.</p>' },
-  { title: 'Building a responsive sidebar', slug: 'building-a-responsive-sidebar', category: 'Tutorials', tags: ['guides', 'tutorials'],
-    excerpt: 'How the sidebar navigation adapts from desktop to mobile.',
-    body: '<p>A good sidebar navigation should stay put on desktop and become a drawer on small screens. This post walks through the idea using the theme that ships with this site.</p><p>On wide screens the sidebar is a sticky column. On phones it slides in from the left when the menu button is pressed, and closes as soon as a link is tapped.</p><blockquote>The best navigation is the one a reader never has to think about.</blockquote>' },
+    body: '<p>This is the first demo post. It exists so you can see how the theme renders a full article: a title, a byline, a featured-image slot, body text, tags, share buttons and comments.</p><p>Write your own posts from the admin panel and delete this one whenever you are ready.</p><h3>What you get</h3><p>Every post gets the same clean reading column, category and tag chips, and share buttons. The header stays in view while scrolling, so readers can jump to any page without going back to the top.</p>' },
+  { title: 'Building a responsive menu', slug: 'building-a-responsive-menu', category: 'Tutorials', tags: ['guides', 'tutorials'],
+    excerpt: 'How the navigation adapts from desktop to mobile.',
+    body: '<p>A good menu should sit in the header on desktop and fold away on small screens. This post walks through the idea using the theme that ships with this site.</p><p>On wide screens the menu is a row in the sticky header, with sub-menus as dropdowns. On phones it slides down when the menu button is pressed, and closes as soon as a link is tapped.</p><blockquote>The best navigation is the one a reader never has to think about.</blockquote>' },
   { title: 'Designing for dark and light', slug: 'designing-for-dark-and-light', category: 'Tutorials', tags: ['guides', 'tutorials'],
     excerpt: 'A theme that looks great in both colour schemes, with a toggle.',
-    body: '<p>This theme ships both a light and a dark palette. The toggle in the header remembers a visitor\'s choice, and a site that has not been touched follows the operating system preference.</p><p>Every colour is driven by design tokens, so a brand colour set in Appearance reaches both palettes at once.</p>' },
-  { title: 'Adding AdSense to your posts', slug: 'adding-adsense-to-your-posts', category: 'Updates', tags: ['updates', 'guides'],
-    excerpt: 'Where the ad slots sit and how to fill them responsibly.',
-    body: '<p>The theme ships two labelled ad slots on posts: one after the article body and one at the very end. Both are empty by default — paste your AdSense code into the theme settings to switch them on.</p><p>Follow AdSense policy: ads belong on content-rich posts, never beside buttons, and never on short pages.</p>' },
+    body: '<p>This theme ships both a light and a dark palette. The toggle in the header remembers a visitor\'s choice, and a site that has not been touched follows the operating system preference.</p><p>The accent colour is one theme setting, so a brand colour set in Appearance reaches both palettes at once.</p>' },
+  { title: 'Setting up your contact details', slug: 'setting-up-your-contact-details', category: 'Updates', tags: ['updates', 'guides'],
+    excerpt: 'Where the phone, email, address and social links appear, and how to fill them in.',
+    body: '<p>The theme shows your contact details in two places: the slim bar above the header and the first column of the footer. Both are empty by default — fill in the phone, email and address in the theme settings to switch them on.</p><p>The same screen holds your social links. Each one you fill in becomes an icon in the top bar and the footer; leave a field empty and its icon is not shown.</p>' },
   { title: 'Writing clean, readable content', slug: 'writing-clean-readable-content', category: 'Tutorials', tags: ['guides', 'tutorials'],
-    excerpt: 'Short paragraphs, clear headings and a reading time that helps.',
-    body: '<p>Readable content is good content. Keep paragraphs short, use headings to break up the page, and let the reading-time estimate help readers decide whether to stay.</p><p>This post is long enough to show the reading-time line under the byline and to give an ad slot enough text to sit beside.</p><h3>A few tips</h3><ul><li>One idea per paragraph.</li><li>Lead with the point.</li><li>Break long sections with subheadings.</li></ul>' },
+    excerpt: 'Short paragraphs, clear headings and lists that help.',
+    body: '<p>Readable content is good content. Keep paragraphs short and use headings to break up the page, so a reader can decide quickly whether to stay.</p><p>This post is long enough to show how headings, paragraphs and lists sit together in the reading column.</p><h3>A few tips</h3><ul><li>One idea per paragraph.</li><li>Lead with the point.</li><li>Break long sections with subheadings.</li></ul>' },
   { title: 'Site update: new pages and sub-pages', slug: 'site-update-new-pages', category: 'News', tags: ['updates', 'news'],
     excerpt: 'The demo content now includes a full page hierarchy.',
-    body: '<p>We have added several top-level pages with sub-pages so the sidebar navigation has something real to show. Each parent nests its children, and the current page stays highlighted so readers always know where they are.</p>' },
+    body: '<p>We have added several top-level pages with sub-pages so the navigation has something real to show. Each parent page lists its children as cards, and a breadcrumb trail shows readers where they are.</p>' },
   { title: 'A review of the default theme', slug: 'a-review-of-the-default-theme', category: 'Reviews', tags: ['reviews'],
     excerpt: 'What the bundled theme does well and where it shines.',
-    body: '<p>The default theme is a full-colour, sidebar-driven design with a hero header, clean cards and a proper footer. It handles pages, sub-pages, posts, archives and the 404 page from one consistent shell.</p><p>Its colour scheme is changeable from four settings, and it respects any brand colours you set in Appearance.</p>' },
+    body: '<p>The default theme is a responsive design with a sticky header, dropdown menus, a homepage hero, clean cards and a rich footer. It handles pages, sub-pages, posts, archives, search and the 404 page from one consistent shell.</p><p>It has a light and a dark mode, and its accent colour, content width, homepage hero and contact details are all theme settings.</p>' },
   { title: 'Planning your page structure', slug: 'planning-your-page-structure', category: 'Tutorials', tags: ['guides', 'tutorials'],
     excerpt: 'Thinking through top-level pages and their sub-pages.',
-    body: '<p>A clear page structure helps readers and search engines alike. Start with a handful of top-level pages and give each a few sub-pages where it makes sense.</p><p>The sidebar in this theme reflects exactly that structure, nesting children under their parents automatically.</p>' },
+    body: '<p>A clear page structure helps readers and search engines alike. Start with a handful of top-level pages and give each a few sub-pages where it makes sense.</p><p>This theme reflects exactly that structure: breadcrumbs on every sub-page, and cards for the children under their parent.</p>' },
 ];
 
 /** Builds the demo-content statements to append to the installer's batch. */
@@ -132,8 +132,8 @@ export function demoContentStatements(db: Env['DB'], now: string, adminId: numbe
     }
   }
 
-  // A primary menu that mirrors the top-level pages, so menu-driven themes and
-  // the sidebar both have something to show. Home and Blog are already seeded
+  // A primary menu that mirrors the top-level pages, so the theme's header menu
+  // has something to show. Home and Blog are already seeded
   // by the installer, so they are not repeated here.
   const menuItems = [
     { label: 'About', url: '/about', pos: 2 },

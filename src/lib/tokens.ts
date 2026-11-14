@@ -230,7 +230,7 @@ const ALIASES: Record<string, string[]> = {
   '--on-brand': ['--accent-fg', '--on-accent', '--accent-ink'],
   '--text': ['--fg', '--ink', '--body'],
   '--text-muted': ['--muted', '--muted-fg', '--subtle'],
-  '--bg': ['--background', '--page', '--surface-page'],
+  '--bg': ['--background', '--page', '--paper', '--surface-page'],
   '--surface': ['--card', '--panel', '--soft'],
   '--line': ['--border', '--rule', '--divider'],
   '--radius': ['--r', '--radius-md', '--round'],

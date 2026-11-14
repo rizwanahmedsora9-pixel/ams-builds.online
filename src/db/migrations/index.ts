@@ -6,7 +6,7 @@ import { resetSchemaCache } from '../../lib/schema';
  * by the installer; each entry here upgrades an already-installed database.
  * Append new entries with the next version number - never edit old ones.
  */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 /**
  * A migration statement that must not take the whole batch down.
@@ -174,7 +174,13 @@ const POST_PAGES = [
   'CREATE INDEX IF NOT EXISTS idx_content_pages_page ON content_pages (page_id)',
 ];
 
-export const migrations: { version: number; name: string; statements: string[] }[] = [
+/**
+ * A migration is a list of SQL statements, and optionally a step in code for
+ * work SQL alone cannot do (writing a bundled theme's files to the file store).
+ */
+type Migration = { version: number; name: string; statements: string[]; run?: (env: Env) => Promise<void> };
+
+export const migrations: Migration[] = [
   { version: 2, name: 'Comments', statements: COMMENTS },
   { version: 3, name: 'Revisions, edit locks and page ordering', statements: EDITOR_WORKFLOW },
   { version: 4, name: 'Page ordering default', statements: WORKFLOW_FIXES },
@@ -184,6 +190,21 @@ export const migrations: { version: number; name: string; statements: string[] }
   { version: 8, name: 'Hierarchical pages', statements: PAGE_HIERARCHY },
   { version: 9, name: 'Page-specific posts', statements: POST_PAGES },
   { version: 10, name: 'Page icons', statements: [tolerant("ALTER TABLE content ADD COLUMN icon TEXT NOT NULL DEFAULT ''")] },
+  {
+    // The app ships a single theme now. Sites installed with an earlier bundled
+    // theme switch to it, and the retired bundled themes are removed.
+    version: 11,
+    name: 'Default theme: Ahmed Pro Theme',
+    statements: [],
+    run: async (env) => {
+      const { adoptDefaultTheme } = await import('../../lib/bundled-theme');
+      await adoptDefaultTheme(env);
+      // Cached pages were rendered by the previous theme.
+      const { getConfig, bumpCache } = await import('../../lib/config');
+      const cfg = await getConfig(env);
+      if (cfg) await bumpCache(env, cfg);
+    },
+  },
 ];
 
 /** Runs one migration statement, tolerating the errors marked in its comment. */
@@ -211,6 +232,7 @@ export async function migrate(env: Env): Promise<number> {
   let current = Number(row?.value || 1);
   for (const m of migrations.filter((x) => x.version > current).sort((a, b) => a.version - b.version)) {
     for (const statement of m.statements) await runStatement(env, statement);
+    if (m.run) await m.run(env);
     await env.DB.prepare(
       "INSERT INTO settings (site_id,key,value) VALUES (1,'schema_version',?) ON CONFLICT(site_id,key) DO UPDATE SET value=excluded.value",
     ).bind(String(m.version)).run();

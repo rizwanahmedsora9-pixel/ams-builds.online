@@ -6,7 +6,7 @@ import { esc, safeUrl } from './security';
 import { listPages, type ContentView } from './content';
 import { publicPageIcon } from '../admin/icons';
 import { type PublicPageHierarchy } from './page-hierarchy';
-import { defaultTheme } from '../themes/nova';
+import { defaultTheme } from '../themes/default';
 import type { ThemeBundle } from './theme-manifest';
 import { activeThemeFor, applyLayout, loadTheme, renderWithTheme, themeAssetUrl } from './theme-store';
 import { variablesFor } from './tokens';
@@ -345,9 +345,8 @@ export async function renderTheme(
   const assetUrl = (path: string): string => themeAssetUrl(theme.slug, path.replace(/^\.?\//, ''));
   // Themes installed in the panel have their stylesheet stored as an asset, so a
   // v2 layout can link it (`{{{theme_css_url}}}`) instead of inlining it. The
-  // bundled copy of AMS Nova (used before an install has written its row) has no
-  // asset to link: its CSS is inlined, and every layout that asks for
-  // `{{{theme_css}}}` keeps working either way.
+  // bundled default theme is linked the same way: the asset route serves its
+  // files from the app when the file store has no copy.
   const cssUrl = `${assetUrl('style.css')}?v=${encodeURIComponent(theme.version)}`;
   // A per-item template (content.template) is resolved by the caller into
   // `opts.template`; when the current theme has no such template the default
@@ -441,26 +440,32 @@ export async function renderTheme(
     // and tell the admins (the banner is rendered by the panel, not here).
     console.error('theme render failed', theme.slug, err);
     markThemeFailure(theme.slug, err);
+    // The fallback is the bundled theme, so its stylesheet, script and settings
+    // are the bundled theme's own (the asset route serves them even when that
+    // theme is not installed) — never the failed theme's.
+    const fallbackAsset = (path: string): string => themeAssetUrl(defaultTheme.slug, path.replace(/^\.?\//, ''));
+    const fallbackOpts = { settings, assetUrl: fallbackAsset };
     const fallbackCss = defaultTheme.css.replace(/<\/style/gi, '<\\/style');
-    const safeInner = source ? renderWithTheme(defaultTheme, source, shared, { ...renderOpts, settings }).replace(/\{\{[\s\S]*?\}\}/g, '') : '';
+    const fallbackSource = defaultTheme.templates[opts.template]
+      ?? (opts.template === 'search' ? defaultTheme.templates.archive : undefined)
+      ?? defaultTheme.templates.page ?? '';
+    const safeInner = fallbackSource ? renderWithTheme(defaultTheme, fallbackSource, shared, fallbackOpts) : '';
     const fallbackContent = `${hierarchyMarkup.before}${safeInner || inner || ''}${hierarchyMarkup.after}`;
     return applyLayout(defaultTheme, opts.template, fallbackContent, {
       ...shared,
       content: fallbackContent,
       theme_css: fallbackCss,
-      theme_css_url: '',
+      theme_css_url: `${fallbackAsset('style.css')}?v=${encodeURIComponent(defaultTheme.version)}`,
       tokens_css: tokensBlock,
-      // The site's own tokens go *after* the theme stylesheet so they win, but
-      // before custom CSS so an author's final say still has the last word.
       head: buildHead(opts.meta, settings, url.origin, headExtra, nonce, tokensBlock, scheme),
-      footer: buildFooter(settings, theme, hooks.footer.join('\n'), nonce),
-    }, { ...renderOpts, settings });
+      footer: buildFooter(settings, defaultTheme, hooks.footer.join('\n'), nonce),
+    }, fallbackOpts);
   }
 }
 
 /**
  * Rendering failures are remembered per isolate so the Themes screen can show
- * "this theme failed, the site is falling back to AMS Nova".
+ * "this theme failed, the site is falling back to the bundled theme".
  */
 const themeFailures = new Map<string, { at: string; message: string }>();
 export function markThemeFailure(slug: string, err: unknown): void {

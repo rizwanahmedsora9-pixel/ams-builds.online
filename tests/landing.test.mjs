@@ -14,22 +14,24 @@ import { fileURLToPath } from 'node:url';
 import { landingPalettes, landingCssVars, schemeLayers } from '../dist/landing.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const themeCss = (slug) => readFileSync(join(root, 'src', 'themes', slug, 'style.css'), 'utf8');
+// The bundled theme is a package: its stylesheet sits where theme.json says.
+const BUNDLED = 'ahmed-pro-theme';
+const themeCss = (slug) => readFileSync(join(root, 'src', 'themes', slug, 'static', 'css', 'style.css'), 'utf8');
 const look = (slug, scheme = null) => ({ css: themeCss(slug), scheme });
 
 test('a theme\'s own palette is read through its var() chains, not invented', () => {
-  // AMS Nova declares plain values on `:root`; the welcome screen reads them
+  // The bundled theme declares plain values on `:root`; the welcome screen reads them
   // straight out of the stylesheet rather than guessing.
-  const nova = landingPalettes({}, look('nova')).light;
-  assert.equal(nova.bg, '#f4f6fb');
-  assert.equal(nova.fg, '#1a2238');
-  assert.equal(nova.brand, '#e94560');
+  const nova = landingPalettes({}, look(BUNDLED)).light;
+  assert.equal(nova.bg, '#f6f8fc');
+  assert.equal(nova.fg, '#111c2e');
+  assert.equal(nova.brand, '#2457d6');
   assert.equal(nova.surface, '#ffffff');
-  assert.equal(nova.radius, '14px', 'shapes are carried too');
+  assert.equal(nova.radius, '1rem', 'shapes are carried too');
 });
 
 test('every bundled theme resolves to a usable palette', () => {
-  for (const slug of ['nova']) {
+  for (const slug of [BUNDLED]) {
     const { light, dark } = landingPalettes({}, look(slug));
     for (const [name, palette] of [['light', light], ['dark', dark]]) {
       for (const key of ['bg', 'fg', 'muted', 'surface', 'line', 'brand', 'onBrand']) {
@@ -42,27 +44,27 @@ test('every bundled theme resolves to a usable palette', () => {
 });
 
 test('light and dark halves are read separately, and a light theme never gets dark copy', () => {
-  const { light, dark, paired } = landingPalettes({}, look('nova'));
-  assert.equal(paired, true, 'AMS Nova ships both halves');
-  assert.equal(light.bg, '#f4f6fb');
-  assert.equal(dark.bg, '#0d1320');
-  assert.equal(dark.fg, '#e9edf7');
+  const { light, dark, paired } = landingPalettes({}, look(BUNDLED));
+  assert.equal(paired, true, 'the bundled theme ships both halves');
+  assert.equal(light.bg, '#f6f8fc');
+  assert.equal(dark.bg, '#0c1322');
+  assert.equal(dark.fg, '#e8edf7');
 
   // The last declaration in a block has no trailing semicolon; it still counts.
-  const nova = landingPalettes({}, look('nova')).light;
-  assert.equal(nova.brand, '#e94560');
-  assert.equal(nova.radius, '14px');
+  const nova = landingPalettes({}, look(BUNDLED)).light;
+  assert.equal(nova.brand, '#2457d6');
+  assert.equal(nova.radius, '1rem');
 });
 
 test('a forced colour scheme collapses the pair, and a hand-switched theme is honoured', () => {
-  const forcedLight = landingPalettes({}, look('nova', 'light'));
+  const forcedLight = landingPalettes({}, look(BUNDLED, 'light'));
   assert.equal(forcedLight.paired, false, 'no media query when the site forces a scheme');
-  assert.equal(forcedLight.light.bg, '#f4f6fb');
+  assert.equal(forcedLight.light.bg, '#f6f8fc');
 
-  const forcedDark = landingPalettes({}, look('nova', 'dark'));
-  assert.equal(forcedDark.light.bg, '#0d1320', 'a forced dark site opens on the dark half');
+  const forcedDark = landingPalettes({}, look(BUNDLED, 'dark'));
+  assert.equal(forcedDark.light.bg, '#0c1322', 'a forced dark site opens on the dark half');
 
-  const css = landingCssVars(landingPalettes({}, look('nova')));
+  const css = landingCssVars(landingPalettes({}, look(BUNDLED)));
   assert.match(css, /@media \(prefers-color-scheme:dark\)\{#ams-landing-screen\{/, 'the browser switch is mirrored');
   assert.match(css, /html\[data-ams-scheme="light"\] #ams-landing-screen\{/, "a theme's own toggle can say light");
   assert.match(css, /html\[data-ams-scheme="dark"\] #ams-landing-screen\{/, 'and dark');
@@ -73,7 +75,7 @@ test('design tokens win over the theme, and a readable ink is picked for the bra
     token_bg: '#102030', token_text: '#f0f0f0', token_brand: '#f7d64a',
     token_radius: '18', token_scheme: 'dark',
   };
-  const palette = landingPalettes(tokens, look('nova')).light;
+  const palette = landingPalettes(tokens, look(BUNDLED)).light;
   assert.equal(palette.bg, '#102030', 'the admin background');
   assert.equal(palette.brand, '#f7d64a', 'the admin brand');
   assert.equal(palette.radius, '18px');
@@ -83,8 +85,8 @@ test('design tokens win over the theme, and a readable ink is picked for the bra
   assert.match(palette.surface, /^color-mix\(in srgb, #102030 /);
 
   // Button ink is derived when the theme does not declare one: a pale gold
-  // brand needs dark ink, a navy one needs white. (AMS Nova declares its own
-  // `--on-brand`, so this uses a bare stylesheet to exercise the derivation.)
+  // brand needs dark ink, a navy one needs white. (A bare stylesheet keeps the
+  // derivation independent of any one theme.)
   const bare = { css: ':root{--bg:#102030;--text:#f0f0f0;--brand:#e94560}', scheme: 'dark' };
   assert.equal(landingPalettes({ token_brand: '#f7d64a' }, bare).light.onBrand, '#0b1220', 'button labels stay readable on a light brand');
   assert.equal(landingPalettes({ token_brand: '#1a3d8f' }, bare).light.onBrand, '#ffffff');

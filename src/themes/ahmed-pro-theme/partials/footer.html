@@ -1,0 +1,35 @@
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <div class="footer-col footer-about">
+      <a class="brand brand--footer" href="/" aria-label="{{site.title}} home">
+        {{#if site.logo}}<img class="brand__logo" src="{{site.logo}}" alt="{{site.title}}">{{else}}<span class="brand__mark" aria-hidden="true"></span>{{/if}}
+        <span class="brand__text"><strong>{{site.title}}</strong></span>
+      </a>
+      {{#if site.tagline}}<p>{{site.tagline}}</p>{{/if}}
+      <ul class="contact-list">
+        {{#if theme.contact_address}}<li><svg class="icon" aria-hidden="true"><use href="#i-pin"></use></svg><span>{{theme.contact_address}}</span></li>{{/if}}
+        {{#if theme.contact_phone}}<li><svg class="icon" aria-hidden="true"><use href="#i-phone"></use></svg><a href="tel:{{theme.contact_phone}}">{{theme.contact_phone}}</a></li>{{/if}}
+        {{#if theme.contact_email}}<li><svg class="icon" aria-hidden="true"><use href="#i-mail"></use></svg><a href="mailto:{{theme.contact_email}}">{{theme.contact_email}}</a></li>{{/if}}
+      </ul>
+      <div class="social social--footer" aria-label="Social links">
+        {{#if theme.social_facebook}}<a class="social__link" href="{{theme.social_facebook}}" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><svg class="icon" aria-hidden="true"><use href="#i-facebook"></use></svg></a>{{/if}}
+        {{#if theme.social_instagram}}<a class="social__link" href="{{theme.social_instagram}}" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><svg class="icon" aria-hidden="true"><use href="#i-instagram"></use></svg></a>{{/if}}
+        {{#if theme.social_x}}<a class="social__link" href="{{theme.social_x}}" target="_blank" rel="noopener noreferrer" aria-label="X"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></a>{{/if}}
+        {{#if theme.social_youtube}}<a class="social__link" href="{{theme.social_youtube}}" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><svg class="icon" aria-hidden="true"><use href="#i-youtube"></use></svg></a>{{/if}}
+        {{#if theme.social_linkedin}}<a class="social__link" href="{{theme.social_linkedin}}" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn"><svg class="icon" aria-hidden="true"><use href="#i-linkedin"></use></svg></a>{{/if}}
+        {{#if theme.social_github}}<a class="social__link" href="{{theme.social_github}}" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><svg class="icon" aria-hidden="true"><use href="#i-github"></use></svg></a>{{/if}}
+        {{#if theme.social_whatsapp}}<a class="social__link" href="https://wa.me/{{theme.social_whatsapp}}" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp"><svg class="icon" aria-hidden="true"><use href="#i-whatsapp"></use></svg></a>{{/if}}
+      </div>
+      {{> social}}
+    </div>
+    {{#if menu.footer}}<nav class="footer-col" aria-label="Footer navigation"><h2 class="footer-title">Quick links</h2>{{#each menu.footer}}<a href="{{url}}">{{label}}</a>{{/each}}</nav>{{/if}}
+    {{#if pages}}<nav class="footer-col footer-col--pages" aria-label="Pages"><h2 class="footer-title">Pages</h2>{{#each pages}}<a href="{{url}}">{{title}}</a>{{/each}}</nav>{{/if}}
+  </div>
+  <div class="site-footer__bottom">
+    <div class="site-footer__bottom-inner">
+      <small>© {{year}} {{site.title}}. All rights reserved.</small>
+      {{#if theme.footer_note}}<small>{{theme.footer_note}}</small>{{/if}}
+      <small>Powered by Edge CMS</small>
+    </div>
+  </div>
+</footer>

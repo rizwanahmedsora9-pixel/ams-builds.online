@@ -98,16 +98,13 @@ const themeId = async (name) => {
   return Number(row[1]);
 };
 
-// Reads the primary menu. Nova renders it in the sidebar's first side-group;
-// older themes put it in a site-nav in the header. Only the first group is
-// read so the page tree (a second group) is not included.
+// Reads the primary menu: the top-level links of the header's site-nav. A
+// dropdown's links (inside `.subnav`) are sub-menu items, not menu entries.
 const nav = (htmlText) => {
-  const side = htmlText.match(/<nav class="side-nav"[^]*?<\/nav>/)?.[0];
-  const header = htmlText.match(/<nav class="site-nav"[^]*?<\/nav>/)?.[0];
-  const block = side ?? header;
+  const block = htmlText.match(/<nav class="site-nav"[^]*?<\/nav>/)?.[0];
   assert.ok(block, 'a navigation block is present');
-  const group = block.match(/<div class="side-group">[\s\S]*?<\/div>/)?.[0] ?? block;
-  return [...group.matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
+  const top = block.replace(/<div class="subnav">[\s\S]*?<\/div>/g, '');
+  return [...top.matchAll(/<a [^>]*\bhref="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
 };
 
 const currentPostUrl = () => {
@@ -125,6 +122,8 @@ const INSTALL = {
   title: 'E2E Test Site', domain: 'example.com', slug: 'admin-panel',
 };
 const state = {};
+// The one theme the app ships: the installer activates it and the store lists it.
+const BUNDLED = { slug: 'ahmed-pro-theme', name: 'Ahmed Pro Theme' };
 
 test('1. fresh start: storage is healthy and every URL leads to the installer', async () => {
   const health = JSON.parse((await anon('/api/health')).text);
@@ -169,7 +168,7 @@ test('4. public site shows the themed sample home page and caches it', async () 
   assert.equal(first.status, 200);
   assert.match(first.text, /<title>E2E Test Site<\/title>/);
   assert.match(first.text, /Welcome to E2E Test Site/);
-  assert.match(first.text, /<a href="\/blog"/, 'seeded menu is rendered');
+  assert.match(first.text, /<a class="nav-link" href="\/blog"/, 'seeded menu is rendered');
   assert.equal(first.headers.get('x-cache'), 'MISS');
   assert.equal((await anon('/')).headers.get('x-cache'), 'HIT');
   assert.equal((await anon('/blog')).status, 200);
@@ -365,7 +364,8 @@ test('8. posts: categories, tags, featured image, archives and JSON API', async 
   assert.equal(videoPage.status, 200);
   assert.equal((videoPage.text.match(/class="html-block"/g) || []).length, 2, 'multiple HTML blocks are rendered');
   assert.match(videoPage.text, /<iframe src="https:\/\/www\.youtube-nocookie\.com\/embed\/dQw4w9WgXcQ" title="Demo video"/);
-  assert.match(videoPage.text, /aspect-ratio:16\/9/, 'video embed is responsive');
+  const videoCss = (await anon(videoPage.text.match(/<link rel="stylesheet" href="([^"]+)"/)[1])).text;
+  assert.match(videoCss, /\.video-responsive\{[^}]*aspect-ratio:16\/9/, 'video embed is responsive');
   assert.equal((await adminPost(`/posts/${videoId}/delete`, {})).status, 303, 'the video post is deleted');
   log(`post #${state.postId} on /blog, 2 category pages, tag page, home page and API; HTML blocks and YouTube embed rendered`);
 });
@@ -717,13 +717,13 @@ test('10f. the landing screen wears the active theme, and Enter site sits on the
     return { html, css, vars };
   };
 
-  // AMS Nova, the bundled theme: its light palette, not a hard-coded navy.
+  // The bundled theme: its light palette, not a hard-coded navy.
   const nova = await themed();
-  assert.equal(nova.vars.bg, '#f4f6fb', "the screen takes the active theme's background");
-  assert.equal(nova.vars.fg, '#1a2238', 'and its text colour');
-  assert.equal(nova.vars.brand, '#e94560', 'and its brand colour');
+  assert.equal(nova.vars.bg, '#f6f8fc', "the screen takes the active theme's background");
+  assert.equal(nova.vars.fg, '#111c2e', 'and its text colour');
+  assert.equal(nova.vars.brand, '#2457d6', 'and its brand colour');
   assert.match(nova.css, /@media \(prefers-color-scheme:dark\)\{#ams-landing-screen\{/, "a theme with a dark half carries both, on the browser's own switch");
-  assert.match(nova.css, /--ams-bg:#0d1320/, "the dark half is the theme's dark background");
+  assert.match(nova.css, /--ams-bg:#0c1322/, "the dark half is the theme's dark background");
   assert.doesNotMatch(nova.html, /#090d16/, 'the old fixed navy gradient is gone');
   assert.match(nova.css, /html\[data-ams-scheme="dark"\] #ams-landing-screen\{/, "a hand-switched theme's choice reaches the screen too");
   assert.match(nova.html, /attributeFilter:\['data-theme'\]/, 'and is followed when the theme toggle is pressed');
@@ -788,7 +788,7 @@ test('12a. menus: pages join the main menu with one tick; reorder, custom links,
   assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog', 'About=/about', 'Services=/services', 'Guides=/guides', 'Contact=/contact'], 'seeded menu');
   const made = await adminPost('/pages/save', { title: 'Projects', body: '<p>What we do</p>', status: 'published', in_menu: 1 });
   const servicesId = idFrom(made.location);
-  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog', 'About=/about', 'Services=/services', 'Guides=/guides', 'Contact=/contact', 'Projects=/projects'], 'ticked page appears in the sidebar');
+  assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Blog=/blog', 'About=/about', 'Services=/services', 'Guides=/guides', 'Contact=/contact', 'Projects=/projects'], 'ticked page appears in the menu');
   assert.match((await get(`${admin}/pages/${servicesId}`)).text, /name="in_menu" value="1" checked/);
   assert.match((await get(`${admin}/pages/new`)).text, /name="in_menu" value="1" checked/, 'new pages start ticked');
 
@@ -813,9 +813,9 @@ test('12a. menus: pages join the main menu with one tick; reorder, custom links,
   await adminPost('/menus/new', { name: 'Footer links' });
   const footerId = Math.max(...[...(await get(`${admin}/menus`)).text.matchAll(/menus\/(\d+)\/save/g)].map((m) => Number(m[1])));
   await adminPost(`/menus/${footerId}/save`, { name: 'Footer links', location: 'footer', label: ['Privacy'], url: ['/privacy'] });
-  assert.match((await anon('/')).text, /<nav class="foot-col" aria-label="Footer menu"[^]*<a href="\/privacy">Privacy<\/a>/);
+  assert.match((await anon('/')).text, /<nav class="footer-col" aria-label="Footer navigation">[^]*?<a href="\/privacy">Privacy<\/a>/);
   await adminPost(`/menus/${footerId}/delete`, {});
-  assert.doesNotMatch((await anon('/')).text, /aria-label="Footer menu"/);
+  assert.doesNotMatch((await anon('/')).text, /aria-label="Footer navigation"/);
 
   // unticking removes the link; deleting a page removes it too
   await adminPost('/pages/save', { id: servicesId, title: 'Projects', slug: 'what-we-do', body: '<p>x</p>', status: 'published' });
@@ -824,7 +824,7 @@ test('12a. menus: pages join the main menu with one tick; reorder, custom links,
   await adminPost(`/pages/${servicesId}/delete`, {});
   await adminPost(`/pages/${idFrom(draft.location)}/delete`, {});
   assert.deepEqual(nav((await anon('/')).text), ['Home=/', 'Docs=https://example.org/docs']);
-  log('tick adds page to sidebar, link follows slug, reorder/rename/custom link saved, unsafe link dropped, footer menu works');
+  log('tick adds page to the menu, link follows slug, reorder/rename/custom link saved, unsafe link dropped, footer menu works');
 });
 
 test('12a1. pages: parent/child hierarchy, hidden header children, and public browsing', async () => {
@@ -937,17 +937,17 @@ test('12a1. pages: parent/child hierarchy, hidden header children, and public br
   log('page tree, parent picker, cycle guard, automatic child cards, breadcrumbs, and menu hiding work');
 });
 
-test('12b. themes: the Nova theme previews the real site and a custom upload round-trips', async () => {
+test('12b. themes: the bundled theme previews the real site and a custom upload round-trips', async () => {
   const manager = await get(`${admin}/themes`);
   const activeRows = [...manager.text.matchAll(/<li style="flex-wrap:wrap" data-theme-id="(\d+)" data-theme-slug="([^"]+)">([\s\S]*?)<\/li>/g)];
   const activeRow = activeRows.find((row) => /badge published/.test(row[3]));
   assert.ok(activeRow, 'an active installed theme exists');
-  assert.equal(activeRow[2], 'nova', 'the active theme is Nova');
+  assert.equal(activeRow[2], BUNDLED.slug, 'the active theme is the bundled one');
 
-  // The Nova store card offers a live preview of the real site.
-  const previewPanel = await get(`${admin}/themes/preview/nova`);
+  // The store card offers a live preview of the real site.
+  const previewPanel = await get(`${admin}/themes/preview/${BUNDLED.slug}`);
   assert.match(previewPanel.text, /id="theme-preview-frame"/);
-  assert.match((await get('/?preview=1&theme=nova')).text, /class="hero"/, 'the Nova preview renders existing CMS data');
+  assert.match((await get(`/?preview=1&theme=${BUNDLED.slug}`)).text, /class="hero"/, 'the preview renders existing CMS data');
 
   // A custom theme uploads, appears in the registry, and can be switched to.
   const custom = {
@@ -966,7 +966,7 @@ test('12b. themes: the Nova theme previews the real site and a custom upload rou
   await adminPost(`/themes/${sampleRow[1]}/activate`, {});
   assert.match((await anon('/')).text, /data-theme="json"/);
   await adminPost(`/themes/${activeRow[1]}/activate`, {});
-  assert.match((await anon('/')).text, /class="hero"/, 'switching back to Nova restores the hero');
+  assert.match((await anon('/')).text, /class="hero"/, 'switching back restores the hero');
   await adminPost(`/themes/${sampleRow[1]}/delete`, {});
 });
 
@@ -1041,81 +1041,111 @@ test('12c. themes: upload JSON and zip, activate, replace, download, delete', as
   assert.equal(manage.status, 200);
   assert.match(manage.text, /data-asset|\/theme-assets\/zip-theme\/style\.css/, 'the manager lists the stylesheet asset');
   assert.match((await get(`${admin}/themes/zip-theme/validate`)).text, /No problems found|Warning/, 'the validator reports on an installed theme');
-  const baseId = await themeId('AMS Nova');
+  const baseId = await themeId(BUNDLED.name);
   await adminPost(`/themes/${baseId}/activate`, {});
   assert.match((await anon('/')).text, /class="site-header"/);
   assert.match(decodeURIComponent((await adminPost(`/themes/${zipId}/delete`, {})).location), /deleted/);
   assert.match(decodeURIComponent((await adminPost(`/themes/${jsonId}/delete`, {})).location), /deleted/);
-  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only AMS Nova is left');
+  assert.equal(((await get(`${admin}/themes`)).text.match(/class="btn ghost small" href="[^"]+\/download"/g) || []).length, 1, 'only the bundled theme is left');
   log('5 bad uploads rejected with reasons; JSON + zip themes installed, activated, replaced live, downloaded, deleted');
 });
 
-test('12b1. AMS Nova: hero home, clean pages, and labelled ad slots on posts', async () => {
-  const at = (html) => (html.match(/<main id="main">[\s\S]*?<\/main>/) || [''])[0];
-
-  // The home page: a full hero, the sample page body, post cards and the footer,
+test('12b1. the bundled theme: hero home, clean pages, and settings that reach the page', async () => {
+  // The home page: a full hero, post cards, the header menu and the footer,
   // with nothing left unrendered.
   const home = await anon('/');
   assert.match(home.text, /<section class="hero">[^]*<h1>/);
-  assert.match(home.text, /class="sidebar"/, 'the sidebar navigation is present');
+  assert.match(home.text, /<nav class="site-nav" id="primary-navigation"/, 'the header navigation is present');
+  assert.match(home.text, /<div class="topbar">/, 'the top bar is on by default');
+  assert.match(home.text, /class="icon-btn theme-toggle"/, 'and so is the light/dark button');
+  assert.match(home.text, /--starter-accent:#2457d6;--starter-width:1160px/, 'the accent and width defaults reach the page');
   assert.doesNotMatch(home.text, /\{\{/, 'no template tags leak into the page');
 
   // A page renders with its title and content in the same shell.
   const about = await anon('/about');
   assert.equal(about.status, 200);
-  assert.match(about.text, /class="entry-header"/);
+  assert.match(about.text, /<header class="page-hero">[^]*<h1>About<\/h1>/);
   assert.match(about.text, /About us/);
   assert.doesNotMatch(about.text, /\{\{/, 'the page renders cleanly');
 
-  // Ad slots are off by default and exist only on posts.
-  assert.equal((home.text.match(/class="ad-slot"/g) || []).length, 0, 'no ad slot on the home page');
-  assert.equal((at((await anon(currentPostUrl())).text).match(/class="ad-slot"/g) || []).length, 0, 'a post prints no ad slot until one is filled in');
+  // Contact details and social links are off until they are filled in.
+  assert.doesNotMatch(home.text, /class="social__link"/, 'no social icon without a link');
+  assert.doesNotMatch(home.text, /mailto:/, 'no contact email until one is set');
+  const settingsScreen = await get(`${admin}/appearance`);
+  for (const key of ['accent', 'content_width', 'show_topbar', 'hero_title', 'contact_email', 'social_whatsapp']) {
+    assert.match(settingsScreen.text, new RegExp(`data-theme-setting="${key}"`), `the Customizer offers ${key}`);
+  }
   await adminPost('/appearance', {
-    ad_slot_1: '<ins class="adsbygoogle" data-ad-slot="111"></ins>',
-    ad_slot_2: '<ins class="adsbygoogle" data-ad-slot="222"></ins>',
+    accent: '#0a7a52', hero_title: 'Built for the test', hero_cta2_label: 'Contact us', hero_cta2_url: '/contact',
+    contact_email: 'hello@example.com', social_facebook: 'https://example.com/fb',
   });
-  const post = at((await anon(currentPostUrl())).text);
-  assert.match(post, /<ins class="adsbygoogle" data-ad-slot="111">/, 'the first ad slot lands after the article');
-  assert.match(post, /<ins class="adsbygoogle" data-ad-slot="222">/, 'the second ad slot lands at the end');
-  assert.doesNotMatch((await anon('/')).text, /<ins[^>]*adsbygoogle/, 'the home page is never monetised');
-  await adminPost('/appearance', { ad_slot_1: '', ad_slot_2: '' });
+  const filled = (await anon('/')).text;
+  assert.match(filled, /--starter-accent:#0a7a52/, 'the accent colour is applied');
+  assert.match(filled, /<h1>Built for the test<\/h1>/, 'the hero headline is the saved one');
+  assert.match(filled, /<a class="button button--ghost" href="\/contact">Contact us<\/a>/, 'the second hero button appears once labelled');
+  assert.match(filled, /href="mailto:hello@example.com"/, 'the contact email is shown');
+  assert.equal((filled.match(/class="social__link" href="https:\/\/example.com\/fb"/g) || []).length, 2, 'the social icon is in the top bar and the footer');
+
+  // A toggle that is on by default can be switched off (an unticked box sends "0").
+  await adminPost('/appearance', { show_topbar: '0', show_theme_toggle: '0' });
+  const bare = (await anon('/')).text;
+  assert.doesNotMatch(bare, /<div class="topbar">/, 'the top bar can be hidden');
+  assert.doesNotMatch(bare, /class="icon-btn theme-toggle"/, 'and the light/dark button too');
+  assert.match(bare, /href="mailto:hello@example.com"/, 'the footer keeps the contact details');
+
+  await adminPost('/appearance', {
+    accent: '#2457d6', hero_title: 'Welcome to our website', hero_cta2_label: '', hero_cta2_url: '',
+    contact_email: '', social_facebook: '', show_topbar: '1', show_theme_toggle: '1',
+  });
+  assert.match((await anon('/')).text, /<div class="topbar">/, 'the defaults are back');
 });
 
-test('12c. theme store: Nova is the single bundled theme and installs with one click', async () => {
+test('12c. theme store: one bundled theme, and it installs with one click', async () => {
   const store = await get(`${admin}/themes`);
-  // `<h3>AMS Nova <small …` — the version suffix is not part of the name.
+  // `<h3>Name <small …` — the version suffix is not part of the name.
   const storeCards = (html) => [...html.matchAll(/<h3>([^<]+?)\s*<small/g)].map((m) => m[1]);
-  assert.deepEqual(storeCards(store.text), ['AMS Nova'], 'Nova is the only store card');
-  // Nova is already installed (the installer activates it), so its card renders
-  // an Activate form, not Install / Install-and-activate.
-  assert.match(store.text, /class="store-item__shot"/);
-  // Any install form on the page targets Nova only (an active theme shows no
+  assert.deepEqual(storeCards(store.text), [BUNDLED.name], 'the bundled theme is the only store card');
+  // It is already installed (the installer activates it), and its card shows the
+  // screenshot the package ships.
+  assert.match(store.text, new RegExp(`class="store-item__shot" style="background-image:url\\(/theme-assets/${BUNDLED.slug}/screenshot\\.png`));
+  const shot = await anon(`/theme-assets/${BUNDLED.slug}/screenshot.png`);
+  assert.equal(shot.status, 200);
+  assert.equal(shot.headers.get('content-type'), 'image/png');
+  // Any install form on the page targets it only (an active theme shows no
   // install button of its own; the install route is exercised below).
   const installLinks = [...store.text.matchAll(/store\/([a-z0-9-]+)\/install/g)].map((m) => m[1]);
-  assert.ok(installLinks.every((slug) => slug === 'nova'), 'no theme other than Nova is offered');
+  assert.ok(installLinks.every((slug) => slug === BUNDLED.slug), 'no other theme is offered');
+  assert.doesNotMatch(store.text, /AMS Nova|store\/nova\//, 'the previous bundled theme is gone');
 
-  // Reinstalling Nova keeps it the active theme.
-  assert.match((await adminPost('/themes/store/nova/install', { activate: 1 })).location, /AMS Nova is now your active theme/);
-  assert.match((await anon('/')).text, /class="hero"/, 'Nova renders its hero after (re)activation');
+  // Reinstalling keeps it the active theme.
+  assert.match((await adminPost(`/themes/store/${BUNDLED.slug}/install`, { activate: 1 })).location, new RegExp(`${BUNDLED.name} is now your active theme`));
+  assert.match((await anon('/')).text, /class="hero"/, 'it renders its hero after (re)activation');
 
-  // Every page kind renders from Nova's one shell, with no leaked tags.
-  const paths = ['/', '/blog', `/${new Date().getUTCFullYear()}/${String(new Date().getUTCMonth() + 1).padStart(2, '0')}/launch-day-more`, '/about', '/nowhere'];
+  // Every page kind renders from the one shell, with no leaked tags.
+  const paths = ['/', '/blog', `/${new Date().getUTCFullYear()}/${String(new Date().getUTCMonth() + 1).padStart(2, '0')}/launch-day-more`, '/about', '/search?q=launch', '/nowhere'];
   for (const path of paths) {
     const res = await anon(path);
     assert.equal(res.status, path === '/nowhere' ? 404 : 200, path);
-    assert.match(res.text, /class="sidebar"/, `${path} has the sidebar navigation`);
+    assert.match(res.text, /<header class="site-header">/, `${path} has the header`);
     assert.match(res.text, /<footer class="site-footer"/, `${path} has the footer`);
     assert.doesNotMatch(res.text, /\{\{/, `${path} has no unrendered template tags`);
     assert.doesNotMatch(res.text, /https?:\/\/(?!127\.0\.0\.1|example\.)/, `${path} loads nothing external`);
-    // Every inline script the theme ships (the dark/light toggle and the mobile
-    // drawer) carries the per-response CSP nonce.
+    // The stylesheet and the script are the theme's own served assets…
+    assert.match(res.text, new RegExp(`<link rel="stylesheet" href="/theme-assets/${BUNDLED.slug}/style\\.css\\?v=`), `${path} links the theme stylesheet`);
+    assert.match(res.text, new RegExp(`<script defer src="/theme-assets/${BUNDLED.slug}/static/js/theme\\.js"></script>`), `${path} loads the theme script`);
+    // …and every inline script (the colour-scheme bootstrap) carries the
+    // per-response CSP nonce.
     for (const tag of res.text.match(/<script\b[^>]*>/g) || []) {
-      assert.match(tag, /\bnonce="/, `${path} only ships nonce-stamped scripts`);
+      assert.match(tag, /\bnonce="|\bsrc="\/theme-assets\//, `${path} only ships nonce-stamped or same-origin scripts`);
     }
   }
+  const script = await anon(`/theme-assets/${BUNDLED.slug}/static/js/theme.js`);
+  assert.equal(script.status, 200);
+  assert.match(script.headers.get('content-type'), /^text\/javascript/);
+  assert.match(script.text, /ahmed-theme/, 'the script is the package file');
 
   assert.match((await adminPost('/themes/store/nope/install', {})).text, /not in the store/);
-  log('the store lists one theme, Nova; it reinstalls, activates, and renders every page from one shell');
+  log('the store lists one theme; it reinstalls, activates, and renders every page from one shell');
 });
 
 test('12d. comments: public form, moderation, approval, replies, spam and delete', async () => {
@@ -1669,8 +1699,7 @@ test('17. the editor markup for images, links, blocks and breaks survives the sa
   const url = JSON.parse((await anon(`/api/posts/${slug}`)).text).url;
   // Render with a known theme: earlier tests leave a fixture theme active, and
   // this test is about the saved markup, not about which theme is current.
-  // The bundled theme is AMS Nova (store slug `nova`).
-  const page = await get(`${url}?preview=1&theme=nova`);
+  const page = await get(`${url}?preview=1&theme=${BUNDLED.slug}`);
   assert.equal(page.status, 200, `${url} renders in the bundled theme`);
 
   // Alignment + width are the two things the editor's bar writes.
@@ -1690,9 +1719,9 @@ test('17. the editor markup for images, links, blocks and breaks survives the sa
   assert.match(page.text, /<div class="html-block"><p>Custom block<\/p><\/div>/);
   assert.match(page.text, /youtube-nocookie.com\/embed\/dQw4w9WgXcQ/);
   // The bundled theme styles the break and the figure placement.
-  const novaCss = (await anon('/theme-assets/nova/style.css')).text || '';
-  assert.match(novaCss, /hr\.page-break\s*\{\s*border-top-style:\s*dashed/);
-  assert.match(novaCss, /figure\.image-block\s*\{\s*margin:\s*1\.5em auto/);
+  const themeCss = (await anon(`/theme-assets/${BUNDLED.slug}/style.css`)).text || '';
+  assert.match(themeCss, /hr\.page-break\s*\{\s*border-top-style:\s*dashed/);
+  assert.match(themeCss, /figure\.image-block\s*\{\s*margin:\s*1\.5em auto/);
 
   // An admin saves raw HTML by design; an author or editor goes through the
   // sanitizer, which keeps exactly the declarations the editor writes and
@@ -1798,8 +1827,8 @@ test('17b. page-specific posts: assign to one or more pages/sub-pages and hide f
   const hubPage = await anon('/guides-hub');
   assert.doesNotMatch(hubPage.text, /Exclusive Subpage Post/, 'parent page does not show posts assigned only to its children');
 
-  // Switch back to AMS Nova so /blog and /category/* have full archive templates.
-  const novaId = await themeId('AMS Nova');
+  // Switch back to the bundled theme so /blog and /category/* have full archive templates.
+  const novaId = await themeId(BUNDLED.name);
   await adminPost(`/themes/${novaId}/activate`, {});
 
   const blogIndex = await anon('/blog');
@@ -1825,9 +1854,9 @@ test('17b. page-specific posts: assign to one or more pages/sub-pages and hide f
   assert.equal(apiSub.total, 1);
   assert.equal(apiSub.posts[0].slug, 'exclusive-subpage-post');
 
-  // Direct post URL still works and links back to the assigned page in AMS Nova.
+  // Direct post URL still works and links back to the assigned page in the bundled theme.
   const postView = JSON.parse((await anon('/api/posts/exclusive-subpage-post')).text);
-  const single = await get(`${postView.url}?preview=1&theme=nova`);
+  const single = await get(`${postView.url}?preview=1&theme=${BUNDLED.slug}`);
   assert.equal(single.status, 200);
   assert.match(single.text, /Only on selected sub-pages\./);
   assert.match(single.text, /Back to (Android|Python) Subpage/);

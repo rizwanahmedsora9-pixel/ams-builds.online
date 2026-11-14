@@ -125,7 +125,9 @@ function themeSettingField(s: ThemeSetting, value: string): Raw {
   const label = html`<label for="${id}">${s.label}${s.help ? html` <span class="field__help">${s.help}</span>` : ''}</label>`;
   switch (s.type) {
     case 'toggle':
-      return html`<label class="check" for="${id}"><input type="checkbox" id="${id}" name="${s.key}" value="1"${value === '1' ? raw(' checked') : raw('')} data-theme-setting="${s.key}"> ${s.label}</label>`;
+      // The hidden field makes an unticked box arrive as "0": without it the key
+      // is absent from the form and a toggle could never be switched off.
+      return html`<label class="check" for="${id}"><input type="hidden" name="${s.key}" value="0"><input type="checkbox" id="${id}" name="${s.key}" value="1"${value === '1' ? raw(' checked') : raw('')} data-theme-setting="${s.key}"> ${s.label}</label>`;
     case 'textarea':
       return html`<div class="tok-field">${label}<textarea id="${id}" name="${s.key}" rows="4" data-theme-setting="${s.key}">${value}</textarea></div>`;
       return html`<div class="tok-field">${label}<textarea id="${id}" name="${s.key}" rows="6" data-theme-setting="${s.key}">${value}</textarea></div>`;
@@ -266,7 +268,7 @@ appearance.post('/appearance', async (c) => {
   for (const st of theme.manifest.settings) {
     if (!f.has(st.key)) continue;
     const rawValue = st.type === 'toggle'
-      ? (String(f.get(st.key) ?? '') === '1' ? '1' : '')
+      ? (f.getAll(st.key).some((v) => String(v) === '1') ? '1' : '')
       : String(f.get(st.key) ?? '').slice(0, 2000);
     themeRows.push({ key: st.key, value: rawValue });
   }
@@ -344,7 +346,7 @@ appearance.post('/appearance/preview', async (c) => {
   const proposedTheme: Record<string, string> = {};
   for (const st of theme.manifest.settings) {
     if (!f.has(st.key)) continue;
-    proposedTheme[st.key] = st.type === 'toggle' ? (String(f.get(st.key)) === '1' ? '1' : '') : String(f.get(st.key) ?? '').slice(0, 500);
+    proposedTheme[st.key] = st.type === 'toggle' ? (f.getAll(st.key).some((v) => String(v) === '1') ? '1' : '') : String(f.get(st.key) ?? '').slice(0, 500);
   }
   const settingsOverrides = diff(proposedTheme, resolveSettings(theme.manifest, savedTheme));
 

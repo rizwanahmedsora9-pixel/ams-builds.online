@@ -1,0 +1,13 @@
+<header class="page-hero">
+  <div class="page-hero__inner">
+    <p class="eyebrow">Browse</p>
+    <h1>{{archive.title}}</h1>
+  </div>
+</header>
+<section class="content-wide archive-content">
+  {{#if posts}}<div class="post-grid">{{#each posts}}<article class="post-card">{{#if featured_image}}<a class="post-card__media" href="{{url}}" tabindex="-1" aria-hidden="true"><img class="post-card__image" src="{{featured_image}}" alt="{{featured_alt}}" loading="lazy"></a>{{/if}}<div class="post-card__body"><p class="meta"><svg class="icon" aria-hidden="true"><use href="#i-calendar"></use></svg><span>{{date}}</span></p><h2><a href="{{url}}">{{title}}</a></h2><p class="post-card__excerpt">{{excerpt}}</p><a class="read-more" href="{{url}}">Read more <svg class="icon icon--dir" aria-hidden="true"><use href="#i-arrow"></use></svg></a></div></article>{{/each}}</div>{{else}}<p class="empty">There is nothing published in this archive yet.</p>{{/if}}
+  <nav class="pagination" aria-label="Pagination">
+    {{#if pagination.prev}}<a class="button button--quiet" href="{{pagination.prev}}"><svg class="icon icon--dir-back" aria-hidden="true"><use href="#i-arrow-left"></use></svg><span>Newer posts</span></a>{{/if}}
+    {{#if pagination.next}}<a class="button button--quiet" href="{{pagination.next}}"><span>Older posts</span><svg class="icon icon--dir" aria-hidden="true"><use href="#i-arrow"></use></svg></a>{{/if}}
+  </nav>
+</section>
