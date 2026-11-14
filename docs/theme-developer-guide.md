@@ -8,8 +8,8 @@ plain files, partials are files too, the stylesheet is served as an asset rather
 than inlined, and every helper is a pure function over data the CMS supplies — no
 template can execute code.
 
-Read this alongside the two themes in `src/themes/journal/` and
-`src/themes/portfolio/`, which are small, complete examples of everything below.
+Read this alongside the bundled default theme in `src/themes/ahmed-pro-theme/`,
+which is a complete version 3 package and an example of everything below.
 The panel itself is described in the [Panel Guide](panel-guide.md); the plan that
 built this is in [the roadmap](panel-overhaul-roadmap.md).
 
@@ -43,7 +43,7 @@ built this is in [the roadmap](panel-overhaul-roadmap.md).
 
 Upload a `.zip` with this `theme.json` next to the files it names (or a single `.json` bundle, the way
 themes were written before — those still load). Only `base` — or a `parent` to inherit from — is required;
-anything else falls back to AMS 1 (the bundled default theme). `partials/header.html` is picked up without being declared, and
+anything else falls back to the bundled default theme (Ahmed Pro Theme). `partials/header.html` is picked up without being declared, and
 everything under `assets/` is stored as a theme asset.
 
 **Limits:** 6 MB upload, 512 KB per asset, 80 assets, PNG/JPEG/GIF/WebP/AVIF/ICO, WOFF/WOFF2/TTF/OTF and a
@@ -114,7 +114,7 @@ slot) before it ever goes live.
 - **Local edits vs the store** — if you edit a theme in the panel that the store also ships, the store shows
   **Update available vX → vY** with the changelog, and asks whether to keep your changes, replace them with
   the store version, or save yours as a copy under a new slug.
-- **A theme that throws** while rendering cannot take the site down: the page falls back to AMS 1 (the bundled default theme) and
+- **A theme that throws** while rendering cannot take the site down: the page falls back to the bundled default theme (Ahmed Pro Theme) and
   the Themes screen says which theme failed and why.
 - Themes contain markup, so only install themes you trust.
 

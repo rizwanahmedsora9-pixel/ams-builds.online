@@ -14,7 +14,7 @@ A WordPress-style CMS that runs as one Cloudflare Worker (TypeScript + Hono) ser
 | 4 | Panel overhaul: design system, lists, dashboard (Phase 0–2 of `docs/panel-overhaul-roadmap.md`) — revisions, autosave, edit locks, media picker, page order | **done (0.5.0)** |
 | 5 | Theme platform: theme packages with assets, template engine v2, manifest v2, inheritance, theme versions and CSP (Phase 3 of the roadmap) | **done (0.6.0)** |
 | 6 | Appearance hub and live Customizer: design tokens, signed-cookie preview, per-theme settings, widget areas, per-page templates, Identity (Phase 4 of the roadmap) | **done (0.7.0)** |
-| 7 | Theme store & lifecycle: screenshots, live preview, in-panel file editor, zip export, rollback, two new bundled themes (Phase 5 of the roadmap) | **done (0.8.0)** |
+| 7 | Theme store & lifecycle: screenshots, live preview, in-panel file editor, zip export, rollback (Phase 5 of the roadmap) | **done (0.8.0)** |
 | 8 | Governance and performance: audit log, capabilities instead of hard-coded roles, enforced performance budgets, panel strings in one catalogue, export v2 (Phase 6 of the roadmap) | **done (0.8.0)** |
 | 9 | The writer's editor: a full formatting bar with shortcuts, a link dialog, image blocks with caption/alt/link, drag anchors and paste-or-drop upload, paste-as-text, page breaks, live word count and slug preview, mark-up tidying on save | **done (0.9.0)** |
 
@@ -534,22 +534,23 @@ becomes controls with no code — are in the [Panel Guide](docs/panel-guide.md#a
 validator. A theme package can ship templates, partials, a stylesheet and binary assets (logo, fonts, one
 `theme.js`), and a theme can inherit from another one.
 
-**AMS 1 is the default theme**: a new install starts with it, a site with no active theme renders with it,
-and a theme that throws while rendering falls back to it.
+**Ahmed Pro Theme is the default theme, and the only one the app ships**: a new install starts with it, a
+site with no active theme renders with it, and a theme that throws while rendering falls back to it.
 
 | Store theme | Look |
 | --- | --- |
-| **AMS 1** | **The default theme.** Sticky header, one centred hero, a featured card, post and tool grids, a four-column footer, and a *layout for every page*: home, blog list, post, page, tools index, a tool page, services, contact and 404. Labelled ad slots on posts and tool pages only, filled from **Appearance → Theme settings**. Ships 25 theme settings (hero copy, call-to-action, contact details, ad code `ad_slot_1`, `ad_slot_2`, `ad_slot_tool`) and two widget areas (`footer`, `after-post`). Its palette, radius, type and width all read the Customizer's design tokens. |
-| AMS Base | The older light-and-minimal theme: one reading column, cards, no page-specific layouts. |
-| AMS Pro | Sticky header with pill-style tab navigation, colour hero, post grid, three-column dark footer. |
-| AMS Premium | Dark header with top bar and underlined tabs, serif headlines, large hero, rich footer. Inherits Pro's page, post and archive templates through `"parent": "ams-pro"`. |
-| AMS Journal | Single column, serif text, a 34rem measure and large images. Header and footer are partials, six settings (measure, serif, accent, rules, byline, drop cap). |
-| AMS Portfolio | A responsive grid with a full-width hero. Eight settings including hero text, grid columns and accent, driven by `--cols` and `--p-*` tokens. |
+| **Ahmed Pro Theme** | **The default theme.** Optional top bar (tagline, phone, email, social icons), sticky header with dropdown sub-menus, search icon and a light/dark button, a homepage hero with two buttons, page tiles and post cards, title banners on pages and posts, category and tag chips, share buttons, styled comments, and a footer with contact details, the footer menu and a pages list. Templates for home, page, post, archive, search and 404. 22 theme settings under **Appearance → Customize**: accent colour, content width, three toggles (search, light/dark button, top bar), hero copy and buttons, contact details, a footer note and seven social links. |
 
-All six use system fonts, load nothing from other servers, need no JavaScript and follow the visitor's
-light or dark setting. Each ships a `screenshot.png` that the store card shows (and a palette gradient when
-a theme ships none). Store themes live in `src/themes/`; add a folder and list it in `src/themes/index.ts`
-to ship another.
+It uses system fonts and inline SVG icons, loads nothing from other servers, and follows the visitor's light
+or dark setting until they press its toggle. Its `screenshot.png` is the store card. The theme lives in
+`src/themes/ahmed-pro-theme/` as a theme package (the same layout as a ZIP upload: `theme.json`,
+`templates/`, `partials/`, `static/`, `config/`); `src/themes/default.ts` names it as the default, and
+`src/themes/index.ts` is the store list.
+
+Upgrading a site that was installed with an earlier bundled theme (AMS Nova, AMS 1, …) runs one migration —
+automatically, or from **Updates → Run updates** — that installs and activates Ahmed Pro Theme and removes
+the retired bundled themes with their settings and files. Themes you uploaded yourself stay installed,
+switched off, and can be activated again or deleted from **Appearance → Themes**.
 
 ### Install, preview, customise, roll back
 
@@ -689,6 +690,7 @@ src/
     template.ts            template engine v2: expressions, filters, partials, layouts
     theme-manifest.ts      theme.json v2: validation, zip reading, inheritance, settings
     theme-store.ts         theme rows, assets, version snapshots, layout rendering
+    bundled-theme.ts       the default theme as stored data: install, asset fallback, upgrade adoption
     capabilities.ts        the capability list, role defaults and can(user, cap)
     audit.ts               audit_log: one helper, filters, 90-day retention
     i18n.ts                panel strings: t(key, vars) and the en catalogue
@@ -698,10 +700,7 @@ src/
     ui.ts                  admin HTML helpers and CSS
   themes/
     index.ts               theme store list
-    ams1/                  AMS 1 (the default: the full page set)
-    default/               AMS Base
-    pro/                   AMS Pro
-    premium/               AMS Premium
-    journal/               AMS Journal (serif, single column)
-    portfolio/             AMS Portfolio (grid, hero)
+    default.ts             which theme is the default (one line)
+    ahmed-pro-theme/       Ahmed Pro Theme, as a theme package (the default, and the only bundled theme)
+    partials/social.html   the shared partial for the site-wide social profiles
 ```

@@ -135,10 +135,12 @@ test('the site can be installed again from zero', async () => {
 
   const fresh = (await anon('/')).text;
   assert.match(fresh, /Welcome to Fresh Start/, 'the sample home page is the only content');
-  // A fresh install is the default theme: AMS 1 ships a layout for every page,
+  // A fresh install is the default theme: it ships a layout for every page,
   // and its navigation and footer come with it.
-  assert.match(fresh, /class="site-header"/, 'AMS Nova is the theme a new site starts with');
-  assert.match(fresh, /class="foot-grid"/, 'with its footer grid');
+  assert.match(fresh, /class="site-header"/, 'the bundled theme is the theme a new site starts with');
+  assert.match(fresh, /href="\/theme-assets\/ahmed-pro-theme\/style\.css/, 'and it is Ahmed Pro Theme');
+  assert.match(fresh, /class="site-footer__inner"/, 'with its footer columns');
+  assert.equal((await anon('/theme-assets/ahmed-pro-theme/static/js/theme.js')).status, 200, 'and its script was written again');
   assert.equal((await anon('/legacy-page')).status, 404, 'the old page did not come back');
   assert.equal((await anon('/old')).status, 404, 'the old redirect did not come back');
   assert.equal((await anon('/admin-panel')).status, 404, 'the old admin URL is not the panel any more');

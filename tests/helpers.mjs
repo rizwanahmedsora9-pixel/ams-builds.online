@@ -90,9 +90,13 @@ export function createHarness() {
         wait();
       };
       if (!child || child.exitCode !== null) return done();
-      child.once('exit', done);
-      child.kill('SIGTERM');
-      setTimeout(() => child.kill('SIGKILL'), 4000).unref();
+      // Bind this process: `child` is reassigned by a restart, and a late
+      // SIGKILL must never land on the server that replaced this one.
+      const stopping = child;
+      const force = setTimeout(() => stopping.kill('SIGKILL'), 4000);
+      force.unref();
+      stopping.once('exit', () => { clearTimeout(force); done(); });
+      stopping.kill('SIGTERM');
     });
   }
 

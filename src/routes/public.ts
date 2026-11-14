@@ -19,6 +19,8 @@ import { readTokens, schemeMeta } from '../lib/tokens';
 import { titleFor } from '../lib/origin';
 import { publicPageHierarchy, type PublicPageHierarchy } from '../lib/page-hierarchy';
 import { getThemeAsset, loadTheme, putThemeAsset } from '../lib/theme-store';
+import { bundledThemeAsset } from '../lib/bundled-theme';
+import { APP_VERSION } from '../lib/version';
 import { assetMime, cleanAssetPath, isRefusedAsset } from '../lib/theme-manifest';
 
 const site = new Hono<AppEnv>();
@@ -64,12 +66,21 @@ site.get('/theme-assets/:slug/:path{.+}', async (c) => {
   const raw = c.req.param('path');
   const path = cleanAssetPath(raw);
   if (!path || isRefusedAsset(path)) return c.notFound();
-  const file = await getThemeAsset(c.env, slug, path);
-  if (!file) return c.notFound();
+  let file = await getThemeAsset(c.env, slug, path);
+  let cache = 'public, max-age=31536000, immutable';
+  if (!file) {
+    // The bundled default theme always has its files, installed or not (it is
+    // also the fallback when another theme fails to render).
+    const bundled = bundledThemeAsset(slug, path);
+    if (!bundled) return c.notFound();
+    file = { body: bundled.data.slice().buffer as ArrayBuffer, contentType: bundled.mime, etag: `bundled-${APP_VERSION}-${bundled.data.byteLength}` };
+    // Not immutable: an installed (possibly edited) copy may take this URL over.
+    cache = 'public, max-age=300';
+  }
   const etag = `"${file.etag}"`;
   const headers = new Headers({
     'Content-Type': file.contentType,
-    'Cache-Control': 'public, max-age=31536000, immutable',
+    'Cache-Control': cache,
     'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; media-src 'self'; sandbox",
     ETag: etag,

@@ -10,6 +10,8 @@ import vm from 'node:vm';
 import { createHarness } from './helpers.mjs';
 
 const panel = createHarness();
+// The one theme the app ships: the installer activates it and the store lists it.
+const BUNDLED = { slug: 'ahmed-pro-theme', name: 'Ahmed Pro Theme' };
 
 before(async () => {
   await panel.start();
@@ -1117,39 +1119,38 @@ const zipNames = async (bytes) => {
   return names.sort();
 };
 
-test('phase 5: the store shows the single Nova theme with a screenshot, tags and a live preview', async () => {
+test('phase 5: the store shows the single bundled theme with a screenshot and a live preview', async () => {
   const page = await panel.get(`${panel.admin}/themes`);
-  assert.ok(page.text.includes('<h3>AMS Nova <small'), 'AMS Nova is a store card');
+  assert.ok(page.text.includes(`<h3>${BUNDLED.name} <small`), 'the bundled theme is a store card');
   assert.equal((page.text.match(/class="store-item__shot"/g) || []).length, 1, 'the one card has art');
-  assert.match(page.text, /class="tag">sidebar/, 'a theme shows its tags');
-  assert.match(page.text, /themes\/preview\/nova/, 'the card links to the live preview');
+  assert.match(page.text, /class="store-item__shot" style="background-image:url\(\/theme-assets\/ahmed-pro-theme\/screenshot\.png/, 'the art is the screenshot the package ships');
+  assert.match(page.text, /· by Ahmed</, 'a theme shows its author');
+  assert.match(page.text, /themes\/preview\/ahmed-pro-theme/, 'the card links to the live preview');
 
   // The preview page frames the real site; the theme is not activated.
-  const preview = await panel.get(`${panel.admin}/themes/preview/nova`);
+  const preview = await panel.get(`${panel.admin}/themes/preview/ahmed-pro-theme`);
   assert.equal(preview.status, 200);
-  assert.match(preview.text, /id="theme-preview-frame"[^>]*src="\/\?preview=1(?:&amp;|&)theme=nova"/);
+  assert.match(preview.text, /id="theme-preview-frame"[^>]*src="\/\?preview=1(?:&amp;|&)theme=ahmed-pro-theme"/);
   assert.match(preview.text, /data-preview-device="mobile"/, 'device widths are offered');
   // A theme that is not installed still renders: its stylesheet is served from the app.
-  const storeCss = await panel.get(`${panel.admin}/themes/preview/nova/style.css`);
+  const storeCss = await panel.get(`${panel.admin}/themes/preview/ahmed-pro-theme/style.css`);
   assert.equal(storeCss.status, 200);
-  assert.match(storeCss.text, /--nova-sidebar/, 'the theme stylesheet is served for the preview');
+  assert.match(storeCss.text, /--starter-accent/, 'the theme stylesheet is served for the preview');
 
   // Installing and activating it makes it the site (it already is, but the route works).
-  assert.match((await panel.adminPost('/themes/store/nova/install', { activate: 1 })).location, /AMS Nova is now your active theme/);
+  assert.match((await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 })).location, /Ahmed Pro Theme is now your active theme/);
   const home = await panel.anon('/');
-  assert.match(home.text, /class="hero"/, 'Nova renders its hero');
-  assert.match(home.text, /class="sidebar"/, 'Nova renders its sidebar');
-  assert.match(home.text, /<style nonce="[^"]*">:root\{--nova-sidebar:#16213e;/, 'the theme settings reach the CSS');
-  // Its declared widget areas are editable, and render where it draws them.
+  assert.match(home.text, /class="hero"/, 'it renders its hero');
+  assert.match(home.text, /<header class="site-header">/, 'and its header');
+  assert.match(home.text, /<body class="tpl-home" style="--starter-accent:#2457d6;--starter-width:1160px">/, 'the theme settings reach the CSS');
+  // Its widget area is editable, and renders where the layout draws it.
   const widgets = await panel.get(`${panel.admin}/widgets`);
-  assert.match(widgets.text, /widgets\.after-post/);
   assert.match(widgets.text, /widgets\.footer/);
-  // The stored key uses underscores (`widget_<area('-'→'_')>_<n>_<field>`), while
-  // the manifest keeps the hyphen in the area name.
-  await panel.adminPost('/widgets', { widget_after_post_1_body: '<p>After the post</p>' });
-  assert.match((await panel.anon('/')).text, /site-widgets--after-post/, 'an area the layout does not draw is appended');
+  await panel.adminPost('/widgets', { widget_footer_1_body: '<p>After the footer</p>' });
+  assert.match((await panel.anon('/')).text, /<\/footer>\s*<div class="site-widgets site-widgets--footer">[\s\S]*After the footer/, 'the footer area is drawn after the theme footer');
+  await panel.adminPost('/widgets', { widget_footer_1_body: '' });
   // Restore the default theme for later cases.
-  await panel.adminPost('/themes/store/nova/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 });
 });
 
 test('phase 5: a theme can be edited in the panel, validated, and rolled back', async () => {
@@ -1193,7 +1194,7 @@ test('phase 5: a theme can be edited in the panel, validated, and rolled back', 
   await panel.adminPost(`/themes/edit-theme/versions/${snapshots[snapshots.length - 1]}/restore`, {});
   assert.doesNotMatch((await panel.anon('/')).text, /Edited in the panel/, 'rollback brought the original back');
   assert.match((await panel.anon('/')).text, /Design with intent/);
-  await panel.adminPost('/themes/store/nova/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 });
 });
 
 test('phase 5: export is a zip that uploads back byte-for-byte', async () => {
@@ -1237,7 +1238,7 @@ test('phase 5: export is a zip that uploads back byte-for-byte', async () => {
   const assets = (await panel.get(`${panel.admin}/themes/journal`)).text;
   assert.match(assets.text ?? assets, /logo\.png/, 'the binary asset round-tripped');
   assert.ok(size > 1000, 'the zip carries the asset, not just text');
-  await panel.adminPost('/themes/store/nova/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 });
 });
 
 test('phase 5: a new theme can be created from a template in the panel', async () => {
@@ -1267,10 +1268,10 @@ test('phase 5: a new theme can be created from a template in the panel', async (
   const ids = (await panel.get(`${panel.admin}/themes`)).text;
   const childId = ids.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="panel-child"/)[1];
   const madeId = ids.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="panel-made"/)[1];
-  await panel.adminPost('/themes/store/nova/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 });
   await panel.adminPost(`/themes/${childId}/delete`, {});
   await panel.adminPost(`/themes/${madeId}/delete`, {});
-  assert.match((await panel.get(`${panel.admin}/themes`)).text, /AMS Nova/, 'the store is unchanged');
+  assert.match((await panel.get(`${panel.admin}/themes`)).text, /Ahmed Pro Theme/, 'the store is unchanged');
 });
 
 /* ---------------------------------- phase 6: audit, capabilities, i18n */
@@ -1280,7 +1281,7 @@ test('phase 6: every mutation writes an audit entry a person can read', async ()
   // mutation, four entries, each naming what happened rather than an id.
   await panel.adminPost('/pages/save', { title: 'Audit Trail Page', slug: 'audit-trail', body: '<p>x</p>', status: 'published' });
   await uploadZip('audit-journal.zip', journalTheme());
-  await panel.adminPost('/themes/store/nova/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 });
   const auditRow = (await panel.get(`${panel.admin}/themes`)).text.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="journal"/);
   await panel.adminPost(`/themes/${auditRow[1]}/activate`, {});
 
@@ -1288,7 +1289,7 @@ test('phase 6: every mutation writes an audit entry a person can read', async ()
   assert.equal(page.status, 200);
   assert.match(page.text, /Audit log/);
   assert.match(page.text, /Created page “Audit Trail Page”/, 'the save is readable');
-  assert.match(page.text, /Activated theme “AMS Nova”/, 'theme activation is logged');
+  assert.match(page.text, /Activated theme “Ahmed Pro Theme”/, 'theme activation is logged');
   assert.match(page.text, /Activated theme “Journal”/, 'a second activation is logged');
   assert.match(page.text, /data-audit-action="created"/, 'actions are filterable');
   assert.match(page.text, /owner/, 'who did it is recorded');
@@ -1443,10 +1444,10 @@ test('phase 6: export v2 carries themes, theme settings and revisions', async ()
 });
 
 test('phase 5: a preview runs the real site, and a local edit is never silently replaced', async () => {
-  // Nova is the active store theme; make sure it is active, then change one of
+  // The bundled theme is the active store theme; make sure it is active, then change one of
   // its partials in the panel.
-  await panel.adminPost('/themes/store/nova/install', { activate: 1 });
-  await panel.adminPost('/themes/nova/edit', {
+  await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 });
+  await panel.adminPost('/themes/ahmed-pro-theme/edit', {
     file: 'partials/footer.html',
     body: '<footer class="site-footer"><p class="my-kicker">My own kicker</p>{{> social}}</footer>',
   });
@@ -1454,27 +1455,27 @@ test('phase 5: a preview runs the real site, and a local edit is never silently 
 
   // Preview: a panel page with the store theme's site framed, and the framed URL
   // renders that theme publicly (preview=1 is signed-in only, never cached).
-  const preview = await panel.get(`${panel.admin}/themes/preview/nova`);
+  const preview = await panel.get(`${panel.admin}/themes/preview/ahmed-pro-theme`);
   assert.equal(preview.status, 200);
   assert.match(preview.text, /id="theme-preview-frame"/);
-  assert.match(preview.text, /src="\/\?preview=1&(amp;)?theme=nova"/);
-  const framed = await panel.get('/?preview=1&theme=nova');
+  assert.match(preview.text, /src="\/\?preview=1&(amp;)?theme=ahmed-pro-theme"/);
+  const framed = await panel.get('/?preview=1&theme=ahmed-pro-theme');
   assert.equal(framed.status, 200);
   assert.match(framed.text, /class="hero"/, 'the framed page is the real theme');
   assert.match(framed.headers.get('cache-control') ?? '', /no-store/);
-  assert.equal((await panel.anon('/?preview=1&theme=nova')).status, 404);
-  assert.doesNotMatch((await panel.anon('/?preview=1&theme=nova')).text, /class="hero"/, 'theme previews are restricted to authorized admins');
+  assert.equal((await panel.anon('/?preview=1&theme=ahmed-pro-theme')).status, 404);
+  assert.doesNotMatch((await panel.anon('/?preview=1&theme=ahmed-pro-theme')).text, /class="hero"/, 'theme previews are restricted to authorized admins');
 
   // The store still ships this theme under this name, and my copy differs, so the
   // next install asks what to do with the edit instead of overwriting it.
-  assert.match((await panel.adminPost('/themes/store/nova/install', { conflict: 'keep' })).location, /Kept%20your%20edits|Kept your edits/);
+  assert.match((await panel.adminPost('/themes/store/ahmed-pro-theme/install', { conflict: 'keep' })).location, /Kept%20your%20edits|Kept your edits/);
   assert.match((await panel.anon('/')).text, /My own kicker/, 'keeping my changes kept them');
 
   // "Save mine as a copy" freezes the edit under its own name and takes the store's.
-  assert.equal((await panel.adminPost('/themes/store/nova/install', { conflict: 'copy' })).status, 303);
+  assert.equal((await panel.adminPost('/themes/store/ahmed-pro-theme/install', { conflict: 'copy' })).status, 303);
   const themes = (await panel.get(`${panel.admin}/themes`)).text;
-  assert.match(themes, /AMS Nova \(mine\)/, 'my edited copy is a theme of its own');
-  assert.match(themes, /data-theme-slug="ams-nova-mine"/);
+  assert.match(themes, /Ahmed Pro Theme \(mine\)/, 'my edited copy is a theme of its own');
+  assert.match(themes, /data-theme-slug="ahmed-pro-theme-mine"/);
   assert.doesNotMatch((await panel.anon('/')).text, /My own kicker/, 'and the store version came back');
 
   // Every one of those choices is in the audit log, naming the files.
@@ -1482,7 +1483,7 @@ test('phase 5: a preview runs the real site, and a local edit is never silently 
   assert.match(audit, /Saved your edits to/);
   assert.match(audit, /partials\/footer\.html|Edited partials\/footer\.html/);
 
-  await panel.adminPost('/themes/store/nova/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 });
 });
 
 test('phase 5: an older install shows "Update available vX → vY" with its changelog', async () => {
@@ -1490,22 +1491,90 @@ test('phase 5: an older install shows "Update available vX → vY" with its chan
   // upgrade finds one: the row says v0.9.0 while the store package is v1.0.0.
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(`${panel.dataDir}/cms.sqlite`);
-  db.prepare("UPDATE themes SET version='0.9.0' WHERE slug='nova'").run();
-  db.prepare("DELETE FROM settings WHERE key='theme_store_stamp_nova'").run();
+  db.prepare("UPDATE themes SET version='0.9.0' WHERE slug='ahmed-pro-theme'").run();
+  db.prepare("DELETE FROM settings WHERE key LIKE 'theme_store_stamp_%'").run();
   db.close();
 
   const store = (await panel.get(`${panel.admin}/themes`)).text;
   assert.match(store, /Update available v0\.9\.0 → v1\.0\.0/);
-  assert.match(store, /First release: one full-colour sidebar theme/, 'the changelog is shown');
+  assert.match(store, /Initial release: dark mode, dropdown menus/, 'the changelog is shown');
   assert.match(store, /Update 0\.9\.0 → 1\.0\.0/, 'the button says both versions');
-  assert.match(store, /data-update="nova"/);
+  assert.match(store, /data-update="ahmed-pro-theme"/);
 
   // Taking the update writes a snapshot and lands the newer files.
-  assert.match((await panel.adminPost('/themes/store/nova/install', {})).location, /installed/);
+  assert.match((await panel.adminPost('/themes/store/ahmed-pro-theme/install', {})).location, /installed/);
   assert.doesNotMatch((await panel.get(`${panel.admin}/themes`)).text, /Update available v0\.9\.0/);
-  const detail = (await panel.get(`${panel.admin}/themes/nova`)).text;
+  const detail = (await panel.get(`${panel.admin}/themes/ahmed-pro-theme`)).text;
   assert.match(detail, /Before store update/, 'the replaced version is in the history');
-  await panel.adminPost('/themes/store/nova/install', { activate: 1 });
+  await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 });
+});
+
+test('an upgraded site adopts the bundled theme, and the retired bundled themes are removed', async () => {
+  // An install made by an earlier release: AMS Nova is the active theme, the
+  // bundled theme was never installed, and the schema is one version behind.
+  await uploadZip('keep-journal.zip', journalTheme());
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(`${panel.dataDir}/cms.sqlite`);
+  const now = new Date().toISOString();
+  db.prepare("DELETE FROM themes WHERE slug='ahmed-pro-theme'").run();
+  db.prepare("DELETE FROM theme_assets WHERE theme_slug='ahmed-pro-theme'").run();
+  db.prepare('UPDATE themes SET active=0').run();
+  db.prepare("INSERT INTO themes (slug,name,version,templates,partials,css,manifest,active,created_at) VALUES ('nova','AMS Nova','1.0.0',?,'{}','body{color:red}','{}',1,?)")
+    .run(JSON.stringify({ base: '<html><head>{{{head}}}</head><body class="old-nova">{{{content}}}</body></html>', page: '{{{page.content}}}' }), now);
+  db.prepare("INSERT INTO theme_assets (theme_slug,path,mime,size,created_at) VALUES ('nova','style.css','text/css',14,?)").run(now);
+  db.prepare("INSERT INTO theme_settings (theme_slug,key,value) VALUES ('nova','hero_title','Old hero')").run();
+  db.prepare("UPDATE settings SET value='10' WHERE key='schema_version'").run();
+  db.close();
+
+  const updates = await panel.get(`${panel.admin}/updates`);
+  assert.match(updates.text, /Default theme: Ahmed Pro Theme/, 'the pending migration is named');
+  assert.match((await panel.adminPost('/updates/run', {})).location, /schema version 11/);
+
+  const check = new DatabaseSync(`${panel.dataDir}/cms.sqlite`);
+  const rows = check.prepare('SELECT slug, active FROM themes ORDER BY slug').all().map((r) => `${r.slug}:${r.active}`);
+  const leftovers = check.prepare("SELECT (SELECT COUNT(*) FROM theme_assets WHERE theme_slug='nova') + (SELECT COUNT(*) FROM theme_settings WHERE theme_slug='nova') AS n").get().n;
+  const assets = check.prepare("SELECT path FROM theme_assets WHERE theme_slug='ahmed-pro-theme' ORDER BY path").all().map((r) => r.path);
+  check.close();
+  assert.ok(!rows.some((r) => r.startsWith('nova:')), 'the retired bundled theme is removed');
+  assert.equal(leftovers, 0, 'with its assets and settings');
+  assert.ok(rows.includes('ahmed-pro-theme:1'), 'the bundled theme is installed and active');
+  assert.equal(rows.filter((r) => r.endsWith(':1')).length, 1, 'and it is the only active theme');
+  assert.ok(rows.includes('journal:0'), 'a theme the owner uploaded is kept, switched off');
+  assert.deepEqual(assets, ['screenshot.png', 'static/js/theme.js', 'style.css'], 'its files are indexed');
+
+  const home = await panel.anon('/');
+  assert.equal(home.headers.get('x-cache'), 'MISS', 'pages cached by the old theme are dropped');
+  assert.doesNotMatch(home.text, /old-nova/);
+  assert.match(home.text, /href="\/theme-assets\/ahmed-pro-theme\/style\.css/, 'the site renders with the bundled theme');
+  assert.equal((await panel.anon('/theme-assets/nova/style.css')).status, 404, 'the retired stylesheet is gone');
+  assert.match((await panel.adminPost('/updates/run', {})).location, /already up to date/, 'running updates again changes nothing');
+
+  const journal = (await panel.get(`${panel.admin}/themes`)).text.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="journal"/);
+  await panel.adminPost(`/themes/${journal[1]}/delete`, {});
+});
+
+test('a theme that fails to render falls back to the bundled theme, fully styled', async () => {
+  await uploadZip('broken-journal.zip', journalTheme());
+  const row = (await panel.get(`${panel.admin}/themes`)).text.match(/data-theme-id="(\d+)"[^>]*data-theme-slug="journal"/);
+  await panel.adminPost(`/themes/${row[1]}/activate`, {});
+  // Break it behind the validator's back, the way a bad manual edit would.
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(`${panel.dataDir}/cms.sqlite`);
+  const templates = JSON.parse(db.prepare("SELECT templates FROM themes WHERE slug='journal'").get().templates);
+  for (const name of Object.keys(templates)) templates[name] = '{{#if page}}<p>never closed';
+  db.prepare("UPDATE themes SET templates=? WHERE slug='journal'").run(JSON.stringify(templates));
+  db.close();
+
+  const home = await panel.anon('/');
+  assert.equal(home.status, 200, 'the site stays up');
+  assert.match(home.text, /<link rel="stylesheet" href="\/theme-assets\/ahmed-pro-theme\/style\.css\?v=/, 'the fallback links the bundled stylesheet');
+  assert.match(home.text, /<script defer src="\/theme-assets\/ahmed-pro-theme\/static\/js\/theme\.js">/, 'and its script, not the failed theme\'s');
+  assert.match(home.text, /<header class="site-header">[\s\S]*<section class="hero">/, 'with the bundled header and home layout');
+  assert.doesNotMatch(home.text, /\{\{|never closed/, 'and none of the broken markup');
+  assert.match((await panel.get(`${panel.admin}/themes`)).text, /failed to render, so the site is falling back to Ahmed Pro Theme/, 'the panel says so');
+
+  await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 });
+  await panel.adminPost(`/themes/${row[1]}/delete`, {});
 });
 
 test('shell uses document scrolling and an overlay drawer', async () => {
@@ -1536,7 +1605,7 @@ test('social profile URL validation and footer toggle', async () => {
   const bad = await panel.adminPost('/settings', { ...base, social_facebook: 'javascript:alert(1)', social_footer: '1' });
   assert.match(bad.location, /valid HTTP or HTTPS URL/);
   // Activate the bundled theme, which includes the shared footer partial.
-  await panel.adminPost('/themes/nova/activate', {});
+  await panel.adminPost('/themes/store/ahmed-pro-theme/install', { activate: 1 });
   await panel.adminPost('/settings', { ...base, social_facebook: 'https://example.com/profile', social_footer: '1' });
   const settingsPage = await panel.get(`${panel.admin}/settings`);
   assert.match(settingsPage.text, /value="https:\/\/example.com\/profile"/);

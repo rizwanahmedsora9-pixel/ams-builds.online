@@ -28,6 +28,9 @@ import terms from './terms';
 import preferences from './preferences';
 import assets from './assets';
 import shellRoutes from './shell';
+import { defaultTheme } from '../../themes/default';
+
+const BUNDLED_THEME_NAME = defaultTheme.name;
 
 /**
  * Admin panel. Mounted by the root app under "/{admin-slug}" with that prefix
@@ -268,7 +271,7 @@ admin.get('/', async (c) => {
         body: html`<dl class="kv kv--tight">
           <dt>Version</dt><dd>${APP_VERSION}</dd>
           <dt>Schema</dt><dd>${schema}${pendingUpdates ? html` · <a href="${base}/updates">${pendingUpdates} update${pendingUpdates === 1 ? '' : 's'} ready</a>` : ' · up to date'}</dd>
-          <dt>Theme</dt><dd>${theme ? `${theme.name} v${theme.version}` : 'AMS Nova'}</dd>
+          <dt>Theme</dt><dd>${theme ? `${theme.name} v${theme.version}` : BUNDLED_THEME_NAME}</dd>
           <dt>Comments</dt><dd>${counts.pending} pending · ${counts.approved} approved</dd>
           <dt>Moderation</dt><dd>${moderated ? 'New comments wait for you' : 'Comments appear immediately'}</dd>
         </dl>`,

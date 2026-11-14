@@ -258,7 +258,7 @@ const lengthVar = (css: string, names: string[]): string => {
 
 /** The variables each idea is called in the bundled themes and everywhere else. */
 const NAMES = {
-  bg: ['--bg', '--background', '--page', '--surface-page', '--j-bg', '--p-bg', '--starter-paper'],
+  bg: ['--bg', '--background', '--page', '--paper', '--surface-page', '--j-bg', '--p-bg', '--starter-paper'],
   fg: ['--text', '--fg', '--ink', '--body', '--j-ink', '--p-ink', '--starter-ink'],
   muted: ['--text-muted', '--muted', '--muted-fg', '--subtle', '--j-soft', '--p-soft', '--starter-muted'],
   surface: ['--surface', '--card', '--panel', '--soft', '--j-card', '--p-card', '--starter-card'],

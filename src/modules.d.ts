@@ -13,3 +13,4 @@ declare module '*.jpeg' { const data: PackagedBytes; export default data; }
 declare module '*.webp' { const data: PackagedBytes; export default data; }
 declare module '*.avif' { const data: PackagedBytes; export default data; }
 declare module '*.ico' { const data: PackagedBytes; export default data; }
+declare module '*.txt' { const text: string; export default text; }
